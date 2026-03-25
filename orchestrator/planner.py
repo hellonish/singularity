@@ -99,17 +99,44 @@ class Planner:
         print(f"  [planner] Raw output saved → {PLANNER_OUTPUT}")
         return raw
 
+    # ------------------------------------------------------------------
+    # Depth → planner directive
+    # ------------------------------------------------------------------
+
+    _DEPTH_DIRECTIVE: dict[str, str] = {
+        "shallow": (
+            "depth: shallow\n"
+            "depth_guidance: Generate 3–5 nodes. Cover 1–2 perspectives. "
+            "Set depth_override='shallow' on all retrieval nodes. "
+            "Prioritise speed and breadth over exhaustive coverage."
+        ),
+        "standard": (
+            "depth: standard\n"
+            "depth_guidance: Generate 7–10 nodes. Cover 3–4 distinct perspectives. "
+            "Set depth_override='standard' on retrieval nodes."
+        ),
+        "deep": (
+            "depth: deep\n"
+            "depth_guidance: Generate 15–20 nodes. Cover 5+ distinct perspectives and "
+            "sub-topics. Set depth_override='deep' on all retrieval nodes. "
+            "Include meta_analysis, contradiction_detect, and claim_verification as "
+            "analysis nodes to maximise evidence quality."
+        ),
+    }
+
     def plan(
         self,
         problem: str,
         audience: str = "",
         output_language: str = "en",
+        depth: str = "standard",
     ) -> tuple[str, Plan]:
         parts = ["mode: plan", f"problem_statement: {problem}"]
         if audience:
             parts.append(f"audience: {audience}")
         if output_language and output_language != "en":
             parts.append(f"output_language: {output_language}")
+        parts.append(self._DEPTH_DIRECTIVE.get(depth, self._DEPTH_DIRECTIVE["standard"]))
         raw = self._call("\n".join(parts))
         return raw, parse_plan(raw)
 
@@ -119,6 +146,7 @@ class Planner:
         ctx: ExecutionContext,
         gaps: list[GapItem],
         round_num: int,
+        depth: str = "standard",
     ) -> tuple[str, Plan]:
         gap_list = [
             {"node_id": g.node_id, "issue": g.issue.value, "detail": g.detail}
@@ -132,6 +160,7 @@ class Planner:
             f"mode: replan\n"
             f"problem_statement: {problem}\n"
             f"replan_round: {round_num}\n"
+            f"{self._DEPTH_DIRECTIVE.get(depth, self._DEPTH_DIRECTIVE['standard'])}\n"
             f"context:\n{ctx_block}"
         )
         return raw, parse_plan(raw)

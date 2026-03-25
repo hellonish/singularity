@@ -78,17 +78,25 @@ def detect_replan_loop(plan: Plan, ctx: ExecutionContext) -> list[str]:
 OUTPUT_SKILLS = {"report_generator", "exec_summary", "explainer",
                  "decision_matrix", "knowledge_delta"}
 
+_DEPTH_LIMITS: dict[str, dict] = {
+    "shallow":  {"rounds": 1, "max_nodes": 8},
+    "standard": {"rounds": 3, "max_nodes": 15},
+    "deep":     {"rounds": 5, "max_nodes": 25},
+}
+
 
 async def run_orchestrator(
     problem_statement: str,
     audience: str = "",
     output_language: str = "en",
+    depth: str = "standard",
 ) -> ExecutionContext:
+    limits   = _DEPTH_LIMITS.get(depth, _DEPTH_LIMITS["standard"])
     client   = GrokClient(model_name=PLANNER_MODEL)
     registry = DomainRegistry(REGISTRY_PATH)
     planner  = Planner(SKILL_PATH, client)
     router   = FallbackRouter(registry, SKILL_REGISTRY)
-    ctx      = ExecutionContext(language=output_language)
+    ctx      = ExecutionContext(language=output_language, depth=depth)
 
     detected_domain, confidence = registry.detect_domain(problem_statement)
     domain_info = registry.get_domain(detected_domain)
@@ -99,11 +107,13 @@ async def run_orchestrator(
     print(f"\nProblem  : {problem_statement}")
     print(f"Domain   : {domain_info['label']} (pre-detected, confidence={confidence})")
     print(f"Audience : {audience or 'auto-detect'}")
-    print(f"Language : {output_language}\n")
+    print(f"Language : {output_language}")
+    print(f"Depth    : {depth}  (rounds={limits['rounds']}, max_nodes={limits['max_nodes']})\n")
 
     # ── Initial plan ──────────────────────────────────────────────
     print("[Round 0] Calling planner...")
-    _, plan = planner.plan(problem_statement, audience, output_language)
+    _, plan = planner.plan(problem_statement, audience, output_language, depth)
+    ctx.audience = plan.metadata.audience
     print(f"  Goal     : {plan.metadata.core_goal}")
     print(f"  Domain   : {plan.metadata.domain}")
     print(f"  Audience : {plan.metadata.audience}")
@@ -117,7 +127,7 @@ async def run_orchestrator(
         return ctx
 
     # ── Execution rounds ──────────────────────────────────────────
-    for round_num in range(1, MAX_REPLAN_ROUNDS + 1):
+    for round_num in range(1, limits["rounds"] + 1):
         print(f"\n{'─' * 65}")
         print(f"[Round {round_num}] Executing plan ({len(plan.nodes)} nodes)")
 
@@ -140,22 +150,29 @@ async def run_orchestrator(
             print(f"\n[Round {round_num}] Termination signal met — research complete.")
             break
 
-        if round_num >= MAX_REPLAN_ROUNDS:
+        if round_num >= limits["rounds"]:
             print(f"\n[Round {round_num}] Max replan rounds reached.")
             break
+
+        # Snapshot failing node hashes BEFORE replanning so the next round
+        # can detect if the replan generates the same failing nodes again.
+        for node in plan.nodes:
+            s = ctx.node_status.get(node.node_id)
+            if s not in (NodeStatus.OK, NodeStatus.OK_DEGRADED, None):
+                ctx.prior_hashes.add(node.description_hash())
+
+        # ── Replan ────────────────────────────────────────────────
+        print(f"\n[Round {round_num}] Replanning...")
+        _, plan = planner.replan(problem_statement, ctx, gaps, round_num, depth)
 
         looping = detect_replan_loop(plan, ctx)
         if looping:
             print(f"\n[WARN] Replan loop detected on {looping} — stopping with partial results.")
             break
 
-        # ── Replan ────────────────────────────────────────────────
-        print(f"\n[Round {round_num}] Replanning...")
-        _, plan = planner.replan(problem_statement, ctx, gaps, round_num)
-
-        if plan.metadata.node_count > MAX_NODES:
-            print(f"  [WARN] Clamping plan from {plan.metadata.node_count} → {MAX_NODES} nodes.")
-            plan.nodes = plan.nodes[:MAX_NODES]
+        if plan.metadata.node_count > limits["max_nodes"]:
+            print(f"  [WARN] Clamping plan from {plan.metadata.node_count} → {limits['max_nodes']} nodes.")
+            plan.nodes = plan.nodes[:limits["max_nodes"]]
 
         if plan.has_cycle():
             print("  [ERROR] Replan produced a cyclic DAG — stopping.")

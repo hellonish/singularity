@@ -86,20 +86,23 @@ class CitationRegistry:
         ]
 
     def format_bibliography(self, style: str = "APA", ids: list[str] | None = None) -> str:
-        """Render a bibliography string for the requested citation_ids (all if None)."""
+        """Render a Markdown bibliography string for the requested citation_ids (all if None)."""
         records = [
             self._records[i]
             for i in (ids if ids is not None else list(self._records))
             if i in self._records
         ]
         if style == "APA":
-            return "\n".join(self._apa(r) for r in records)
+            return "\n\n".join(self._apa(r) for r in records)
         if style == "IEEE":
-            return "\n".join(self._ieee(i, r) for i, r in enumerate(records, 1))
+            return "\n\n".join(self._ieee(i, r) for i, r in enumerate(records, 1))
         if style == "Vancouver":
-            return "\n".join(self._vancouver(i, r) for i, r in enumerate(records, 1))
-        # Default: plain list
-        return "\n".join(f"{r.citation_id}  {r.title}  {r.url}" for r in records)
+            return "\n\n".join(self._vancouver(i, r) for i, r in enumerate(records, 1))
+        # Default: one entry per paragraph with clickable URL on its own line
+        return "\n\n".join(
+            f"**{r.citation_id}** {r.title}\n{self._md_url(r.url)}"
+            for r in records
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -146,22 +149,30 @@ class CitationRegistry:
         return f"[{surname}{year}_x]"   # overflow (extremely unlikely)
 
     # ------------------------------------------------------------------
-    # Bibliography formatters
+    # Bibliography formatters (Markdown output)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _md_url(url: str) -> str:
+        """Render a URL as a Markdown link, or plain text if empty."""
+        return f"[{url}]({url})" if url else "*URL unavailable*"
 
     @staticmethod
     def _apa(r: CitationRecord) -> str:
         authors = ", ".join(r.authors[:6]) + (" et al." if len(r.authors) > 6 else "")
         year    = f"({r.year})." if r.year else "(n.d.)."
-        return f"{authors or 'Unknown'} {year} {r.title}. {r.url}"
+        url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
+        return f"{authors or 'Unknown'} {year} {r.title}.{url}"
 
     @staticmethod
     def _ieee(idx: int, r: CitationRecord) -> str:
         authors = ", ".join(r.authors[:3]) + (" et al." if len(r.authors) > 3 else "")
+        url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
         return (f'[{idx}] {authors or "Unknown"}, "{r.title}," '
-                f'{r.year or "n.d."}. [Online]. Available: {r.url}')
+                f'{r.year or "n.d."}. [Online]. Available:{url}')
 
     @staticmethod
     def _vancouver(idx: int, r: CitationRecord) -> str:
         authors = ", ".join(r.authors[:6]) + (" et al." if len(r.authors) > 6 else "")
-        return f"{idx}. {authors or 'Unknown'}. {r.title}. {r.year or 'n.d.'}. {r.url}"
+        url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
+        return f"{idx}. {authors or 'Unknown'}. {r.title}. {r.year or 'n.d.'}.{url}"

@@ -1,16 +1,16 @@
 {
   "metadata": {
-    "research_type": "instrumental",
-    "core_goal": "Determine the GDPR compliance risks and requirements for using a third-party LLM API to process EU customer data in a SaaS product",
-    "domain": "legal",
-    "audience": "practitioner",
-    "output_format": "decision_matrix",
+    "research_type": "exploratory",
+    "core_goal": "Investigate spurious correlations in machine learning across multiple perspectives, ensuring comprehensive coverage and high evidence quality through verification and analysis",
+    "domain": "ml_research",
+    "audience": "expert",
+    "output_format": "report_generator",
     "output_language": "en",
     "depth_default": "deep",
-    "recency_window_years": 0,
-    "termination_signal": "All GDPR implications, including data processing risks, third-party processor obligations, and compliance strategies for LLM APIs, covered with cross-validated sources from EU jurisdiction",
-    "node_count": 8,
-    "sensitivity_flag": true,
+    "recency_window_years": 2,
+    "termination_signal": "Coverage of at least 5 perspectives on spurious correlations, with verified claims from multiple sources, meta-analysis of findings, and no unresolved contradictions",
+    "node_count": 15,
+    "sensitivity_flag": false,
     "multilingual": false,
     "created_at_mode": "plan",
     "replan_round": 0
@@ -18,139 +18,233 @@
   "nodes": [
     {
       "node_id": "n1",
-      "description": "Search GDPR articles and regulations on data processing and third-party processors, focusing on EU customer data",
-      "skill": "legal_search",
+      "description": "Search academic literature for definitions and theoretical foundations of spurious correlations in machine learning",
+      "skill": "academic_search",
       "depends_on": [],
-      "acceptance": ["factual_grounding", "jurisdiction_relevance", "temporal_validity"],
+      "acceptance": ["factual_grounding", "source_authority", "methodological_soundness"],
       "parallelizable": true,
-      "output_slot": "gdpr_data_processing_rules",
-      "depth_override": null,
+      "output_slot": "definitions_foundations",
+      "depth_override": "deep",
       "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n2",
-      "description": "Search GDPR guidelines on using third-party services for data processing, including vendor due diligence and data transfer requirements",
-      "skill": "legal_search",
+      "description": "Search case studies and real-world examples of spurious correlations in ML applications, such as image recognition or predictive modeling",
+      "skill": "web_search",
       "depends_on": [],
-      "acceptance": ["factual_grounding", "jurisdiction_relevance", "source_authority"],
+      "acceptance": ["factual_grounding", "replication_status", "relevance"],
       "parallelizable": true,
-      "output_slot": "gdpr_third_party_obligations",
-      "depth_override": null,
+      "output_slot": "case_studies_examples",
+      "depth_override": "deep",
       "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n3",
-      "description": "Search academic and technical resources on LLM API data handling practices, focusing on privacy implications for EU data",
+      "description": "Search statistical perspectives on spurious correlations, including confounding variables and correlation vs. causation debates",
       "skill": "academic_search",
       "depends_on": [],
-      "acceptance": ["factual_grounding", "recency", "relevance"],
+      "acceptance": ["source_authority", "methodological_soundness", "cross_validation"],
       "parallelizable": true,
-      "output_slot": "llm_api_privacy_practices",
+      "output_slot": "statistical_perspectives",
       "depth_override": "deep",
       "synthesis_hint": null,
-      "note": "Secondary skill from ml_research domain"
+      "note": null
     },
     {
       "node_id": "n4",
-      "description": "Evaluate credibility of sources from n1, n2, and n3, checking for conflicts of interest and authority",
-      "skill": "credibility_score",
-      "depends_on": ["n1", "n2", "n3"],
-      "acceptance": ["source_authority", "conflict_of_interest", "cross_validation"],
-      "parallelizable": false,
-      "output_slot": "source_credibility_assessment",
-      "depth_override": null,
+      "description": "Search neural network-specific instances of spurious correlations, focusing on deep learning models and feature engineering",
+      "skill": "code_search",
+      "depends_on": [],
+      "acceptance": ["factual_grounding", "replication_status", "depth"],
+      "parallelizable": true,
+      "output_slot": "neural_network_perspectives",
+      "depth_override": "deep",
       "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n5",
-      "description": "Analyze intersections between GDPR requirements and LLM API usage, identifying risks and mitigation strategies",
-      "skill": "comparative_analysis",
-      "depends_on": ["n4"],
-      "acceptance": ["coverage", "coherence", "methodological_soundness"],
-      "parallelizable": false,
-      "output_slot": "gdpr_llm_risk_analysis",
-      "depth_override": null,
+      "description": "Search ethical and societal impacts of spurious correlations in ML, including bias amplification and decision-making consequences",
+      "skill": "web_search",
+      "depends_on": [],
+      "acceptance": ["source_authority", "relevance", "conflict_of_interest"],
+      "parallelizable": true,
+      "output_slot": "ethical_societal_impact",
+      "depth_override": "deep",
       "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n6",
-      "description": "Detect any contradictions in the analysis, such as varying interpretations of GDPR for AI technologies",
-      "skill": "contradiction_detect",
-      "depends_on": ["n5"],
-      "acceptance": ["coherence", "relevance", "cross_validation"],
-      "parallelizable": false,
-      "output_slot": "contradictions_in_gdpr_application",
-      "depth_override": null,
+      "description": "Search detection methods and tools for spurious correlations, such as causal inference techniques and validation frameworks",
+      "skill": "academic_search",
+      "depends_on": [],
+      "acceptance": ["factual_grounding", "methodological_soundness", "cross_validation"],
+      "parallelizable": true,
+      "output_slot": "detection_methods",
+      "depth_override": "deep",
       "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n7",
-      "description": "Synthesize findings into a decision matrix for SaaS product compliance, including pros, cons, and action steps",
-      "skill": "decision_matrix",
-      "depends_on": ["n6"],
-      "acceptance": ["coverage", "relevance", "audience_calibration"],
-      "parallelizable": false,
-      "output_slot": "compliance_decision_matrix",
-      "depth_override": null,
-      "synthesis_hint": "Tailor to practitioner needs: use actionable language, include compliance checklists, and highlight decision trade-offs without legal jargon overload.",
+      "description": "Search mitigation strategies for spurious correlations, including dataset augmentation and model regularization approaches",
+      "skill": "dataset_search",
+      "depends_on": [],
+      "acceptance": ["replication_status", "relevance", "depth"],
+      "parallelizable": true,
+      "output_slot": "mitigation_strategies",
+      "depth_override": "deep",
+      "synthesis_hint": null,
       "note": null
     },
     {
       "node_id": "n8",
-      "description": "Prepend output with legal disclaimer: not professional advice, verify with qualified expert",
-      "skill": "exec_summary",
-      "depends_on": ["n7"],
-      "acceptance": ["relevance", "coherence"],
+      "description": "Verify key claims from retrieved sources on spurious correlations using established fact-checking and evidence standards",
+      "skill": "claim_verification",
+      "depends_on": ["n1", "n2", "n3", "n4", "n5", "n6", "n7"],
+      "acceptance": ["factual_grounding", "cross_validation", "coherence"],
       "parallelizable": false,
-      "output_slot": "final_disclaimer_output",
+      "output_slot": "verified_claims",
       "depth_override": null,
       "synthesis_hint": null,
-      "note": "Mandatory for sensitive domain"
+      "note": null
+    },
+    {
+      "node_id": "n9",
+      "description": "Detect contradictions across sources on perspectives of spurious correlations, such as conflicting detection methods",
+      "skill": "contradiction_detect",
+      "depends_on": ["n8"],
+      "acceptance": ["coherence", "coverage", "methodological_soundness"],
+      "parallelizable": false,
+      "output_slot": "contradictions_identified",
+      "depth_override": null,
+      "synthesis_hint": null,
+      "note": null
+    },
+    {
+      "node_id": "n10",
+      "description": "Perform meta-analysis on aggregated data from verified sources to synthesize overall patterns in spurious correlations research",
+      "skill": "meta_analysis",
+      "depends_on": ["n8", "n9"],
+      "acceptance": ["source_authority", "cross_validation", "depth"],
+      "parallelizable": false,
+      "output_slot": "meta_analysis_results",
+      "depth_override": null,
+      "synthesis_hint": null,
+      "note": null
+    },
+    {
+      "node_id": "n11",
+      "description": "Conduct gap analysis to identify underrepresented perspectives or limitations in the current research on spurious correlations",
+      "skill": "gap_analysis",
+      "depends_on": ["n10"],
+      "acceptance": ["coverage", "relevance", "coherence"],
+      "parallelizable": false,
+      "output_slot": "research_gaps",
+      "depth_override": null,
+      "synthesis_hint": null,
+      "note": null
+    },
+    {
+      "node_id": "n12",
+      "description": "Generate a comparative analysis of different perspectives on spurious correlations, highlighting strengths and weaknesses",
+      "skill": "comparative_analysis",
+      "depends_on": ["n11"],
+      "acceptance": ["coherence", "relevance", "methodological_soundness"],
+      "parallelizable": false,
+      "output_slot": "comparative_perspectives",
+      "depth_override": null,
+      "synthesis_hint": null,
+      "note": null
+    },
+    {
+      "node_id": "n13",
+      "description": "Synthesize findings into a cohesive narrative, integrating all perspectives and evidence quality assessments",
+      "skill": "synthesis",
+      "depends_on": ["n12"],
+      "acceptance": ["coverage", "coherence", "depth"],
+      "parallelizable": false,
+      "output_slot": "synthesized_narrative",
+      "depth_override": null,
+      "synthesis_hint": "Use technical terminology appropriate for experts; provide in-depth explanations and references; emphasize evidence-based conclusions.",
+      "note": null
+    },
+    {
+      "node_id": "n14",
+      "description": "Generate a bibliography of all sources used, ensuring proper citation and authority checks",
+      "skill": "bibliography_gen",
+      "depends_on": ["n13"],
+      "acceptance": ["factual_grounding", "source_authority", "relevance"],
+      "parallelizable": false,
+      "output_slot": "source_bibliography",
+      "depth_override": null,
+      "synthesis_hint": null,
+      "note": null
+    },
+    {
+      "node_id": "n15",
+      "description": "Compile final report with all synthesized content, including appendices for detailed analyses",
+      "skill": "report_generator",
+      "depends_on": ["n13", "n14"],
+      "acceptance": ["coverage", "relevance", "audience_calibration"],
+      "parallelizable": false,
+      "output_slot": "final_report",
+      "depth_override": null,
+      "synthesis_hint": "Tailor for experts: include mathematical derivations where relevant, avoid oversimplification, and highlight implications for ML practice.",
+      "note": null
     }
   ]
 }
 
 ## Intent
 
-**Research type**: instrumental
-**Core goal**: Determine the GDPR compliance risks and requirements for using a third-party LLM API to process EU customer data in a SaaS product
-**Domain**: legal — Legal Research
+**Research type**: exploratory
+**Core goal**: Investigate spurious correlations in machine learning across multiple perspectives, ensuring comprehensive coverage and high evidence quality through verification and analysis
+**Domain**: ml_research — ML / AI Research
 **Domain confidence**: high
-**Audience**: practitioner
-**Output format**: decision_matrix
+**Audience**: expert
+**Output format**: report_generator
 **Output language**: en
-**Implicit constraints**: EU jurisdiction implied; focus on current legal standards; practitioner-level depth for practical application
-**Sensitivity flag**: true — Legal domain requires disclaimer
+**Implicit constraints**: 
+- Deep technical depth required
+- Coverage of at least 5 distinct perspectives (e.g., definitions, examples, statistical views, ethical impacts, detection methods)
+- Focus on evidence quality with mandatory analysis nodes
+**Sensitivity flag**: false — none
 
 ## Scope
 
-**Source types active**: legal databases, academic papers, regulatory guidelines
+**Source types active**: academic_search, web_search, code_search, dataset_search
 **Depth default**: deep
-**Recency window**: no recency constraint — temporal_validity applies
+**Recency window**: 2 years
 **Multilingual**: false
-**Termination signal**: All GDPR implications, including data processing risks, third-party processor obligations, and compliance strategies for LLM APIs, covered with cross-validated sources from EU jurisdiction
-**Budget**: moderate (8 nodes)
+**Termination signal**: Coverage of at least 5 perspectives on spurious correlations, with verified claims from multiple sources, meta-analysis of findings, and no unresolved contradictions
+**Budget**: expansive (15 nodes)
 
 ## Rubric Summary
 
-n1 | legal_search | factual_grounding,jurisdiction_relevance,temporal_validity  
-n2 | legal_search | factual_grounding,jurisdiction_relevance,source_authority  
-n3 | academic_search | factual_grounding,recency,relevance  
-n4 | credibility_score | source_authority,conflict_of_interest,cross_validation  
-n5 | comparative_analysis | coverage,coherence,methodological_soundness  
-n6 | contradiction_detect | coherence,relevance,cross_validation  
-n7 | decision_matrix | coverage,relevance,audience_calibration  
-n8 | exec_summary | relevance,coherence
+n1 | academic_search | factual_grounding,source_authority,methodological_soundness  
+n2 | web_search | factual_grounding,replication_status,relevance  
+n3 | academic_search | source_authority,methodological_soundness,cross_validation  
+n4 | code_search | factual_grounding,replication_status,depth  
+n5 | web_search | source_authority,relevance,conflict_of_interest  
+n6 | academic_search | factual_grounding,methodological_soundness,cross_validation  
+n7 | dataset_search | replication_status,relevance,depth  
+n8 | claim_verification | factual_grounding,cross_validation,coherence  
+n9 | contradiction_detect | coherence,coverage,methodological_soundness  
+n10 | meta_analysis | source_authority,cross_validation,depth  
+n11 | gap_analysis | coverage,relevance,coherence  
+n12 | comparative_analysis | coherence,relevance,methodological_soundness  
+n13 | synthesis | coverage,coherence,depth  
+n14 | bibliography_gen | factual_grounding,source_authority,relevance  
+n15 | report_generator | coverage,relevance,audience_calibration
 
 ## Execution Notes
 
-- First parallel wave composition: Nodes n1, n2, n3 (retrieval tasks can run concurrently)
-- Critical path: n1 -> n4 -> n5 -> n6 -> n7 -> n8 (longest chain due to dependencies on analysis and synthesis)
-- Bottleneck node(s): n4 (credibility_score may require manual review of sources, increasing latency)
-- Domain-specific risks: Access to EU-specific legal databases may involve paywalls; ensure jurisdiction_relevance to avoid non-EU sources
-- Sensitivity notes: n8 disclaimer is mandatory; outputs should emphasize that this is not legal advice and users must consult experts
+- First parallel wave composition: Nodes n1 through n7 are parallelizable and can execute simultaneously as they have no dependencies.
+- Critical path: Longest dependency chain is n1/n2/n3/n4/n5/n6/n7 → n8 → n9 → n10 → n11 → n12 → n13 → n14 → n15, spanning all 15 nodes.
+- Bottleneck node(s): n8 (claim_verification) as it depends on all prior nodes, potentially creating a sequential choke point.
+- Domain-specific risks: Access barriers to academic sources (e.g., paywalls for journals); rapid evolution in ML research may require cross-validation to mitigate outdated findings.
+- Sensitivity or disclaimer notes: None applicable, as sensitivity flag is false.

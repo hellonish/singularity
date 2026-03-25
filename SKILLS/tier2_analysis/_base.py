@@ -8,6 +8,7 @@ Subclass this and set:
 Override _parse_findings() if your skill needs custom finding extraction.
 The default implementation already handles the standard AnalysisOutput shape.
 """
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -51,9 +52,10 @@ class BaseAnalysisSkill(SkillBase):
             f"## Upstream Context\n{upstream}"
         )
 
-        # 4. Call LLM — use generate_text, then parse JSON
+        # 4. Call LLM — run in thread so the sync HTTP call doesn't block the event loop
         try:
-            raw = client.generate_text(
+            raw = await asyncio.to_thread(
+                client.generate_text,
                 prompt=user_message,
                 system_prompt=system_prompt,
                 temperature=0.3,

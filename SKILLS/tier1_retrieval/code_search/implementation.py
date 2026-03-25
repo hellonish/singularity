@@ -8,5 +8,5 @@ class CodeSearchSkill(BaseRetrievalSkill):
 
     async def _fetch(self, node):
         return await GitHubTool().call_with_retry(
-            node.description, max_results=self._depth_n(node)
+            self._to_query(node.description), max_results=self._depth_n(node)
         )

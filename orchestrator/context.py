@@ -17,6 +17,8 @@ class ExecutionContext:
     credibility_scores: dict[str, float] = field(default_factory=dict)
     prior_hashes: set[str]               = field(default_factory=set)
     language: str                        = "en"
+    depth: str                           = "standard"  # "shallow" | "standard" | "deep"
+    audience: str                        = ""
     citation_registry: Any               = field(default=None)  # CitationRegistry; injected at run start
 
     def __post_init__(self) -> None:
@@ -36,7 +38,6 @@ class ExecutionContext:
         self.node_status[node.node_id] = status
         adj = CREDIBILITY_ADJ.get(fallback_level, 0.0)
         self.credibility_scores[node.output_slot] = max(0.0, credibility + adj)
-        self.prior_hashes.add(node.description_hash())
 
     def is_resolved(self, node_id: str) -> bool:
         return node_id in self.node_status

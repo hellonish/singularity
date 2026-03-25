@@ -8,6 +8,7 @@ Subclass this and set:
 
 It fetches LLM output (which is JSON) and converts it to an OutputDocument.
 """
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -34,45 +35,48 @@ class BaseOutputSkill(SkillBase):
         system_prompt = prompt_path.read_text(encoding="utf-8")
         upstream = _budget.build_context(node, ctx)
 
+        audience = getattr(ctx, "audience", "") or ctx.results.get("metadata", {}).get("audience", "general")
         user_message = (
             f"## Node\n"
             f"node_id: {node.node_id}\n"
             f"skill: {node.skill}\n"
             f"description: {node.description}\n"
-            f"audience: {ctx.results.get('metadata', {}).get('audience', 'general')}\n\n"
+            f"audience: {audience}\n\n"
             f"## Upstream Context\n{upstream}"
         )
 
         try:
-            raw = client.generate_text(
+            # Use asyncio.to_thread so the sync HTTP call doesn't block the event loop
+            raw = await asyncio.to_thread(
+                client.generate_text,
                 prompt=user_message,
                 system_prompt=system_prompt,
-                temperature=0.3, # Slightly more creative for outputs
+                temperature=0.3,
             )
         except Exception as exc:
             return self._fail(f"LLM call failed: {exc}")
 
         try:
             data = self._extract_json(raw)
-            
-            # Combine findings into a single content string
-            content_parts = []
+
+            # Build proper Markdown sections from findings list
+            sections: list[str] = []
+            summary = data.get("summary", "")
+            if summary:
+                sections.append(f"## Executive Summary\n\n{summary}")
             for item in data.get("findings", []):
-                for k, v in item.items():
-                    if isinstance(v, list):
-                        content_parts.append(f"**{k}**\\n" + "\\n".join(f"- {x}" for x in v))
-                    elif isinstance(v, dict):
-                        content_parts.append(f"**{k}**\\n" + json.dumps(v, indent=2))
-                    else:
-                        content_parts.append(f"**{k}**\\n{v}")
-                        
-            content = "\\n\\n".join(content_parts)
+                title = item.get("section", "")
+                body = item.get("content", "")
+                if title or body:
+                    sections.append(f"## {title}\n\n{body}")
+
+            content = "\n\n".join(sections)
             
             output = OutputDocument(
                 skill_name=self.name,
                 format=self.format_type,
                 content=content,
-                audience=ctx.results.get("metadata", {}).get("audience", "general"),
+                audience=audience,
                 word_count=0, # Auto-computed by pydantic validator
                 citations_included=data.get("citations_used", []),
                 coverage_gaps_disclosed=data.get("coverage_gaps", []),

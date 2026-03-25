@@ -4,6 +4,8 @@ BaseRetrievalSkill — shared pattern for all 18 tier-1 retrieval skills.
 Subclass this and implement _fetch(node) → ToolResult.
 For multi-tool skills (academic, clinical, financial) override run() directly.
 """
+import re
+
 from orchestrator.skills import SkillBase
 from orchestrator.models import NodeStatus, PlanNode
 
@@ -79,11 +81,27 @@ class BaseRetrievalSkill(SkillBase):
             return f"{n} result(s) — below minimum ({self.min_ok} required for OK)"
         return f"{n} result(s) found"
 
-    def _depth_n(self, node: PlanNode, default: int = 10) -> int:
-        """Map node.depth_override → max_results."""
-        return {"shallow": 5, "standard": 10, "deep": 20}.get(
-            node.depth_override or "", default
+    def _to_query(self, description: str, max_words: int = 8) -> str:
+        """Extract a concise keyword query from a verbose node description.
+
+        Strips instruction-style prefixes ("Search X for examples of ...") and
+        returns the core topic words, capped at max_words.
+        """
+        m = re.search(
+            r'\b(?:for(?:\s+examples?\s+of)?|about|on|of|highlighting|covering|related\s+to)\s+(.+)',
+            description, re.IGNORECASE,
         )
+        topic = m.group(1) if m else description
+        # Cut at first comma/semicolon/colon to drop "such as ..." clauses
+        topic = re.sub(r'[,;:].*', '', topic).strip()
+        words = topic.split()
+        return " ".join(words[:max_words])
+
+    def _depth_n(self, node: PlanNode, ctx=None, default: int = 10) -> int:
+        """Map depth → max_results. Node-level override wins; ctx.depth is the global fallback."""
+        _MAP = {"shallow": 5, "standard": 10, "deep": 20}
+        key = node.depth_override or (getattr(ctx, "depth", None)) or ""
+        return _MAP.get(key, default)
 
     def _register_all(self, sources: list[dict], node: PlanNode, ctx) -> list[dict]:
         """Register a list of sources and mutate each with citation_id. Returns sources."""

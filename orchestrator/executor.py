@@ -24,8 +24,8 @@ class FallbackRouter:
         node: PlanNode,
         ctx: ExecutionContext,
         client,
-    ) -> tuple[Any, NodeStatus, str]:
-        """Returns (result, status, fallback_level)."""
+    ) -> tuple[Any, NodeStatus, float, str]:
+        """Returns (result, status, credibility, fallback_level)."""
         chain = [node.skill] + self._registry.get_fallback_chain(node.skill)
         last_error: str | None = None
 
@@ -38,18 +38,26 @@ class FallbackRouter:
             for retry in range(len(RETRY_BACKOFF) + 1):
                 try:
                     result, status, credibility = await skill.run(node, ctx, client, self._registry)
-                    fallback_level = "primary" if attempt_idx == 0 else f"fallback_{attempt_idx}"
-                    if skill_name in CREDIBILITY_ADJ:
-                        credibility = max(0.0, credibility + CREDIBILITY_ADJ[skill_name])
-                    return result, status, fallback_level
                 except Exception as exc:
                     last_error = str(exc)
                     if retry < len(RETRY_BACKOFF):
                         await asyncio.sleep(RETRY_BACKOFF[retry])
+                    continue
+
+                if status != NodeStatus.FAILED:
+                    fallback_level = "primary" if attempt_idx == 0 else f"fallback_{attempt_idx}"
+                    if skill_name in CREDIBILITY_ADJ:
+                        credibility = max(0.0, credibility + CREDIBILITY_ADJ[skill_name])
+                    return result, status, credibility, fallback_level
+
+                # Skill returned FAILED — try next in chain without retrying
+                last_error = (result.get("error") or "skill returned FAILED") if isinstance(result, dict) else "skill returned FAILED"
+                break
 
         return (
             {"error": last_error, "skill_attempted": chain[:3], "fallback_attempted": True},
             NodeStatus.FAILED,
+            0.0,
             "exhausted",
         )
 
@@ -60,8 +68,7 @@ async def execute_node(
     client,
     router: FallbackRouter,
 ) -> None:
-    result, status, fallback_level = await router.execute(node, ctx, client)
-    credibility = 0.85 if status != NodeStatus.FAILED else 0.0
+    result, status, credibility, fallback_level = await router.execute(node, ctx, client)
     ctx.record(node, result, status, credibility, fallback_level)
     tag = f"[{fallback_level}]" if fallback_level != "primary" else ""
     print(f"  [{status.value.upper()}]{tag} {node.node_id} → {node.output_slot}")
