@@ -24,7 +24,7 @@ def _cred(url: str) -> float:
 # ---------------------------------------------------------------------------
 
 def _ddg(query: str, max_results: int) -> list[dict]:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     return list(DDGS().text(query, max_results=max_results))
 
 

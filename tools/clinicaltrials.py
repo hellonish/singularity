@@ -7,7 +7,7 @@ credibility_base: 1.0 (official government registry).
 """
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
 _BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
 
@@ -24,7 +24,7 @@ class ClinicalTrialsTool(ToolBase):
                           "BriefSummary",
         }
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
             async with session.get(_BASE_URL, params=params) as resp:
                 resp.raise_for_status()
                 data = await resp.json()

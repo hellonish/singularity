@@ -1,0 +1,39 @@
+# ── Core ──────────────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.7.0
+
+# ── LLM clients ───────────────────────────────────────────────────────────────
+openai>=1.0.0            # GrokClient (xAI via OpenAI-compatible SDK)
+google-genai>=1.0.0      # GeminiClient
+deepseek>=1.0.0          # DeepSeekClient
+
+# ── Tools — HTTP ──────────────────────────────────────────────────────────────
+aiohttp>=3.9.0           # async HTTP for all REST-based tools
+requests>=2.31.0         # sync HTTP fallback
+
+# ── Tools — Web search ────────────────────────────────────────────────────────
+ddgs>=6.0.0               # WebFetchTool + StandardsFetchTool (free, no key)
+tavily-python>=0.3.0      # WebFetchTool fallback (TAVILY_API_KEY)
+
+# ── Tools — Translation ────────────────────────────────────────────────────────
+# TranslationTool primary: MyMemory API (free, no key, uses aiohttp — already listed)
+# TranslationTool fallback: Google Translate (GOOGLE_TRANSLATE_API_KEY)
+
+# ── Tools — Academic ──────────────────────────────────────────────────────────
+arxiv>=2.1.0              # ArxivTool (free, no key)
+biopython>=1.84           # PubMedTool via NCBI Entrez (free, needs NCBI_EMAIL)
+
+# ── Tools — Code & data ───────────────────────────────────────────────────────
+PyGithub>=2.3.0           # GitHubTool (GITHUB_TOKEN optional)
+huggingface-hub>=0.23.0   # DatasetHubTool (free, no key)
+
+# ── Tools — Video ─────────────────────────────────────────────────────────────
+youtube-transcript-api>=0.6.2  # YouTubeTranscriptTool (free, no key)
+
+# ── Tools — PDF ───────────────────────────────────────────────────────────────
+pdfplumber>=0.11.0        # PdfReaderTool primary
+PyMuPDF>=1.24.0           # PdfReaderTool fallback for scanned/broken PDFs
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

@@ -18,11 +18,12 @@ def _search(query: str, max_results: int, max_age_years: float | None) -> list[d
         cutoff = datetime.now(tz=timezone.utc) - timedelta(days=365 * max_age_years)
 
     results = []
-    for paper in arxiv.Search(
+    search = arxiv.Search(
         query=query,
         max_results=max_results,
         sort_by=arxiv.SortCriterion.Relevance,
-    ).results():
+    )
+    for paper in arxiv.Client().results(search):
         if cutoff and paper.published and paper.published < cutoff:
             continue
         results.append({

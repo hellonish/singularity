@@ -12,11 +12,17 @@ from .models import NodeStatus, PlanNode
 
 @dataclass
 class ExecutionContext:
-    results: dict[str, Any]           = field(default_factory=dict)
-    node_status: dict[str, NodeStatus] = field(default_factory=dict)
+    results: dict[str, Any]              = field(default_factory=dict)
+    node_status: dict[str, NodeStatus]   = field(default_factory=dict)
     credibility_scores: dict[str, float] = field(default_factory=dict)
-    prior_hashes: set[str]            = field(default_factory=set)
-    language: str                     = "en"
+    prior_hashes: set[str]               = field(default_factory=set)
+    language: str                        = "en"
+    citation_registry: Any               = field(default=None)  # CitationRegistry; injected at run start
+
+    def __post_init__(self) -> None:
+        if self.citation_registry is None:
+            from citations.registry import CitationRegistry
+            self.citation_registry = CitationRegistry()
 
     def record(
         self,

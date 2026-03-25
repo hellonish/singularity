@@ -7,8 +7,15 @@ Every tool:
   - Gets `call_with_retry` for free (exponential back-off, never raises).
 """
 import asyncio
+import ssl
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def ssl_ctx() -> ssl.SSLContext:
+    """Return an SSL context with certifi's CA bundle (fixes macOS Python cert issues)."""
+    import certifi
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 @dataclass

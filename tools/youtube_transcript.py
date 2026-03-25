@@ -26,7 +26,7 @@ def _extract_video_id(url: str) -> str | None:
 
 
 def _ddg_youtube_search(query: str, max_results: int) -> list[str]:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     results = DDGS().text(f"site:youtube.com {query}", max_results=max_results * 2)
     video_ids = []
     for r in results:
@@ -39,17 +39,17 @@ def _ddg_youtube_search(query: str, max_results: int) -> list[str]:
 
 
 def _fetch_transcript(video_id: str) -> dict | None:
-    from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+    from youtube_transcript_api import YouTubeTranscriptApi
     try:
-        entries   = YouTubeTranscriptApi.get_transcript(video_id)
-        full_text = " ".join(e["text"] for e in entries)
+        entries   = YouTubeTranscriptApi().fetch(video_id)   # v1.x API
+        full_text = " ".join(e.text for e in entries)
         return {
             "video_id": video_id,
             "url":      f"https://www.youtube.com/watch?v={video_id}",
             "text":     full_text,
-            "duration": entries[-1]["start"] if entries else 0,
+            "duration": entries[-1].start if entries else 0,
         }
-    except (TranscriptsDisabled, NoTranscriptFound):
+    except Exception:
         return None
 
 

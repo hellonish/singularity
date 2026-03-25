@@ -11,36 +11,27 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
-_NIST_URL  = "https://csrc.nist.gov/CSRC/media/Publications/sp/800-53/rev-5/final/documents"
-_NIST_SEARCH = "https://csrc.nist.gov/publications/search"
+_NIST_BASE = "https://csrc.nist.gov"
 _IEEE_URL  = "https://ieeexploreapi.ieee.org/api/v1/search/articles"
 
 
-async def _nist_search(query: str, max_results: int) -> list[dict]:
-    # NIST CSRC publication search (scrapes the public search endpoint)
-    params = {"SearchText": query, "SearchAreaNumber": "0", "SearchAreaName": "all"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(_NIST_SEARCH, params=params) as resp:
-            resp.raise_for_status()
-            text = await resp.text()
-
-    # Parse very simple result extraction — titles and URLs from the response
-    import re
+def _nist_search_sync(query: str, max_results: int) -> list[dict]:
+    """DDG site:csrc.nist.gov search — NIST CSRC is a JS-rendered SPA with no public JSON API."""
+    from ddgs import DDGS
     results = []
-    for match in re.finditer(
-        r'href="(/publications/detail/[^"]+)"[^>]*>([^<]+)</a>', text
-    ):
-        url, title = match.groups()
+    for r in DDGS().text(f"site:csrc.nist.gov {query}", max_results=max_results):
         results.append({
-            "title":    title.strip(),
-            "url":      f"https://csrc.nist.gov{url}",
-            "source":   "NIST",
+            "title":  r.get("title", ""),
+            "url":    r.get("href") or r.get("url", ""),
+            "source": "NIST",
         })
-        if len(results) >= max_results:
-            break
     return results
+
+
+async def _nist_search(query: str, max_results: int) -> list[dict]:
+    return await asyncio.to_thread(_nist_search_sync, query, max_results)
 
 
 async def _ieee_search(query: str, max_results: int, api_key: str) -> list[dict]:
@@ -49,7 +40,7 @@ async def _ieee_search(query: str, max_results: int, api_key: str) -> list[dict]
         "max_records": max_results,
         "apikey":     api_key,
     }
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
         async with session.get(_IEEE_URL, params=params) as resp:
             resp.raise_for_status()
             data = await resp.json()

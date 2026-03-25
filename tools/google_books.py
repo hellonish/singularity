@@ -9,7 +9,7 @@ import os
 
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
 _BASE_URL = "https://www.googleapis.com/books/v1/volumes"
 
@@ -23,7 +23,7 @@ class GoogleBooksTool(ToolBase):
         if api_key:
             params["key"] = api_key
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
             async with session.get(_BASE_URL, params=params) as resp:
                 resp.raise_for_status()
                 data = await resp.json()

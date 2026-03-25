@@ -1,0 +1,40 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_standards_fetch_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  StandardsFetchTool  ✓  6 source(s)  |  cred: 1.00
+────────────────────────────────────────────────────────────
+  [1] [1.00] Cybersecurity Supply Chain Risk Management | CSRC
+       url     : https://csrc.nist.gov/Projects/cyber-supply-chain-risk-management
+  [2] [1.00] Cybersecurity Supply Chain Risk Management | CSRC
+       url     : https://csrc.nist.gov/Projects/cyber-supply-chain-risk-management/ssca
+  [3] [1.00] SP 1303, NIST Cybersecurity Framework 2.0: Enterprise Risk
+       url     : https://csrc.nist.gov/pubs/sp/1303/ipd
+  ... and 3 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_standards_fetch_sources_labelled
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  StandardsFetchTool (source labels)  ✓  6 source(s)  |  cred: 1.00
+────────────────────────────────────────────────────────────
+  [1] [1.00] Cybersecurity Supply Chain Risk Management | CSRC
+       url     : https://csrc.nist.gov/Projects/cyber-supply-chain-risk-management
+  [2] [1.00] Cybersecurity Supply Chain Risk Management | CSRC
+       url     : https://csrc.nist.gov/Projects/cyber-supply-chain-risk-management/ssca
+  [3] [1.00] SP 1303, NIST Cybersecurity Framework 2.0: Enterprise Risk
+       url     : https://csrc.nist.gov/pubs/sp/1303/ipd
+  ... and 3 more source(s)
+────────────────────────────────────────────────────────────
+
+  Issuing bodies found: {'NIST'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_standards_fetch_ieee_only_when_key_set
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  IEEE_API_KEY not set → expecting 0 IEEE results, got 0

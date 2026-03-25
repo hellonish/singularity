@@ -7,7 +7,7 @@ credibility_base: 1.0 (official regulatory filings).
 """
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
 _SEARCH_URL  = "https://efts.sec.gov/LATEST/search-index"
 _FILING_BASE = "https://www.sec.gov"
@@ -17,10 +17,11 @@ class SecEdgarTool(ToolBase):
     name = "sec_edgar"
 
     async def call(self, query: str, max_results: int = 10, **kwargs) -> ToolResult:
-        params = {"q": f'"{query}"', "dateRange": "custom", "forms": "10-K,10-Q,8-K"}
+        params = {"q": query, "forms": "10-K,10-Q,8-K"}
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(_SEARCH_URL, params=params) as resp:
+        headers = {"User-Agent": "singularity-research/1.0 research@localhost"}
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
+            async with session.get(_SEARCH_URL, params=params, headers=headers) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
 

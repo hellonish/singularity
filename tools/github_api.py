@@ -6,6 +6,7 @@ from 60 → 5,000 req/hr).
 credibility_base: 0.70 base + stars boost → max 0.90.
 """
 import asyncio
+import itertools
 import os
 
 from .base import ToolBase, ToolResult
@@ -20,7 +21,7 @@ def _search(query: str, max_results: int) -> list[dict]:
     g     = Github(token) if token else Github()
 
     results = []
-    for repo in g.search_repositories(query, sort="stars")[:max_results]:
+    for repo in itertools.islice(g.search_repositories(query, sort="stars"), max_results):
         try:
             readme = repo.get_readme().decoded_content.decode("utf-8", errors="ignore")
             readme = readme[:_README_MAX_CHARS]

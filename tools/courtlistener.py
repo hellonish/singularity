@@ -7,7 +7,7 @@ credibility_base: 0.95 (official court records).
 """
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
 _BASE_URL = "https://www.courtlistener.com/api/rest/v4/search/"
 
@@ -18,7 +18,7 @@ class CourtListenerTool(ToolBase):
     async def call(self, query: str, max_results: int = 10, **kwargs) -> ToolResult:
         params = {"q": query, "type": "o", "page_size": max_results}
 
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
             async with session.get(_BASE_URL, params=params) as resp:
                 resp.raise_for_status()
                 data = await resp.json()

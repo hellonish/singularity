@@ -9,7 +9,7 @@ import asyncio
 
 import aiohttp
 
-from .base import ToolBase, ToolResult
+from .base import ToolBase, ToolResult, ssl_ctx
 
 _BASE_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 _FIELDS   = "title,authors,year,abstract,citationCount,openAccessPdf,externalIds"
@@ -17,11 +17,16 @@ _FIELDS   = "title,authors,year,abstract,citationCount,openAccessPdf,externalIds
 
 async def _fetch(query: str, limit: int) -> list[dict]:
     params = {"query": query, "limit": limit, "fields": _FIELDS}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(_BASE_URL, params=params) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-    return data.get("data", [])
+    for attempt in range(3):
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
+            async with session.get(_BASE_URL, params=params) as resp:
+                if resp.status == 429:
+                    await asyncio.sleep(10 * (attempt + 1))   # 10s, 20s, 30s on rate limit
+                    continue
+                resp.raise_for_status()
+                data = await resp.json()
+        return data.get("data", [])
+    raise RuntimeError("Semantic Scholar rate limit exceeded — try again later")
 
 
 class SemanticScholarTool(ToolBase):

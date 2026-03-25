@@ -11,7 +11,7 @@ load_dotenv()
 # Paths
 # ---------------------------------------------------------------------------
 PROJECT_ROOT   = Path(__file__).resolve().parent.parent
-SKILL_PATH     = PROJECT_ROOT / "SKILLS" / "PLANNER.md"
+SKILL_PATH     = PROJECT_ROOT / "planner" / "system_prompt.md"
 REGISTRY_PATH  = PROJECT_ROOT / "planner" / "domain_registry.json"
 PLANNER_OUTPUT = PROJECT_ROOT / "orchestrator" / "planner_output.md"
 
