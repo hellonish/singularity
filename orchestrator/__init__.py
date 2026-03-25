@@ -4,7 +4,7 @@ from .skills import SKILL_REGISTRY
 
 def _register_real_skills() -> None:
     """
-    Swap stub implementations for real tier-1 and tier-2 skills.
+    Swap stub implementations for real tier-1, tier-2, and tier-3 skills.
     Done lazily here (not at module level) to avoid circular imports.
     Falls back to stubs silently if the skills package is unavailable.
     """
@@ -24,6 +24,11 @@ def _register_real_skills() -> None:
             TrendAnalysisSkill, TimelineConstructSkill, HypothesisGenSkill,
             EntityExtractionSkill, CitationGraphSkill, SentimentClusterSkill,
             CredibilityScoreSkill, TranslationSkill, FallbackRouterSkill,
+        )
+        from skills.tier3_output import (
+            ReportGeneratorSkill, ExecSummarySkill, BibliographyGenSkill,
+            DecisionMatrixSkill, ExplainerSkill, AnnotationGenSkill,
+            VisualizationSpecSkill, KnowledgeDeltaSkill,
         )
     except ImportError:
         return   # skills package not yet available — keep stubs
@@ -67,6 +72,15 @@ def _register_real_skills() -> None:
         "credibility_score":    CredibilityScoreSkill(),
         "translation":          TranslationSkill(),
         "fallback_router":      FallbackRouterSkill(),
+        # Tier 3
+        "report_generator":   ReportGeneratorSkill(),
+        "exec_summary":       ExecSummarySkill(),
+        "bibliography_gen":   BibliographyGenSkill(),
+        "decision_matrix":    DecisionMatrixSkill(),
+        "explainer":          ExplainerSkill(),
+        "annotation_gen":     AnnotationGenSkill(),
+        "visualization_spec": VisualizationSpecSkill(),
+        "knowledge_delta":    KnowledgeDeltaSkill(),
     })
 
 
