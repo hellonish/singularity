@@ -10,7 +10,7 @@ from orchestrator.models import NodeStatus, PlanNode
 from contracts.skill_contracts import QualityReport
 from context.budget import ContextBudgetManager
 
-_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "prompts"
 _budget = ContextBudgetManager()
 
 

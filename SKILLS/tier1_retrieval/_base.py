@@ -50,7 +50,7 @@ class BaseRetrievalSkill(SkillBase):
                     if n else 0.0)
 
         return {
-            "skill":          self.name,
+            "skill_name":     self.name,
             "sources":        sources,
             "query_used":     node.description,
             "result_count":   n,
@@ -64,7 +64,7 @@ class BaseRetrievalSkill(SkillBase):
 
     def _fail(self, node: PlanNode, error: str | None):
         return {
-            "skill":          self.name,
+            "skill_name":     self.name,
             "sources":        [],
             "query_used":     node.description,
             "result_count":   0,
@@ -108,7 +108,7 @@ class BaseRetrievalSkill(SkillBase):
         avg_cred = (sum(s.get("credibility_base", 0.75) for s in sources) / n
                     if n else 0.0)
         return {
-            "skill":          self.name,
+            "skill_name":     self.name,
             "sources":        sources,
             "query_used":     node.description,
             "result_count":   n,
