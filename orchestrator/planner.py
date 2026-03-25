@@ -1,0 +1,137 @@
+"""
+Planner — calls the LLM with PLANNER.md as system prompt to produce a DAG plan,
+and parse_plan converts the raw LLM output into a typed Plan object.
+"""
+import json
+import re
+from pathlib import Path
+
+from .config import PLANNER_OUTPUT
+from .context import ExecutionContext
+from .models import GapItem, Plan, PlanMetadata, PlanNode
+
+
+# ---------------------------------------------------------------------------
+# Parser
+# ---------------------------------------------------------------------------
+
+def parse_plan(markdown: str) -> Plan:
+    """Extract the JSON DAG block from the planner's raw Markdown response."""
+    # First try: look for a fenced ```json block
+    dag_block: dict | None = None
+    for raw in re.findall(r"```json\s*\n(.*?)\n```", markdown, re.DOTALL):
+        try:
+            parsed = json.loads(raw)
+            if "nodes" in parsed and "metadata" in parsed:
+                dag_block = parsed
+                break
+        except json.JSONDecodeError:
+            continue
+
+    # Second try: response starts directly with a JSON object
+    if dag_block is None:
+        text = markdown.strip()
+        if text.startswith("{"):
+            try:
+                parsed, _ = json.JSONDecoder().raw_decode(text)
+                if isinstance(parsed, dict) and "nodes" in parsed and "metadata" in parsed:
+                    dag_block = parsed
+            except json.JSONDecodeError:
+                pass
+
+    if dag_block is None:
+        raise ValueError(
+            f"No valid DAG JSON block found in planner output.\n"
+            f"First 600 chars:\n{markdown[:600]}"
+        )
+
+    m = dag_block["metadata"]
+    meta = PlanMetadata(
+        research_type        = m.get("research_type", "exploratory"),
+        core_goal            = m.get("core_goal", ""),
+        domain               = m.get("domain", "general"),
+        audience             = m.get("audience", "practitioner"),
+        output_format        = m.get("output_format", "report"),
+        output_language      = m.get("output_language", "en"),
+        depth_default        = m.get("depth_default", "deep"),
+        recency_window_years = float(m.get("recency_window_years", 3)),
+        termination_signal   = m.get("termination_signal", ""),
+        node_count           = m.get("node_count", len(dag_block["nodes"])),
+        sensitivity_flag     = bool(m.get("sensitivity_flag", False)),
+        multilingual         = bool(m.get("multilingual", False)),
+        created_at_mode      = m.get("created_at_mode", "plan"),
+        replan_round         = int(m.get("replan_round", 0)),
+    )
+    nodes = [
+        PlanNode(
+            node_id        = n["node_id"],
+            description    = n["description"],
+            skill          = n["skill"],
+            depends_on     = n.get("depends_on", []),
+            acceptance     = n.get("acceptance", []),
+            parallelizable = n.get("parallelizable", True),
+            output_slot    = n["output_slot"],
+            depth_override = n.get("depth_override"),
+            synthesis_hint = n.get("synthesis_hint"),
+            note           = n.get("note"),
+        )
+        for n in dag_block["nodes"]
+    ]
+    return Plan(metadata=meta, nodes=nodes)
+
+
+# ---------------------------------------------------------------------------
+# Planner
+# ---------------------------------------------------------------------------
+
+class Planner:
+    def __init__(self, skill_path: Path, client):
+        self.skill_md = skill_path.read_text(encoding="utf-8")
+        self.client = client
+
+    def _call(self, user_content: str) -> str:
+        raw = self.client.generate_text(
+            prompt=user_content,
+            system_prompt=self.skill_md,
+            temperature=0.2,
+        )
+        PLANNER_OUTPUT.write_text(raw, encoding="utf-8")
+        print(f"  [planner] Raw output saved → {PLANNER_OUTPUT}")
+        return raw
+
+    def plan(
+        self,
+        problem: str,
+        audience: str = "",
+        output_language: str = "en",
+    ) -> tuple[str, Plan]:
+        parts = ["mode: plan", f"problem_statement: {problem}"]
+        if audience:
+            parts.append(f"audience: {audience}")
+        if output_language and output_language != "en":
+            parts.append(f"output_language: {output_language}")
+        raw = self._call("\n".join(parts))
+        return raw, parse_plan(raw)
+
+    def replan(
+        self,
+        problem: str,
+        ctx: ExecutionContext,
+        gaps: list[GapItem],
+        round_num: int,
+    ) -> tuple[str, Plan]:
+        gap_list = [
+            {"node_id": g.node_id, "issue": g.issue.value, "detail": g.detail}
+            for g in gaps
+        ]
+        ctx_block = json.dumps(
+            {"execution_results": ctx.result_summary(), "gap_report": gap_list},
+            indent=2,
+        )
+        raw = self._call(
+            f"mode: replan\n"
+            f"problem_statement: {problem}\n"
+            f"replan_round: {round_num}\n"
+            f"context:\n{ctx_block}"
+        )
+        return raw, parse_plan(raw)

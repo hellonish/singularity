@@ -1,0 +1,1158 @@
+{
+    "_meta": {
+        "version": "2.0",
+        "description": "Domain bundles loaded by the Planner in Phase 0. Each domain defines preferred source skills, analysis skills, output skills, quality axes, and audience defaults. The Planner narrows the skill registry to this bundle before constructing the DAG \u2014 preventing skill overload on 36-skill registry.",
+        "audience_types": [
+            "layperson",
+            "student",
+            "practitioner",
+            "expert",
+            "executive"
+        ],
+        "output_format_types": [
+            "academic_paper",
+            "legal_brief",
+            "systematic_review",
+            "investigative_report",
+            "executive_brief",
+            "policy_brief",
+            "technical_report",
+            "insights_brief",
+            "investment_memo",
+            "annotated_bibliography",
+            "decision_memo"
+        ]
+    },
+    "domains": {
+        "ml_research": {
+            "label": "ML / AI Research",
+            "description": "Academic and industry machine learning, AI systems, NLP, computer vision, robotics",
+            "detection_signals": [
+                "model",
+                "dataset",
+                "benchmark",
+                "training",
+                "fine-tuning",
+                "neural",
+                "LLM",
+                "transformer",
+                "embedding",
+                "inference",
+                "gradient",
+                "architecture"
+            ],
+            "default_audience": "expert",
+            "default_output_format": "academic_paper",
+            "source_skills": {
+                "primary": [
+                    "academic_search",
+                    "code_search",
+                    "dataset_search"
+                ],
+                "secondary": [
+                    "web_search",
+                    "video_search",
+                    "forum_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "gap_analysis",
+                    "citation_graph"
+                ],
+                "secondary": [
+                    "trend_analysis",
+                    "statistical_analysis",
+                    "hypothesis_gen",
+                    "contradiction_detect"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "bibliography_gen",
+                "visualization_spec"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "source_authority",
+                    "cross_validation",
+                    "recency",
+                    "depth",
+                    "coverage"
+                ],
+                "domain_specific": [
+                    "replication_status",
+                    "methodological_soundness"
+                ]
+            },
+            "rubric_notes": "Prefer arXiv, NeurIPS, ICML, ICLR, ACL for source_authority. recency window: 2 years. Benchmark comparisons require cross_validation across at least 2 independent datasets."
+        },
+        "legal": {
+            "label": "Legal Research",
+            "description": "Case law, statutes, regulatory compliance, contract analysis, intellectual property, litigation support",
+            "detection_signals": [
+                "law",
+                "legal",
+                "statute",
+                "regulation",
+                "court",
+                "case",
+                "jurisdiction",
+                "compliance",
+                "contract",
+                "precedent",
+                "ruling",
+                "plaintiff",
+                "defendant",
+                "IP",
+                "patent litigation",
+                "GDPR",
+                "privacy",
+                "lawsuit",
+                "litigation",
+                "attorney",
+                "counsel",
+                "regulatory",
+                "data protection",
+                "copyright",
+                "trademark",
+                "employment law"
+            ],
+            "default_audience": "practitioner",
+            "default_output_format": "legal_brief",
+            "source_skills": {
+                "primary": [
+                    "legal_search",
+                    "gov_search",
+                    "pdf_deep_extract"
+                ],
+                "secondary": [
+                    "academic_search",
+                    "news_archive",
+                    "patent_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "timeline_construct",
+                    "claim_verification"
+                ],
+                "secondary": [
+                    "contradiction_detect",
+                    "entity_extraction",
+                    "causal_analysis"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "annotation_gen",
+                "bibliography_gen",
+                "decision_matrix"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "source_authority",
+                    "coverage"
+                ],
+                "domain_specific": [
+                    "jurisdiction_relevance",
+                    "temporal_validity",
+                    "geographic_scope"
+                ]
+            },
+            "rubric_notes": "jurisdiction_relevance is MANDATORY \u2014 a case from a different jurisdiction has zero weight. temporal_validity is critical: overturned precedents must be flagged. Bluebook citation format for bibliography_gen."
+        },
+        "medical_clinical": {
+            "label": "Medical / Clinical",
+            "description": "Clinical evidence, drug trials, diagnostics, health policy, public health, biomedical research",
+            "detection_signals": [
+                "clinical",
+                "trial",
+                "patient",
+                "drug",
+                "treatment",
+                "diagnosis",
+                "symptom",
+                "disease",
+                "therapy",
+                "FDA",
+                "medical",
+                "health",
+                "biomedical",
+                "RCT",
+                "meta-analysis",
+                "epidemiology"
+            ],
+            "default_audience": "expert",
+            "default_output_format": "systematic_review",
+            "source_skills": {
+                "primary": [
+                    "clinical_search",
+                    "academic_search",
+                    "pdf_deep_extract"
+                ],
+                "secondary": [
+                    "gov_search",
+                    "web_search",
+                    "dataset_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "statistical_analysis",
+                    "comparative_analysis",
+                    "claim_verification"
+                ],
+                "secondary": [
+                    "contradiction_detect",
+                    "causal_analysis",
+                    "credibility_score",
+                    "meta_analysis"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "decision_matrix",
+                "bibliography_gen"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "source_authority",
+                    "cross_validation",
+                    "depth",
+                    "factual_grounding"
+                ],
+                "domain_specific": [
+                    "clinical_significance",
+                    "methodological_soundness",
+                    "conflict_of_interest",
+                    "replication_status"
+                ]
+            },
+            "rubric_notes": "RCTs and systematic reviews outrank observational studies for source_authority. conflict_of_interest must check industry funding. clinical_significance requires effect size + p-value, not just statistical significance. NEVER recommend specific treatments \u2014 describe evidence only."
+        },
+        "journalism": {
+            "label": "Journalism / Investigative",
+            "description": "News synthesis, investigative reporting, fact-checking, public interest stories",
+            "detection_signals": [
+                "news",
+                "journalist",
+                "report",
+                "investigate",
+                "fact-check",
+                "media",
+                "public interest",
+                "story",
+                "source",
+                "leak",
+                "whistleblower",
+                "accountability"
+            ],
+            "default_audience": "practitioner",
+            "default_output_format": "investigative_report",
+            "source_skills": {
+                "primary": [
+                    "news_archive",
+                    "gov_search",
+                    "social_search"
+                ],
+                "secondary": [
+                    "web_search",
+                    "financial_search",
+                    "forum_search",
+                    "pdf_deep_extract"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "claim_verification",
+                    "contradiction_detect",
+                    "timeline_construct"
+                ],
+                "secondary": [
+                    "entity_extraction",
+                    "credibility_score",
+                    "causal_analysis"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "exec_summary",
+                "annotation_gen"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "cross_validation",
+                    "source_authority",
+                    "coverage"
+                ],
+                "domain_specific": [
+                    "conflict_of_interest",
+                    "temporal_validity",
+                    "geographic_scope"
+                ]
+            },
+            "rubric_notes": "conflict_of_interest is highest priority \u2014 always check source motivations. cross_validation requires \u22652 independent named sources per key claim. Anonymous sources must be noted but do NOT satisfy cross_validation."
+        },
+        "market_research": {
+            "label": "Market / Competitive Research",
+            "description": "Competitive intelligence, industry sizing, due diligence, market entry analysis, product landscape",
+            "detection_signals": [
+                "market",
+                "competitor",
+                "industry",
+                "revenue",
+                "growth",
+                "TAM",
+                "SAM",
+                "business",
+                "company",
+                "startup",
+                "enterprise",
+                "competitive",
+                "landscape",
+                "benchmark",
+                "due diligence",
+                "M&A",
+                "SaaS",
+                "TAM SAM",
+                "competitive intelligence",
+                "market share",
+                "B2B",
+                "B2C"
+            ],
+            "default_audience": "executive",
+            "default_output_format": "executive_brief",
+            "source_skills": {
+                "primary": [
+                    "financial_search",
+                    "web_search",
+                    "news_archive"
+                ],
+                "secondary": [
+                    "forum_search",
+                    "patent_search",
+                    "dataset_search",
+                    "social_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "trend_analysis",
+                    "statistical_analysis"
+                ],
+                "secondary": [
+                    "entity_extraction",
+                    "gap_analysis",
+                    "causal_analysis",
+                    "credibility_score"
+                ]
+            },
+            "output_skills": [
+                "exec_summary",
+                "decision_matrix",
+                "visualization_spec"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "recency",
+                    "relevance",
+                    "coverage"
+                ],
+                "domain_specific": [
+                    "temporal_validity",
+                    "geographic_scope",
+                    "conflict_of_interest"
+                ]
+            },
+            "rubric_notes": "recency window: 6 months for market data. temporal_validity is critical \u2014 market conditions change fast. Prioritize primary data (earnings calls, SEC filings, official press releases) over analyst aggregations."
+        },
+        "policy_analysis": {
+            "label": "Policy Analysis",
+            "description": "Public policy research, legislation tracking, regulatory impact assessment, international relations",
+            "detection_signals": [
+                "policy",
+                "government",
+                "legislation",
+                "regulation",
+                "public",
+                "politics",
+                "reform",
+                "bill",
+                "amendment",
+                "agency",
+                "federal",
+                "state",
+                "international",
+                "treaty",
+                "geopolitical"
+            ],
+            "default_audience": "practitioner",
+            "default_output_format": "policy_brief",
+            "source_skills": {
+                "primary": [
+                    "gov_search",
+                    "news_archive",
+                    "academic_search"
+                ],
+                "secondary": [
+                    "legal_search",
+                    "social_search",
+                    "web_search",
+                    "financial_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "causal_analysis",
+                    "timeline_construct"
+                ],
+                "secondary": [
+                    "statistical_analysis",
+                    "contradiction_detect",
+                    "claim_verification",
+                    "trend_analysis"
+                ]
+            },
+            "output_skills": [
+                "exec_summary",
+                "report_generator",
+                "decision_matrix"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "coverage",
+                    "coherence",
+                    "source_authority"
+                ],
+                "domain_specific": [
+                    "geographic_scope",
+                    "temporal_validity",
+                    "conflict_of_interest",
+                    "methodological_soundness"
+                ]
+            },
+            "rubric_notes": "geographic_scope must be explicit in every node \u2014 a US policy finding does not transfer to EU context without citation. conflict_of_interest: think-tank funding must be disclosed."
+        },
+        "engineering_standards": {
+            "label": "Engineering / Standards",
+            "description": "Technical standards, system design, hardware/software specs, safety certifications, compliance",
+            "detection_signals": [
+                "engineering",
+                "standard",
+                "specification",
+                "ISO",
+                "IEEE",
+                "RFC",
+                "protocol",
+                "compliance",
+                "safety",
+                "certification",
+                "architecture",
+                "system design",
+                "hardware",
+                "embedded",
+                "manufacturing"
+            ],
+            "default_audience": "expert",
+            "default_output_format": "technical_report",
+            "source_skills": {
+                "primary": [
+                    "standards_search",
+                    "academic_search",
+                    "code_search"
+                ],
+                "secondary": [
+                    "patent_search",
+                    "forum_search",
+                    "web_search",
+                    "pdf_deep_extract"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "claim_verification",
+                    "gap_analysis"
+                ],
+                "secondary": [
+                    "contradiction_detect",
+                    "statistical_analysis",
+                    "timeline_construct"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "visualization_spec",
+                "decision_matrix"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "source_authority",
+                    "factual_grounding",
+                    "depth",
+                    "coverage"
+                ],
+                "domain_specific": [
+                    "temporal_validity",
+                    "methodological_soundness"
+                ]
+            },
+            "rubric_notes": "source_authority: official standards bodies (ISO, IEEE, IETF, NIST) outrank all other sources. temporal_validity critical \u2014 superseded standards must be flagged. Version numbers must be exact."
+        },
+        "historical_humanities": {
+            "label": "Historical / Humanities",
+            "description": "Historical analysis, cultural studies, philosophy, literature, archival research, biographical research",
+            "detection_signals": [
+                "history",
+                "historical",
+                "archive",
+                "century",
+                "war",
+                "civilization",
+                "culture",
+                "philosophy",
+                "literature",
+                "biography",
+                "movement",
+                "period",
+                "era",
+                "classical",
+                "ancient",
+                "medieval",
+                "battle",
+                "war",
+                "conflict",
+                "empire",
+                "revolution",
+                "dynasty",
+                "colonial",
+                "ancient",
+                "medieval",
+                "century",
+                "historical significance",
+                "World War",
+                "Cold War",
+                "siege"
+            ],
+            "default_audience": "student",
+            "default_output_format": "academic_paper",
+            "source_skills": {
+                "primary": [
+                    "book_search",
+                    "news_archive",
+                    "academic_search"
+                ],
+                "secondary": [
+                    "gov_search",
+                    "multimedia_search",
+                    "pdf_deep_extract",
+                    "translation"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "timeline_construct",
+                    "comparative_analysis",
+                    "translation"
+                ],
+                "secondary": [
+                    "entity_extraction",
+                    "citation_graph",
+                    "contradiction_detect",
+                    "causal_analysis"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "annotation_gen",
+                "bibliography_gen"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "source_authority",
+                    "factual_grounding",
+                    "coverage",
+                    "coherence"
+                ],
+                "domain_specific": [
+                    "temporal_validity",
+                    "geographic_scope",
+                    "methodological_soundness"
+                ]
+            },
+            "rubric_notes": "Primary sources (original texts, documents, firsthand accounts) outrank secondary analyses for source_authority. translation is required for non-English primary sources. temporal_validity for historical claims means correct period attribution, not recency."
+        },
+        "product_ux": {
+            "label": "Product / UX Research",
+            "description": "User research, product discovery, competitive product analysis, customer insights, design research",
+            "detection_signals": [
+                "product",
+                "user",
+                "UX",
+                "UI",
+                "design",
+                "customer",
+                "experience",
+                "feature",
+                "roadmap",
+                "persona",
+                "journey",
+                "usability",
+                "feedback",
+                "NPS",
+                "retention",
+                "churn",
+                "onboarding"
+            ],
+            "default_audience": "practitioner",
+            "default_output_format": "insights_brief",
+            "source_skills": {
+                "primary": [
+                    "web_search",
+                    "forum_search",
+                    "social_search"
+                ],
+                "secondary": [
+                    "academic_search",
+                    "video_search",
+                    "news_archive",
+                    "dataset_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "trend_analysis",
+                    "synthesis"
+                ],
+                "secondary": [
+                    "entity_extraction",
+                    "gap_analysis",
+                    "credibility_score",
+                    "sentiment_cluster"
+                ]
+            },
+            "output_skills": [
+                "exec_summary",
+                "visualization_spec",
+                "decision_matrix"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "relevance",
+                    "coverage",
+                    "coherence",
+                    "recency"
+                ],
+                "domain_specific": [
+                    "temporal_validity",
+                    "geographic_scope",
+                    "audience_calibration"
+                ]
+            },
+            "rubric_notes": "recency window: 12 months \u2014 user behaviour changes fast. geographic_scope must be explicit when drawing UX conclusions from non-representative regional samples. Avoid survey results without disclosed methodology."
+        },
+        "finance_investment": {
+            "label": "Finance / Investment",
+            "description": "Investment research, financial analysis, portfolio decisions, risk assessment, economic analysis",
+            "detection_signals": [
+                "investment",
+                "finance",
+                "stock",
+                "equity",
+                "fund",
+                "portfolio",
+                "earnings",
+                "valuation",
+                "risk",
+                "return",
+                "bond",
+                "macro",
+                "GDP",
+                "inflation",
+                "central bank",
+                "hedge",
+                "VC",
+                "PE"
+            ],
+            "default_audience": "expert",
+            "default_output_format": "investment_memo",
+            "source_skills": {
+                "primary": [
+                    "financial_search",
+                    "news_archive",
+                    "web_search"
+                ],
+                "secondary": [
+                    "academic_search",
+                    "gov_search",
+                    "dataset_search",
+                    "social_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "statistical_analysis",
+                    "trend_analysis",
+                    "comparative_analysis"
+                ],
+                "secondary": [
+                    "causal_analysis",
+                    "claim_verification",
+                    "credibility_score",
+                    "contradiction_detect"
+                ]
+            },
+            "output_skills": [
+                "exec_summary",
+                "decision_matrix",
+                "visualization_spec"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "recency",
+                    "cross_validation",
+                    "depth"
+                ],
+                "domain_specific": [
+                    "temporal_validity",
+                    "conflict_of_interest",
+                    "methodological_soundness"
+                ]
+            },
+            "rubric_notes": "conflict_of_interest: disclose analyst/firm relationships to covered securities. recency window: 1 month for market data, 1 quarter for fundamentals. NEVER provide explicit buy/sell recommendations \u2014 describe evidence only."
+        },
+        "general": {
+            "label": "General / Unknown",
+            "description": "Fallback domain when no specific domain is detected with confidence. Uses broad skill set.",
+            "detection_signals": [],
+            "default_audience": "layperson",
+            "default_output_format": "executive_brief",
+            "source_skills": {
+                "primary": [
+                    "web_search",
+                    "academic_search"
+                ],
+                "secondary": [
+                    "news_archive",
+                    "forum_search",
+                    "book_search",
+                    "video_search"
+                ]
+            },
+            "analysis_skills": {
+                "primary": [
+                    "comparative_analysis",
+                    "synthesis",
+                    "gap_analysis"
+                ],
+                "secondary": [
+                    "claim_verification",
+                    "credibility_score",
+                    "trend_analysis"
+                ]
+            },
+            "output_skills": [
+                "report_generator",
+                "exec_summary",
+                "explainer"
+            ],
+            "quality_axes": {
+                "universal": [
+                    "factual_grounding",
+                    "relevance",
+                    "coverage",
+                    "coherence"
+                ],
+                "domain_specific": [
+                    "audience_calibration"
+                ]
+            },
+            "rubric_notes": "audience_calibration is mandatory for general domain \u2014 output must be tuned to the detected audience (layperson vs expert). Prefer breadth over depth when domain is ambiguous."
+        }
+    },
+    "audience_output_rules": {
+        "layperson": {
+            "preferred_output_skills": [
+                "explainer",
+                "exec_summary"
+            ],
+            "avoid_skills": [
+                "bibliography_gen",
+                "annotation_gen"
+            ],
+            "synthesis_instruction": "Avoid jargon. Use analogies. Prioritize 'what does this mean' over 'what the sources say'.",
+            "depth_default": "shallow"
+        },
+        "student": {
+            "preferred_output_skills": [
+                "report_generator",
+                "bibliography_gen",
+                "annotation_gen"
+            ],
+            "avoid_skills": [
+                "decision_matrix"
+            ],
+            "synthesis_instruction": "Explain reasoning. Show how conclusions follow from evidence. Educational tone.",
+            "depth_default": "deep"
+        },
+        "practitioner": {
+            "preferred_output_skills": [
+                "report_generator",
+                "decision_matrix",
+                "annotation_gen"
+            ],
+            "avoid_skills": [
+                "explainer"
+            ],
+            "synthesis_instruction": "Assume domain competence. Focus on actionable findings and trade-offs.",
+            "depth_default": "deep"
+        },
+        "expert": {
+            "preferred_output_skills": [
+                "report_generator",
+                "bibliography_gen",
+                "visualization_spec"
+            ],
+            "avoid_skills": [
+                "explainer",
+                "exec_summary"
+            ],
+            "synthesis_instruction": "Maximum technical precision. Full methodological detail. Hedged claims with explicit uncertainty.",
+            "depth_default": "deep"
+        },
+        "executive": {
+            "preferred_output_skills": [
+                "exec_summary",
+                "decision_matrix",
+                "visualization_spec"
+            ],
+            "avoid_skills": [
+                "bibliography_gen",
+                "annotation_gen",
+                "explainer"
+            ],
+            "synthesis_instruction": "Lead with decision. Bottom line up front. Trade-offs in 3 bullets. No methodology detail unless asked.",
+            "depth_default": "shallow"
+        }
+    },
+    "skill_registry": {
+        "tier_1_retrieval": {
+            "web_search": {
+                "desc": "Open web search for recent info, blogs, news",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "academic_search": {
+                "desc": "arXiv, Semantic Scholar, PubMed, Google Scholar",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "code_search": {
+                "desc": "GitHub repos, READMEs, source inspection",
+                "cost": "low",
+                "latency": "medium"
+            },
+            "data_extraction": {
+                "desc": "Tables, PDFs, structured data extraction",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "patent_search": {
+                "desc": "USPTO, EPO, WIPO patent databases",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "legal_search": {
+                "desc": "Case law, statutes, regulations (CourtListener, LexisNexis)",
+                "cost": "high",
+                "latency": "medium"
+            },
+            "clinical_search": {
+                "desc": "ClinicalTrials.gov, PubMed, Cochrane, FDA databases",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "news_archive": {
+                "desc": "Reuters, AP, LexisNexis newspaper archives",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "financial_search": {
+                "desc": "EDGAR, earnings calls, Bloomberg, financial filings",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "standards_search": {
+                "desc": "ISO, IEEE, NIST, IETF RFCs, industry standards",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "forum_search": {
+                "desc": "Stack Overflow, Reddit, Hacker News, domain forums",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "video_search": {
+                "desc": "YouTube transcripts, conference talks, lectures",
+                "cost": "low",
+                "latency": "medium"
+            },
+            "dataset_search": {
+                "desc": "HuggingFace Hub, Kaggle, UCI, data.gov",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "gov_search": {
+                "desc": "Government websites, regulatory filings, public records",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "book_search": {
+                "desc": "Google Books, Internet Archive, Open Library",
+                "cost": "low",
+                "latency": "medium"
+            },
+            "social_search": {
+                "desc": "Public social media discourse, sentiment signals",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "pdf_deep_extract": {
+                "desc": "Dense document parsing: tables, footnotes, appendices",
+                "cost": "high",
+                "latency": "slow"
+            },
+            "multimedia_search": {
+                "desc": "Images, charts, diagrams from public sources",
+                "cost": "low",
+                "latency": "medium"
+            }
+        },
+        "tier_2_analysis": {
+            "synthesis": {
+                "desc": "Combine multiple node outputs into coherent summary",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "comparative_analysis": {
+                "desc": "Structured comparison across defined axes",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "gap_analysis": {
+                "desc": "Identify missing or unresolved elements",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "quality_check": {
+                "desc": "Evaluate node output against rubric axes",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "translation": {
+                "desc": "Translate non-English sources for analysis",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "entity_extraction": {
+                "desc": "Named entity recognition, relationship mapping",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "timeline_construct": {
+                "desc": "Build chronological event ordering from sources",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "citation_graph": {
+                "desc": "Map citation networks between papers/sources",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "contradiction_detect": {
+                "desc": "Flag contradictory claims across sources",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "claim_verification": {
+                "desc": "Fact-check specific assertions against sources",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "trend_analysis": {
+                "desc": "Identify topic evolution patterns over time",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "causal_analysis": {
+                "desc": "Distinguish correlation from causation in evidence",
+                "cost": "high",
+                "latency": "slow"
+            },
+            "hypothesis_gen": {
+                "desc": "Generate testable next-step research hypotheses",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "statistical_analysis": {
+                "desc": "Extract and evaluate numerical data from sources",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "credibility_score": {
+                "desc": "Score source credibility (0-1) by domain standards",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "fallback_router": {
+                "desc": "Retry failed nodes with alternate skill/source",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "meta_analysis": {
+                "desc": "Aggregate statistics across multiple studies",
+                "cost": "high",
+                "latency": "slow"
+            },
+            "sentiment_cluster": {
+                "desc": "Cluster sources by sentiment/opinion polarity",
+                "cost": "medium",
+                "latency": "medium"
+            }
+        },
+        "tier_3_output": {
+            "report_generator": {
+                "desc": "Long-form structured research report",
+                "cost": "high",
+                "latency": "slow"
+            },
+            "exec_summary": {
+                "desc": "Decision-oriented brief, BLUF format",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "bibliography_gen": {
+                "desc": "Formatted citations (APA/MLA/Bluebook/IEEE)",
+                "cost": "low",
+                "latency": "fast"
+            },
+            "decision_matrix": {
+                "desc": "Structured option comparison for decisions",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "explainer": {
+                "desc": "Audience-adapted accessible explanation",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "annotation_gen": {
+                "desc": "Annotated source list with critical notes",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "visualization_spec": {
+                "desc": "Chart/diagram specification for rendering",
+                "cost": "medium",
+                "latency": "medium"
+            },
+            "knowledge_delta": {
+                "desc": "What changed in this topic since a prior date",
+                "cost": "medium",
+                "latency": "medium"
+            }
+        }
+    },
+    "quality_axes": {
+        "universal": {
+            "factual_grounding": "Every claim traces to a cited source",
+            "source_authority": "Source is primary, peer-reviewed, or domain-authoritative",
+            "coverage": "All aspects of the node description are addressed",
+            "recency": "Sources are within N years (N specified per node)",
+            "cross_validation": "Key claims appear in \u22652 independent sources",
+            "relevance": "Output directly serves the core goal",
+            "coherence": "Output does not contradict other node outputs",
+            "depth": "Sufficient technical detail for the stated domain"
+        },
+        "domain_specific": {
+            "jurisdiction_relevance": "Legal: source is from the applicable legal jurisdiction",
+            "clinical_significance": "Medical: effect size and clinical meaning, not just p-value",
+            "replication_status": "Science: has the finding been independently replicated?",
+            "methodological_soundness": "Research: study design is appropriate for the claim",
+            "conflict_of_interest": "Journalism/Finance/Medical: funding and affiliations disclosed",
+            "temporal_validity": "Source reflects current state (law, market, policy, standard)",
+            "geographic_scope": "Finding applies to the relevant geography, not generalised",
+            "audience_calibration": "Output complexity matches the stated audience level"
+        }
+    },
+    "fallback_chains": {
+        "academic_search": [
+            "web_search",
+            "book_search",
+            "forum_search"
+        ],
+        "legal_search": [
+            "gov_search",
+            "academic_search",
+            "pdf_deep_extract"
+        ],
+        "clinical_search": [
+            "academic_search",
+            "gov_search",
+            "web_search"
+        ],
+        "financial_search": [
+            "news_archive",
+            "web_search",
+            "gov_search"
+        ],
+        "standards_search": [
+            "academic_search",
+            "gov_search",
+            "pdf_deep_extract"
+        ],
+        "patent_search": [
+            "web_search",
+            "academic_search"
+        ],
+        "news_archive": [
+            "web_search",
+            "social_search"
+        ],
+        "code_search": [
+            "web_search",
+            "forum_search"
+        ],
+        "pdf_deep_extract": [
+            "data_extraction",
+            "web_search"
+        ],
+        "book_search": [
+            "academic_search",
+            "web_search"
+        ],
+        "dataset_search": [
+            "academic_search",
+            "web_search"
+        ],
+        "video_search": [
+            "web_search",
+            "forum_search"
+        ],
+        "social_search": [
+            "web_search",
+            "news_archive"
+        ]
+    }
+}
