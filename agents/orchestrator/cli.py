@@ -10,9 +10,26 @@ CLI entry point — run from project root:
 """
 import asyncio
 import sys
+from datetime import datetime
+from pathlib import Path
 
 from .runner import run_orchestrator
 from .pipeline import run_pipeline
+from render import ReportHtmlRenderer
+
+
+def _save_report(report_md: str, query: str, metadata: dict) -> None:
+    """
+    Writes the Markdown report to final_report.md and the rendered HTML to
+    final_report.html.  ReportHtmlRenderer embeds the Markdown client-side so
+    KaTeX + Marked.js handle math and formatting in the browser.
+    """
+    Path("final_report.md").write_text(report_md, encoding="utf-8")
+    print("Saved  →  final_report.md")
+
+    html = ReportHtmlRenderer().render(report_md, query=query, metadata=metadata)
+    Path("final_report.html").write_text(html, encoding="utf-8")
+    print("Saved  →  final_report.html")
 
 
 def _legacy_run(problem: str, depth: str, audience: str, lang: str) -> None:
@@ -51,19 +68,24 @@ def _legacy_run(problem: str, depth: str, audience: str, lang: str) -> None:
             if ctx.credibility_scores:
                 avg = sum(ctx.credibility_scores.values()) / len(ctx.credibility_scores)
                 cred_md = f"\n\n---\n\n*Mean source credibility: {avg:.2f} / 1.00*"
-            report_content = (
+            report_md = (
                 f"# Research Report\n\n**Query:** {problem}\n\n---\n\n"
                 f"{content}{gaps_md}{bib_md}{cred_md}\n"
             )
         else:
-            report_content = (
+            report_md = (
                 f"# Research Report\n\n**Query:** {problem}\n\n"
                 "> No output document was generated — the pipeline may have failed.\n"
             )
 
-        with open("final_report.md", "w", encoding="utf-8") as f:
-            f.write(report_content)
-        print("Saved to final_report.md")
+        _save_report(
+            report_md,
+            query=problem,
+            metadata={
+                "audience": audience or "practitioner",
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            },
+        )
 
     asyncio.run(main_run())
 
@@ -78,9 +100,15 @@ def _strength_run(problem: str, strength: int, audience: str, lang: str) -> None
             audience=audience or "practitioner",
             output_language=lang,
         )
-        with open("final_report.md", "w", encoding="utf-8") as f:
-            f.write(report_md)
-        print("Saved to final_report.md")
+        _save_report(
+            report_md,
+            query=problem,
+            metadata={
+                "strength": strength,
+                "audience": audience or "practitioner",
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            },
+        )
 
     asyncio.run(main_run())
 
