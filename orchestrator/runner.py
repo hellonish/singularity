@@ -54,6 +54,37 @@ def run_gap_analysis(plan: Plan, ctx: ExecutionContext) -> list[GapItem]:
     return gaps
 
 
+def _clear_for_reexecution(plan: Plan, ctx: ExecutionContext) -> set[str]:
+    """
+    After a replan, clear PARTIAL/FAILED nodes and all their transitive
+    dependents so the executor treats them as unresolved and re-runs them.
+    Returns the set of node_ids cleared.
+    """
+    to_clear = {
+        node.node_id for node in plan.nodes
+        if ctx.node_status.get(node.node_id) in
+           (NodeStatus.PARTIAL, NodeStatus.FAILED, NodeStatus.SKIPPED, NodeStatus.BLOCKED)
+    }
+
+    # Propagate downstream: any node whose dep is cleared must also be cleared
+    changed = True
+    while changed:
+        changed = False
+        for node in plan.nodes:
+            if node.node_id not in to_clear:
+                if any(dep in to_clear for dep in node.depends_on):
+                    to_clear.add(node.node_id)
+                    changed = True
+
+    for node in plan.nodes:
+        if node.node_id in to_clear:
+            ctx.node_status.pop(node.node_id, None)
+            ctx.results.pop(node.output_slot, None)
+            ctx.credibility_scores.pop(node.output_slot, None)
+
+    return to_clear
+
+
 def check_termination(plan: Plan, ctx: ExecutionContext) -> bool:
     all_ids = {n.node_id for n in plan.nodes}
     ok_ids  = {nid for nid, s in ctx.node_status.items()
@@ -170,6 +201,12 @@ async def run_orchestrator(
             print(f"\n[WARN] Replan loop detected on {looping} — stopping with partial results.")
             break
 
+        # Clear partial/failed nodes (and their dependents) so the next round
+        # actually re-executes them instead of treating them as resolved.
+        cleared = _clear_for_reexecution(plan, ctx)
+        if cleared:
+            print(f"  Cleared for re-execution: {sorted(cleared)}")
+
         if plan.metadata.node_count > limits["max_nodes"]:
             print(f"  [WARN] Clamping plan from {plan.metadata.node_count} → {limits['max_nodes']} nodes.")
             plan.nodes = plan.nodes[:limits["max_nodes"]]
@@ -191,6 +228,7 @@ async def run_orchestrator(
 
     final_node = next((n for n in reversed(plan.nodes) if n.skill in OUTPUT_SKILLS), None)
     if final_node and final_node.output_slot in ctx.results:
+        ctx.final_output_slot = final_node.output_slot
         print(f"\nFinal output slot: '{final_node.output_slot}'")
         print(json.dumps(ctx.results[final_node.output_slot], indent=2, default=str))
 

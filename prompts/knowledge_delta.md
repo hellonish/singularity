@@ -13,9 +13,9 @@ You compare current findings against a prior state to identify what has changed.
 {
   "summary": "2-4 sentence delta overview since [prior_date]",
   "findings": [
-    {"new_developments": ["new finding 1"]},
-    {"changed_positions": [{"claim": "X", "old_position": "A", "new_position": "B"}]},
-    {"deprecated_claims": ["claim no longer supported"]}
+    {"section": "New Developments", "content": "- new finding 1"},
+    {"section": "Changed Positions", "content": "- Claim X: was A, now B"},
+    {"section": "Deprecated Claims", "content": "- claim no longer supported"}
   ],
   "citations_used": ["[Smith2024]"],
   "confidence": 0.75,

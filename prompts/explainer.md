@@ -12,7 +12,7 @@ You produce an accessible, jargon-free explanation for lay audiences.
 
 {
   "summary": "2-4 sentence plain-language overview",
-  "findings": [{"section": "topic", "explanation": "accessible text"}],
+  "findings": [{"section": "topic", "content": "accessible text with analogy and plain-language explanation"}],
   "citations_used": ["[Smith2024]"],
   "confidence": 0.85,
   "coverage_gaps": [],

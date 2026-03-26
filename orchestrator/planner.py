@@ -15,29 +15,69 @@ from .models import GapItem, Plan, PlanMetadata, PlanNode
 # Parser
 # ---------------------------------------------------------------------------
 
+def _find_dag_block(obj, _depth: int = 0) -> dict | None:
+    """
+    Recursively search any parsed JSON value for a dict that has both
+    'nodes' (a list) and 'metadata' (a dict). Works at any nesting depth.
+    """
+    if _depth > 8:
+        return None
+    if isinstance(obj, dict):
+        if isinstance(obj.get("nodes"), list) and isinstance(obj.get("metadata"), dict):
+            return obj
+        for val in obj.values():
+            hit = _find_dag_block(val, _depth + 1)
+            if hit:
+                return hit
+    elif isinstance(obj, list):
+        for item in obj:
+            hit = _find_dag_block(item, _depth + 1)
+            if hit:
+                return hit
+    return None
+
+
 def parse_plan(markdown: str) -> Plan:
     """Extract the JSON DAG block from the planner's raw Markdown response."""
-    # First try: look for a fenced ```json block
     dag_block: dict | None = None
-    for raw in re.findall(r"```json\s*\n(.*?)\n```", markdown, re.DOTALL):
-        try:
-            parsed = json.loads(raw)
-            if "nodes" in parsed and "metadata" in parsed:
-                dag_block = parsed
-                break
-        except json.JSONDecodeError:
-            continue
+    _decoder = json.JSONDecoder()
 
-    # Second try: response starts directly with a JSON object
-    if dag_block is None:
-        text = markdown.strip()
-        if text.startswith("{"):
+    def _try_parse(text: str) -> dict | None:
+        """Try json.loads then raw_decode; return _find_dag_block result or None."""
+        for loader in (
+            lambda t: json.loads(t),
+            lambda t: _decoder.raw_decode(t)[0],
+        ):
             try:
-                parsed, _ = json.JSONDecoder().raw_decode(text)
-                if isinstance(parsed, dict) and "nodes" in parsed and "metadata" in parsed:
-                    dag_block = parsed
-            except json.JSONDecodeError:
-                pass
+                parsed = loader(text)
+                hit = _find_dag_block(parsed)
+                if hit:
+                    return hit
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return None
+
+    # Strategy 1: any fenced ```json block in the response
+    for raw_block in re.findall(r"```(?:json)?\s*\n(.*?)\n```", markdown, re.DOTALL):
+        dag_block = _try_parse(raw_block.strip())
+        if dag_block:
+            break
+
+    # Strategy 2: the whole text is / starts with a JSON object
+    if not dag_block:
+        dag_block = _try_parse(markdown.strip())
+
+    # Strategy 3: scan every `{` position and try parsing from there.
+    # Catches cases where the outer JSON is malformed but an inner object is valid.
+    if not dag_block:
+        for m in re.finditer(r'\{', markdown):
+            try:
+                candidate, _ = _decoder.raw_decode(markdown, m.start())
+                dag_block = _find_dag_block(candidate)
+                if dag_block:
+                    break
+            except (json.JSONDecodeError, ValueError):
+                continue
 
     if dag_block is None:
         raise ValueError(

@@ -19,6 +19,7 @@ class ExecutionContext:
     language: str                        = "en"
     depth: str                           = "standard"  # "shallow" | "standard" | "deep"
     audience: str                        = ""
+    final_output_slot: str | None        = None  # Set by runner after identifying the report node
     citation_registry: Any               = field(default=None)  # CitationRegistry; injected at run start
 
     def __post_init__(self) -> None:

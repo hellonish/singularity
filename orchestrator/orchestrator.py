@@ -34,11 +34,20 @@ if __name__ == "__main__":
         ctx = await run_orchestrator(problem, audience=args.audience, output_language=args.lang, depth=args.depth)
 
         # ── Find the output document ──────────────────────────────────
+        # Prefer the slot explicitly identified by the runner (report_generator,
+        # exec_summary, etc.) — never a bibliography or visualization node.
         output_data = None
-        for slot, data in ctx.results.items():
-            if isinstance(data, dict) and "format" in data and "content" in data:
-                output_data = data
-                break
+        if ctx.final_output_slot and ctx.final_output_slot in ctx.results:
+            output_data = ctx.results[ctx.final_output_slot]
+        else:
+            # Fallback: scan for any primary output skill result
+            _PRIMARY_OUTPUT_SKILLS = {
+                "report_generator", "exec_summary", "explainer",
+                "decision_matrix", "knowledge_delta",
+            }
+            for slot, data in ctx.results.items():
+                if isinstance(data, dict) and data.get("skill_name") in _PRIMARY_OUTPUT_SKILLS:
+                    output_data = data  # last match wins (most downstream)
 
         # ── Build the Markdown report ─────────────────────────────────
         if output_data:

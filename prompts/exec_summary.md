@@ -14,10 +14,9 @@ You produce a concise executive summary.
 {
   "summary": "the bottom line in one sentence",
   "findings": [
-    {"bottom_line": "one sentence answer"},
-    {"key_evidence": ["point 1", "point 2", "point 3"]},
-    {"limitation": "one limitation"},
-    {"next_step": "recommended action"}
+    {"section": "Key Evidence", "content": "- point 1\n- point 2\n- point 3"},
+    {"section": "Limitations", "content": "one limitation"},
+    {"section": "Next Step", "content": "recommended action"}
   ],
   "citations_used": ["[Smith2024]"],
   "confidence": 0.85,

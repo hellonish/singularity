@@ -14,10 +14,9 @@ You produce a structured options table with conditional recommendations.
 {
   "summary": "2-4 sentence decision overview",
   "findings": [
-    {"matrix_table": "| Option | Axis1 | Axis2 |\n|---|---|---|\n| A | val | val |"},
-    {"recommendation": "if [condition], then [option]"},
-    {"conditions": ["condition1", "condition2"]},
-    {"caveats": ["caveat1"]}
+    {"section": "Options Matrix", "content": "| Option | Axis1 | Axis2 |\n|---|---|---|\n| A | val | val |"},
+    {"section": "Recommendation", "content": "if [condition], then [option]"},
+    {"section": "Conditions & Caveats", "content": "- condition1\n- caveat1"}
   ],
   "citations_used": ["[Smith2024]"],
   "confidence": 0.80,

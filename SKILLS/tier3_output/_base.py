@@ -66,7 +66,18 @@ class BaseOutputSkill(SkillBase):
                 sections.append(f"## Executive Summary\n\n{summary}")
             for item in data.get("findings", []):
                 title = item.get("section", "")
-                body = item.get("content", "")
+                body = item.get("content", "") or item.get("explanation", "")
+                if not body:
+                    # Fallback: serialize any non-section string/list values
+                    extra_parts = []
+                    for k, v in item.items():
+                        if k == "section":
+                            continue
+                        if isinstance(v, list):
+                            extra_parts.append("\n".join(f"- {x}" if not str(x).startswith("-") else str(x) for x in v))
+                        elif isinstance(v, str):
+                            extra_parts.append(v)
+                    body = "\n\n".join(extra_parts)
                 if title or body:
                     sections.append(f"## {title}\n\n{body}")
 
