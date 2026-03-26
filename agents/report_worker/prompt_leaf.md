@@ -56,7 +56,7 @@ Respond ONLY with this JSON. No prose outside the JSON.
   "section_node_id": "n12",
   "section_title": "...",
   "tier3_selected": "report_generator",
-  "content": "## Section Title\n\nFull markdown content of the section...",
+  "content": "Full markdown content starting directly with body text — no top-level heading...",
   "word_count": 420,
   "citations_used": ["[Smith2024]", "[Jones2023]"],
   "coverage_gaps": []
@@ -64,9 +64,21 @@ Respond ONLY with this JSON. No prose outside the JSON.
 ```
 
 ## Writing Rules
-1. Use evidence from the provided chunks — every factual claim must trace to a chunk
-2. Do not repeat content that will appear in sibling sections
-3. Use inline citation format: "...as shown by Smith [Smith2024]..."
-4. Target word count: 300–600 words for subsections, 500–900 for sections
-5. Write for the stated audience — match technical depth accordingly
-6. Be specific: name studies, quote statistics, cite dates
+1. Do NOT begin `content` with the section heading — the report assembler injects it at the correct
+   hierarchy level. Start your content directly with a paragraph or prose.
+   If you need internal sub-headings, use heading levels deeper than the `section_heading` marker
+   provided in the prompt (e.g., if your section is `##`, use `###` or `####` inside).
+2. Use evidence from the provided chunks — every factual claim must trace to a chunk
+3. Do not repeat content that will appear in sibling sections
+4. Use the pre-assigned citation key shown in each chunk header ("Cite as: [Key]").
+   Use it verbatim in your inline citations: "...as shown by the study [ComplexityMatters]..."
+   Do NOT invent your own citation keys — use only the keys provided in chunk headers.
+5. Target word count: 300–600 words for subsections, 500–900 for sections
+6. Write for the stated audience — match technical depth accordingly
+7. Be specific: name studies, quote statistics, cite dates
+8. Math & statistics formatting — write all math as plain readable text, no LaTeX or special syntax:
+   - Use `R² = 0.94` not `$R^2 = 0.94$`
+   - Use `p < 0.05` not `$p < 0.05$`
+   - Use `mean ± SD` for variation; unicode symbols are fine (α, β, μ, σ, ±, ², ³)
+   - Use `3/4` or `3 out of 4` for fractions
+   - Spell out or use unicode for Greek letters: `α = 0.05` not `$\alpha = 0.05$`

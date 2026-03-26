@@ -41,8 +41,20 @@ def _make_client(model: str) -> GrokClient:
     return GrokClient(model_name=model)
 
 
-def _format_report(tree: ReportTree, query: str, bib_md: str, cred_avg: float | None) -> str:
-    """Assemble the final Markdown document from the written tree."""
+def _format_report(
+    tree: ReportTree,
+    query: str,
+    bib_md: str,
+    cred_avg: float | None,
+    source_map: dict[str, dict] | None = None,
+) -> str:
+    """
+    Assemble the final Markdown document from the written tree.
+
+    Appends a Reference List built from `source_map` (citation_id → {title, url})
+    collected by the workers. Each entry links the inline citation key used in the
+    section content back to its actual source URL.
+    """
     parts = [
         f"# Research Report\n\n**Query:** {query}\n\n---\n",
     ]
@@ -57,6 +69,21 @@ def _format_report(tree: ReportTree, query: str, bib_md: str, cred_avg: float | 
             _walk(child.node_id, depth + 1)
 
     _walk(tree.root.node_id, 1)
+
+    if source_map:
+        ref_lines: list[str] = []
+        for cite_id in sorted(source_map.keys()):
+            info = source_map[cite_id]
+            title = info.get("title", "")
+            url   = info.get("url", "")
+            if url and title:
+                ref_lines.append(f"- {cite_id}: [{title}]({url})")
+            elif url:
+                ref_lines.append(f"- {cite_id}: {url}")
+            elif title:
+                ref_lines.append(f"- {cite_id}: {title}")
+        if ref_lines:
+            parts.append("\n---\n\n## Reference List\n\n" + "\n".join(ref_lines))
 
     if bib_md.strip():
         parts.append(f"\n---\n\n## References\n\n{bib_md}")
@@ -130,11 +157,14 @@ async def _phase_c(
     audience: str,
     query: str,
     vs: VectorStoreClient,
-) -> None:
+) -> dict[str, dict]:
     """
     Spawn one ReportWorkerAgent per node.
     Execute bottom-up: deepest level first, root last.
     Workers at the same depth level run in parallel.
+
+    Returns a merged source_map (citation_id → {title, url}) collected from
+    all workers, used by the assembler to build the Reference List.
     """
     print(f"\n[Phase C] Writing — {len(tree.nodes)} sections, "
           f"{len(tree.leaves())} leaves")
@@ -169,6 +199,12 @@ async def _phase_c(
                   f"→ {result.word_count} words, {len(result.citations_used)} citations")
 
         await asyncio.gather(*[_write_node(n) for n in level_nodes])
+
+    # Aggregate source maps from all nodes (written in-place by workers)
+    merged: dict[str, dict] = {}
+    for node in tree.nodes:
+        merged.update(node.source_map)
+    return merged
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +260,7 @@ async def run_pipeline(
     )
 
     # ── Phase C ───────────────────────────────────────────────────────
-    await _phase_c(
+    source_map = await _phase_c(
         tree=tree,
         run_id=active_run_id,
         strength=sc,
@@ -244,7 +280,7 @@ async def run_pipeline(
     if ctx.credibility_scores:
         cred_avg = sum(ctx.credibility_scores.values()) / len(ctx.credibility_scores)
 
-    report_md = _format_report(tree, query, bib_md, cred_avg)
+    report_md = _format_report(tree, query, bib_md, cred_avg, source_map=source_map)
 
     total_words = sum(n.word_count for n in tree.nodes)
     print(f"\n{'=' * 65}")

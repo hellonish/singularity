@@ -58,7 +58,7 @@ Respond ONLY with this JSON.
   "section_node_id": "n5",
   "section_title": "...",
   "tier3_selected": "exec_summary",
-  "content": "## Chapter Title\n\nFraming paragraph...\n\nConnective synthesis...",
+  "content": "Framing paragraph starting directly with body text — no top-level heading...\n\nConnective synthesis...",
   "word_count": 220,
   "citations_used": ["[Smith2024]"],
   "coverage_gaps": ["aspect X was not covered due to limited sources"]
@@ -66,8 +66,16 @@ Respond ONLY with this JSON.
 ```
 
 ## Writing Rules
-1. Parent sections are shorter than leaf sections: 150–350 words
-2. No new factual claims without a citation — if you add something, it must
-   come from the provided Qdrant chunks
-3. Avoid starting with "This chapter covers..." — open with the intellectual question
-4. Write for the stated audience
+1. Do NOT begin `content` with the section heading — the report assembler injects it at the
+   correct hierarchy level. Start your content directly with a paragraph or prose.
+2. Parent sections are shorter than leaf sections: 150–350 words
+3. No new factual claims without a citation — if you add something, it must
+   come from the provided Qdrant chunks. Use the pre-assigned citation key shown in
+   each chunk header ("Cite as: [Key]") verbatim. Do NOT invent citation keys.
+4. Avoid starting with "This chapter covers..." — open with the intellectual question
+5. Write for the stated audience
+6. Math & statistics formatting — write all math as plain readable text, no LaTeX or special syntax:
+   - Use `R² = 0.94` not `$R^2 = 0.94$`
+   - Use `p < 0.05` not `$p < 0.05$`
+   - Use unicode symbols where helpful (α, β, μ, σ, ±, ², ³)
+   - Spell out or use unicode for Greek letters: `α = 0.05` not `$\alpha = 0.05$`

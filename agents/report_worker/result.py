@@ -19,3 +19,4 @@ class WorkerResult:
     qdrant_chunks_used: list[int]       # chunk indices referenced
     children_consumed: list[str]        # node_ids of children (parent workers only)
     coverage_gaps: list[str] = field(default_factory=list)
+    source_map: dict = field(default_factory=dict)  # citation_id → {title, url}

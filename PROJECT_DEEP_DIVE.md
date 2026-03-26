@@ -2,6 +2,8 @@
 ## A Universal Research Agent: Architecture, Challenges, and Agentic AI Patterns
 
 > **Purpose:** This report is a complete technical reference for the Singularity project. It is written to serve as both a post-mortem of how the system was designed and debugged, and as a study guide for understanding modern agentic AI systems from first principles.
+>
+> **Last updated:** March 2026. Section 3 and the Appendix reflect the current module layout under `agents/`. The project now has two execution modes: Legacy DAG (`--depth`) and Phase 5 Strength-Based Pipeline (`--strength`).
 
 ---
 
@@ -30,10 +32,14 @@
 
 Singularity is a **universal research agent** — a system that takes a plain-English research question and autonomously produces a comprehensive, cited, audience-calibrated report on it.
 
-You run it like this:
+You run it in one of two modes:
 
 ```bash
-python -m orchestrator.orchestrator "research about spurious correlations in machine learning" --depth deep
+# Legacy DAG mode (--depth)
+python -m agents.orchestrator.cli "research about spurious correlations in ML" --depth deep
+
+# Phase 5 strength-based product mode (--strength 1–10)
+python -m agents.orchestrator.cli "research about spurious correlations in ML" --strength 7 --audience expert
 ```
 
 It then:
@@ -45,7 +51,7 @@ It then:
 - Generates a formatted report with inline citations, a bibliography, and a credibility score
 - If tasks fail, it re-plans and tries again — up to 5 rounds for deep mode
 
-The system has **36 modular skills**, **14 data source connectors**, **11 domain bundles**, **3 LLM backends** (Grok, Gemini, DeepSeek), and a complete citation registry with stable `[AuthorYYYY]` citation IDs.
+The system has **36 modular skills**, **14 data source connectors**, **11 domain bundles**, **3 LLM backends** (Grok, Gemini, DeepSeek), a **Qdrant vector store** for evidence retrieval, and a citation tracking system that generates a Reference List mapping inline citation keys to source URLs.
 
 ### Why build this?
 
@@ -127,16 +133,18 @@ Every major design decision in Singularity is a response to one of these tension
 
 ## 3. System Architecture Overview
 
+The project has two execution modes that share the same skills, tools, and LLM layer.
+
+### 3A. Legacy DAG Mode (`--depth`)
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        CLI Entry Point                          │
-│                    orchestrator/orchestrator.py                 │
+│                 CLI — agents/orchestrator/cli.py                │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │
+                                │ _legacy_run()
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                         RUNNER                                  │
-│                     orchestrator/runner.py                      │
+│            RUNNER — agents/orchestrator/runner.py               │
 │                                                                 │
 │  ┌────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
 │  │  Planner   │  │   Executor   │  │    Gap Analyzer        │  │
@@ -148,62 +156,79 @@ Every major design decision in Singularity is a response to one of these tension
           │                     │                     │
           ▼                     ▼                     ▼
 ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│    PLANNER       │  │   EXECUTOR       │  │  EXECUTION CTX   │
-│ planner.py       │  │  executor.py     │  │  context.py      │
-│                  │  │                  │  │                  │
-│ • Calls Grok LLM │  │ FallbackRouter   │  │ • results dict   │
-│ • Parses JSON    │  │ execute_node()   │  │ • node statuses  │
-│ • Returns Plan   │  │ execute_wave()   │  │ • credibility    │
-└──────────────────┘  └────────┬─────────┘  │ • citations      │
-                               │            └──────────────────┘
+│    PLANNER       │  │   EXECUTOR       │  │  ExecutionContext │
+│ agents/planner/  │  │ agents/          │  │  models.py       │
+│   planner.py     │  │ orchestrator/    │  │                  │
+│                  │  │ executor.py      │  │ • results dict   │
+│ • Calls Grok LLM │  │                  │  │ • node statuses  │
+│ • Parses JSON    │  │ FallbackRouter   │  │ • credibility    │
+│ • Returns Plan   │  │ execute_wave()   │  │ • citations      │
+└──────────────────┘  └────────┬─────────┘  └──────────────────┘
                                ▼
               ┌────────────────────────────────┐
-              │           SKILLS               │
-              │                                │
+              │      SKILLS (SKILLS/)          │
               │  Tier 1: Retrieval (18)        │
-              │  ├── academic_search           │
-              │  ├── code_search               │
-              │  └── dataset_search, ...       │
-              │                                │
               │  Tier 2: Analysis (18)         │
-              │  ├── synthesis                 │
-              │  ├── meta_analysis             │
-              │  └── contradiction_detect, ... │
-              │                                │
               │  Tier 3: Output (8)            │
-              │  ├── report_generator          │
-              │  └── exec_summary, ...         │
               └────────────────────────────────┘
-                               │
                                ▼
               ┌────────────────────────────────┐
               │           TOOLS (14)           │
               │  arXiv, PubMed, GitHub,        │
-              │  HuggingFace, SEC EDGAR,       │
-              │  CourtListener, YouTube, ...   │
+              │  HuggingFace, SEC EDGAR, ...   │
               └────────────────────────────────┘
+```
+
+### 3B. Phase 5 Strength-Based Pipeline (`--strength 1–10`)
+
+```
+CLI _strength_run()
+        │
+        ▼
+  run_pipeline()  [agents/orchestrator/pipeline.py]
+        │
+        ├── Phase A: Retrieval
+        │     Retriever → skill fan-out → Qdrant vector store
+        │
+        ├── Phase B: Structure Planning
+        │     3× ReportManagerAgent (parallel proposals)
+        │           └── ReportLeadAgent (final tree selection)
+        │
+        └── Phase C: Writing (bottom-up)
+              ReportWorkerAgent per SectionNode
+                    ├── Call 1: Multi-Analysis (tier-2 skills)
+                    ├── Call 2: Section Write (tier-3 output skill)
+                    └── Stores content + source_map on SectionNode
+                          ↓
+              _format_report() → Reference List from source_map
 ```
 
 ### Module Inventory
 
-| Module | File | Responsibility |
+| Module | Path | Responsibility |
 |---|---|---|
-| CLI Entry | `orchestrator/orchestrator.py` | Argument parsing, final Markdown assembly, file write |
-| Runner | `orchestrator/runner.py` | Main loop: plan → execute → gap-analyze → replan |
-| Planner | `orchestrator/planner.py` | LLM call to generate/update DAG, JSON parsing |
-| Executor | `orchestrator/executor.py` | FallbackRouter, wave execution, node execution |
-| Context | `orchestrator/context.py` | Shared mutable state for entire run |
-| Models | `orchestrator/models.py` | PlanNode, Plan, NodeStatus, GapItem enums |
-| Domain | `orchestrator/domain.py` | Domain detection, fallback chain lookup |
-| Config | `orchestrator/config.py` | All tunable constants in one place |
-| Skills | `SKILLS/tier*/*/implementation.py` | 36 skill implementations |
-| Tools | `tools/*.py` | 14 API connectors |
-| Budget | `context/budget.py` | Context window management |
-| Citations | `citations/registry.py` | Source tracking and ID generation |
-| Contracts | `contracts/skill_contracts.py` | Pydantic data shapes for all outputs |
-| LLM | `llm/*.py` | Grok, Gemini, DeepSeek clients |
-| Prompts | `prompts/*.md` | System prompts for all LLM-based skills |
-| Domain Registry | `planner/domain_registry.json` | 11 domain bundles |
+| CLI Entry | `agents/orchestrator/cli.py` | Argument parsing, mode dispatch, `final_report.md` write |
+| Runner (legacy) | `agents/orchestrator/runner.py` | DAG loop: plan → execute → gap-analyze → replan |
+| Pipeline (Phase 5) | `agents/orchestrator/pipeline.py` | Phases A/B/C, assembles final Markdown + Reference List |
+| Planner | `agents/planner/planner.py` | LLM call to generate/update DAG; `Planner`, `parse_plan()` |
+| Domain Registry | `agents/planner/domain_registry.py` | Domain detection, fallback chains, audience rules |
+| Executor | `agents/orchestrator/executor.py` | `FallbackRouter`, `execute_wave()`, `execute_node()` |
+| Strength | `agents/orchestrator/strength.py` | `StrengthConfig` — maps 1–10 to retrieval counts, section range |
+| Retriever | `agents/retriever/retriever.py` | LLM JSON plan of `skill_queries`; fan-out into Qdrant |
+| Report Manager | `agents/report_manager/agent.py` | One hierarchical `ReportTree` proposal per instance |
+| Report Lead | `agents/report_lead/agent.py` | Merges 3 proposals into the final `ReportTree` |
+| Report Worker | `agents/report_worker/agent.py` | 2-call writer per section node; builds `source_map` for citations |
+| Section Node | `agents/report_manager/section_node.py` | Data model: title, content, citations, `source_map` |
+| Report Tree | `agents/report_manager/report_tree.py` | Tree model; `topological_levels()` for bottom-up writing |
+| Models | `models.py` | All data contracts: `PlanNode`, `Plan`, `ExecutionContext`, `DocumentChunk`, etc. |
+| Config | `agents/orchestrator/config.py` | All tunable constants (models, limits, paths) |
+| Skills | `SKILLS/tier*/*/` | 36 skill implementations across 3 tiers |
+| Tools | `tools/*.py` | 14 API connectors (arXiv, PubMed, GitHub, etc.) |
+| Vector Store | `vector_store/client.py` | Qdrant client; in-memory fallback; topic cache |
+| Budget | `context/budget.py` | `ContextBudgetManager` — context window budgeting |
+| Citations | `citations/registry.py` | `CitationRegistry` — stable `[AuthorYYYY]` IDs (legacy mode) |
+| LLM | `llm/*.py` | `GrokClient`, `GeminiClient`, `DeepSeekClient` |
+| Domain Registry JSON | `agents/planner/domain_registry.json` | 11 domain bundles, fallback chains, skill metadata |
 
 ---
 
@@ -1724,22 +1749,34 @@ The entire pipeline uses `asyncio`. The benefit is real: in Wave 0, all 6 retrie
 
 | File | Lines | Key Exports |
 |---|---|---|
-| `orchestrator/runner.py` | ~195 | `run_orchestrator()`, `run_gap_analysis()`, `detect_replan_loop()` |
-| `orchestrator/planner.py` | ~150 | `Planner`, `parse_plan()` |
-| `orchestrator/executor.py` | ~90 | `FallbackRouter`, `execute_wave()` |
-| `orchestrator/context.py` | ~60 | `ExecutionContext` |
-| `orchestrator/models.py` | ~110 | `PlanNode`, `Plan`, `NodeStatus`, `GapItem` |
-| `orchestrator/domain.py` | ~50 | `DomainRegistry` |
-| `orchestrator/config.py` | ~42 | All constants |
+| `agents/orchestrator/cli.py` | ~140 | `_legacy_run()`, `_strength_run()` |
+| `agents/orchestrator/runner.py` | ~239 | `run_orchestrator()`, `run_gap_analysis()`, `detect_replan_loop()` |
+| `agents/orchestrator/pipeline.py` | ~293 | `run_pipeline()`, `_format_report()`, `_phase_c()` |
+| `agents/orchestrator/executor.py` | ~41 | `execute_node()`, `execute_wave()` |
+| `agents/orchestrator/fallback_router.py` | ~59 | `FallbackRouter` |
+| `agents/orchestrator/strength.py` | ~106 | `StrengthConfig` |
+| `agents/orchestrator/config.py` | ~47 | All constants |
+| `agents/planner/planner.py` | ~206 | `Planner`, `parse_plan()` |
+| `agents/planner/domain_registry.py` | ~50 | `DomainRegistry` |
+| `agents/retriever/retriever.py` | ~119 | `Retriever`, `run_fanout()` |
+| `agents/report_manager/agent.py` | ~70 | `ReportManagerAgent` |
+| `agents/report_manager/report_tree.py` | ~157 | `ReportTree`, `topological_levels()` |
+| `agents/report_manager/section_node.py` | ~25 | `SectionNode` (content, citations, source_map) |
+| `agents/report_lead/agent.py` | ~74 | `ReportLeadAgent` |
+| `agents/report_worker/agent.py` | ~215 | `ReportWorkerAgent`, `_make_citation_id()`, `_format_chunks()` |
+| `agents/report_worker/result.py` | ~25 | `WorkerResult` (includes source_map) |
+| `models.py` | ~477 | All data models (unified) |
 | `SKILLS/tier1_retrieval/_base.py` | ~120 | `BaseRetrievalSkill`, `_to_query()` |
 | `SKILLS/tier2_analysis/_base.py` | ~120 | `BaseAnalysisSkill`, `_extract_json()` |
 | `SKILLS/tier3_output/_base.py` | ~115 | `BaseOutputSkill` |
+| `vector_store/client.py` | — | `VectorStoreClient` (Qdrant + in-memory) |
 | `context/budget.py` | ~80 | `ContextBudgetManager` |
-| `citations/registry.py` | ~100 | `CitationRegistry` |
-| `contracts/skill_contracts.py` | ~150 | `SourceRecord`, `RetrievalOutput`, `AnalysisOutput`, `OutputDocument` |
+| `citations/registry.py` | ~100 | `CitationRegistry` (legacy DAG mode) |
 | `llm/grok.py` | ~80 | `GrokClient` |
-| `planner/system_prompt.md` | 534 | Planner instructions |
-| `planner/domain_registry.json` | ~1150 | 11 domain bundles, fallback chains, skill registry |
+| `agents/planner/system_prompt.md` | ~535 | Planner instructions (6-phase, full skill registry) |
+| `agents/planner/domain_registry.json` | ~1150 | 11 domain bundles, fallback chains, skill registry |
+| `agents/report_worker/prompt_leaf.md` | — | Leaf worker instructions (2-call, citation rules) |
+| `agents/report_worker/prompt_parent.md` | — | Parent worker instructions (synthesis, citation rules) |
 
 ---
 

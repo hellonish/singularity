@@ -20,3 +20,4 @@ class SectionNode:
     content:      str = ""
     word_count:   int = 0
     citations:    list[str] = field(default_factory=list)
+    source_map:   dict = field(default_factory=dict)  # citation_id → {title, url}
