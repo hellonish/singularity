@@ -9,7 +9,6 @@ CLI entry point — run from project root:
     python -m agents.orchestrator.cli "your question" --strength 10 --audience expert
 """
 import asyncio
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -20,13 +19,10 @@ from render import ReportHtmlRenderer
 
 def _save_report(report_md: str, query: str, metadata: dict) -> None:
     """
-    Writes the Markdown report to final_report.md and the rendered HTML to
-    final_report.html.  ReportHtmlRenderer embeds the Markdown client-side so
-    KaTeX + Marked.js handle math and formatting in the browser.
+    Renders the Markdown report to a self-contained HTML file (final_report.html).
+    ReportHtmlRenderer embeds the Markdown client-side so KaTeX + Marked.js
+    handle math, formatting, and advanced symbols in the browser.
     """
-    Path("final_report.md").write_text(report_md, encoding="utf-8")
-    print("Saved  →  final_report.md")
-
     html = ReportHtmlRenderer().render(report_md, query=query, metadata=metadata)
     Path("final_report.html").write_text(html, encoding="utf-8")
     print("Saved  →  final_report.html")
