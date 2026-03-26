@@ -1,10 +1,11 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from orchestrator import SKILL_REGISTRY
-from orchestrator.models import PlanNode, NodeStatus
-from orchestrator.context import ExecutionContext
-from contracts.skill_contracts import RetrievalOutput, AnalysisOutput, QualityReport, OutputDocument
+from skills import SKILL_REGISTRY, _register_real_skills
+from models import PlanNode, NodeStatus, ExecutionContext, RetrievalOutput, AnalysisOutput, QualityReport, OutputDocument
+
+# Ensure registry is populated
+_register_real_skills()
 
 # We want to test all skills registered.
 all_skills = list(SKILL_REGISTRY.keys())
@@ -104,7 +105,7 @@ async def test_skill_contract(skill_name, mock_ctx, mock_node):
 
     # Run the skill
     result, status, conf = await skill.run(mock_node, mock_ctx, client, registry)
-    
+
     # Assert return types match SkillReturn signature
     assert isinstance(result, dict)
     assert isinstance(status, NodeStatus)
@@ -113,7 +114,7 @@ async def test_skill_contract(skill_name, mock_ctx, mock_node):
 
     # Validate depending on tier
     tier = skill.__module__.split(".")[1] # e.g. "tier1_retrieval"
-    
+
     try:
         if tier == "tier1_retrieval":
             # Just ensure it conforms loosely to RetrievalOutput

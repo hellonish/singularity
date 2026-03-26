@@ -4,29 +4,29 @@ Tier-1 retrieval skills — real implementations of all 18 retrieval nodes.
 Each skill lives in its own directory:
   skills/tier1_retrieval/<skill_name>/
     skill.md            ← description, when to use, output contract
-    implementation.py   ← Python class
+    skill.py            ← Python class
     __init__.py
 
-Registered into SKILL_REGISTRY by orchestrator/__init__.py at import time.
+Registered into SKILL_REGISTRY by agents/orchestrator/__init__.py at import time.
 """
-from .web_search.implementation        import WebSearchSkill
-from .academic_search.implementation  import AcademicSearchSkill
-from .clinical_search.implementation  import ClinicalSearchSkill
-from .legal_search.implementation     import LegalSearchSkill
-from .financial_search.implementation import FinancialSearchSkill
-from .news_archive.implementation     import NewsArchiveSkill
-from .gov_search.implementation       import GovSearchSkill
-from .code_search.implementation      import CodeSearchSkill
-from .patent_search.implementation    import PatentSearchSkill
-from .standards_search.implementation import StandardsSearchSkill
-from .forum_search.implementation     import ForumSearchSkill
-from .video_search.implementation     import VideoSearchSkill
-from .dataset_search.implementation   import DatasetSearchSkill
-from .book_search.implementation      import BookSearchSkill
-from .social_search.implementation    import SocialSearchSkill
-from .pdf_deep_extract.implementation import PdfDeepExtractSkill
-from .multimedia_search.implementation import MultimediaSearchSkill
-from .data_extraction.implementation  import DataExtractionSkill
+from .web_search.skill        import WebSearchSkill
+from .academic_search.skill  import AcademicSearchSkill
+from .clinical_search.skill  import ClinicalSearchSkill
+from .legal_search.skill     import LegalSearchSkill
+from .financial_search.skill import FinancialSearchSkill
+from .news_archive.skill     import NewsArchiveSkill
+from .gov_search.skill       import GovSearchSkill
+from .code_search.skill      import CodeSearchSkill
+from .patent_search.skill    import PatentSearchSkill
+from .standards_search.skill import StandardsSearchSkill
+from .forum_search.skill     import ForumSearchSkill
+from .video_search.skill     import VideoSearchSkill
+from .dataset_search.skill   import DatasetSearchSkill
+from .book_search.skill      import BookSearchSkill
+from .social_search.skill    import SocialSearchSkill
+from .pdf_deep_extract.skill import PdfDeepExtractSkill
+from .multimedia_search.skill import MultimediaSearchSkill
+from .data_extraction.skill  import DataExtractionSkill
 
 __all__ = [
     "WebSearchSkill",

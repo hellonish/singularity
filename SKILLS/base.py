@@ -1,9 +1,17 @@
-"""
-skills/base.py — canonical export point for SkillBase.
+"""SkillBase — abstract base class for all skills."""
+from typing import Any
 
-Import SkillBase from here (not directly from orchestrator.skills) so the
-skills package is the single source of truth.
-"""
-from orchestrator.skills import SkillBase
+from models import NodeStatus, PlanNode
 
-__all__ = ["SkillBase"]
+
+class SkillBase:
+    name: str = "base"
+
+    async def run(
+        self,
+        node: PlanNode,
+        ctx,
+        client,
+        registry,
+    ) -> tuple[Any, NodeStatus, float]:
+        raise NotImplementedError

@@ -6,6 +6,8 @@ all analysis and output skills reference sources by citation_id only.
 import re
 from dataclasses import dataclass, field
 
+from models import CitationRecord
+
 
 def _year(date: str | None) -> str | None:
     """Extract the 4-digit year from any date-ish string."""
@@ -13,19 +15,6 @@ def _year(date: str | None) -> str | None:
         return None
     m = re.match(r"(\d{4})", str(date))
     return m.group(1) if m else None
-
-
-@dataclass
-class CitationRecord:
-    citation_id:       str          # e.g. "[Smith2024]"
-    title:             str
-    authors:           list[str]
-    year:              str | None
-    url:               str
-    source_type:       str          # matches SourceType literals
-    credibility_base:  float
-    registered_by:     str          # skill name that found this source
-    registered_at_slot: str         # output_slot of the node that registered it
 
 
 class CitationRegistry:
