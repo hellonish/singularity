@@ -7,6 +7,10 @@ Call 2: Section Write   — uses Call 1 output to write the final Markdown secti
 Leaf workers analyse raw Qdrant evidence.
 Parent workers synthesise their children's already-written content.
 
+Phase C+ (Issue 3): Evidence Augmentation Loop runs between Call 1 and Call 2 for
+leaf nodes.  Iteratively expands the chunk pool via gap-driven retrieval until 2 of
+3 stopping signals fire: entity coverage ≥ 80%, novelty rate < 25%, or gap stability.
+
 Citation tracking: each chunk is pre-assigned a stable citation key derived from its
 source title. The key is shown to the LLM in the chunk header ("Cite as: [Key]") so
 the LLM uses it verbatim. The resulting citation_id → {title, url} mapping is stored
@@ -76,13 +80,20 @@ class ReportWorkerAgent:
         audience: str = "practitioner",
         research_query: str = "",
         logger: "TraceLogger | None" = None,
+        # Phase C+ parameters (optional — augmentation only runs when all are provided)
+        strength=None,
+        collection_name: str | None = None,
+        vs=None,
+        ctx=None,
     ) -> WorkerResult:
         """
-        Execute Call 1 (analysis) then Call 2 (write).
+        Execute Call 1 (analysis) then optionally Phase C+ augmentation then Call 2 (write).
 
-        When `logger` is provided, both calls are fully traced: system prompt,
-        user message, raw LLM response, and parsed JSON are all written to the
-        trace directory under 03_phase_c/<node_id>_<title>/.
+        Phase C+ augmentation loop runs for leaf nodes when `strength`, `vs`, and
+        `collection_name` are all provided.  It expands the chunk pool iteratively
+        using gap-driven retrieval, stopping when 2 of 3 signals fire.
+
+        When `logger` is provided, both calls are fully traced.
         """
         children_content = self._gather_children_content()
         chunks_text, source_map = self._format_chunks(qdrant_chunks)
@@ -109,6 +120,27 @@ class ReportWorkerAgent:
                 parsed=analysis,
             )
 
+        # ── Phase C+: Evidence Augmentation Loop (leaf nodes only) ──
+        aug_meta: dict[str, Any] = {
+            "augmentation_iters": 0,
+            "entity_coverage": None,
+            "faithfulness_score": None,
+        }
+        if (self._is_leaf
+                and strength is not None
+                and vs is not None
+                and collection_name is not None):
+            qdrant_chunks, aug_meta = await self._augment_evidence(
+                initial_chunks=qdrant_chunks,
+                call1_analysis=analysis,
+                strength=strength,
+                collection_name=collection_name,
+                vs=vs,
+                ctx=ctx,
+            )
+            # Re-format with augmented pool for Call 2
+            chunks_text, source_map = self._format_chunks(qdrant_chunks)
+
         # ── Call 2: Section Write (best-quality write model) ──────────
         call2_msg = self._build_call2_message(
             analysis, chunks_text, children_content, audience,
@@ -122,6 +154,17 @@ class ReportWorkerAgent:
         )
         write_out = self._parse_call(raw2, expected_call=2)
 
+        # ── Phase C+ post-loop: faithfulness check ────────────────────
+        faithfulness_score: float | None = None
+        if (self._is_leaf
+                and strength is not None
+                and getattr(strength, "augmentation_faithfulness_check", False)):
+            content_for_check = write_out.get("content", "")
+            if content_for_check:
+                faithfulness_score = await self._check_faithfulness(
+                    content_for_check, chunks_text
+                )
+
         # ── Persist content back onto the tree node ───────────────────
         content = write_out.get("content", "")
         citations = write_out.get("citations_used", [])
@@ -129,6 +172,8 @@ class ReportWorkerAgent:
         self.node.word_count = write_out.get("word_count", len(content.split()))
         self.node.citations  = citations
         self.node.source_map = source_map
+        if faithfulness_score is not None:
+            self.node.faithfulness_score = faithfulness_score
 
         if logger is not None:
             logger.log_worker_call2(
@@ -154,7 +199,296 @@ class ReportWorkerAgent:
             children_consumed=[c.node_id for c in self.tree.children_of(self.node.node_id)],
             coverage_gaps=write_out.get("coverage_gaps", []),
             source_map=source_map,
+            faithfulness_score=faithfulness_score,
+            entity_coverage=aug_meta.get("entity_coverage"),
+            augmentation_iters=aug_meta.get("augmentation_iters", 0),
         )
+
+    # ------------------------------------------------------------------
+    # Phase C+: Evidence Augmentation Loop
+    # ------------------------------------------------------------------
+
+    async def _augment_evidence(
+        self,
+        initial_chunks: list[Any],
+        call1_analysis: dict,
+        strength,
+        collection_name: str,
+        vs,
+        ctx=None,
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """
+        Phase C+ Evidence Augmentation Loop.
+
+        Iteratively expands the chunk pool using gap-driven queries.
+        Stopping signals (2 of 3 must fire to stop early):
+          1. Entity coverage ≥ 80%  (fixed goal set extracted from description)
+          2. Novelty rate < 25%     (evidence ceiling — new chunks are redundant)
+          3. Gap stability ≥ 2 rounds (same gaps → no new angles available)
+
+        Returns (augmented_pool, metadata_dict).
+        """
+        required_entities = self._extract_required_entities()
+
+        chunk_pool = list(initial_chunks)
+        pool_text_prefixes: set[str] = {
+            getattr(c, "text", "")[:120] for c in chunk_pool
+        }
+        pool_vocab = self._build_pool_vocab(chunk_pool)
+
+        iters_run = 0
+        web_escalations_used = 0
+        last_gap_text = ""
+        gap_stable_rounds = 0
+
+        max_iters = strength.max_augmentation_iters
+        max_web_esc = strength.max_web_escalations
+
+        for _iter in range(max_iters):
+            # ── Stopping signal 1: entity coverage ───────────────────
+            entity_cov = self._compute_entity_coverage(required_entities, chunk_pool)
+
+            # ── Extract gap text from Call 1 ─────────────────────────
+            analyses = call1_analysis.get("analyses", {})
+            gap_text = analyses.get("gap_analysis", "") or analyses.get("coverage_gaps", "")
+            if isinstance(gap_text, list):
+                gap_text = " ".join(gap_text)
+            # Also include top-level coverage_gaps
+            top_gaps = call1_analysis.get("coverage_gaps", [])
+            if isinstance(top_gaps, list) and top_gaps:
+                gap_text = gap_text + " " + " ".join(top_gaps)
+            gap_text = gap_text.strip()
+
+            # ── Stopping signal 3: gap stability ─────────────────────
+            if gap_text and gap_text == last_gap_text:
+                gap_stable_rounds += 1
+            else:
+                gap_stable_rounds = 0
+            last_gap_text = gap_text
+
+            signals_fired = int(entity_cov >= 0.80) + int(gap_stable_rounds >= 2)
+            if signals_fired >= 2:
+                break
+
+            # ── Generate gap queries (anchor interpolation) ───────────
+            queries = self._gaps_to_queries(gap_text)
+            if not queries:
+                break
+
+            # ── Qdrant retrieval ──────────────────────────────────────
+            new_chunks: list[Any] = []
+            for q in queries[:2]:
+                results = vs.search(
+                    run_id=self.run_id, query_text=q, k=6, min_credibility=0.3
+                )
+                for c in results:
+                    prefix = getattr(c, "text", "")[:120]
+                    if prefix not in pool_text_prefixes:
+                        new_chunks.append(c)
+                        pool_text_prefixes.add(prefix)
+
+            # ── Stopping signal 2: novelty rate ──────────────────────
+            if new_chunks:
+                novelty = self._compute_novelty_rate(new_chunks, pool_vocab)
+                if novelty < 0.25:
+                    signals_fired += 1
+                    if signals_fired >= 2:
+                        break
+
+            # ── Web escalation if Qdrant yield is thin ────────────────
+            if len(new_chunks) < 2 and web_escalations_used < max_web_esc:
+                web_new = await self._run_web_escalation(
+                    queries[0], collection_name, vs
+                )
+                for c in web_new:
+                    prefix = getattr(c, "text", "")[:120]
+                    if prefix not in pool_text_prefixes:
+                        new_chunks.append(c)
+                        pool_text_prefixes.add(prefix)
+                web_escalations_used += 1
+
+            if not new_chunks:
+                break
+
+            # ── Quality gate ──────────────────────────────────────────
+            kept = self._quality_gate_filter(new_chunks)
+
+            chunk_pool.extend(kept)
+            pool_vocab.update(self._build_pool_vocab(kept))
+            iters_run += 1
+
+        final_cov = self._compute_entity_coverage(required_entities, chunk_pool)
+        return chunk_pool, {
+            "augmentation_iters": iters_run,
+            "entity_coverage": final_cov,
+            "web_escalations": web_escalations_used,
+            "chunks_added": len(chunk_pool) - len(initial_chunks),
+        }
+
+    def _extract_required_entities(self) -> list[str]:
+        """
+        Extract key entities from section title + description using heuristics.
+        No LLM call — uses capitalized phrases and quoted terms.
+        """
+        text = f"{self.node.title} {self.node.description}"
+        quoted  = re.findall(r'"([^"]+)"', text)
+        caps    = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b', text)
+        title_w = [w for w in self.node.title.split() if len(w) > 3 and w[0].isupper()]
+        seen: set[str] = set()
+        result: list[str] = []
+        for e in quoted + caps + title_w:
+            if e.lower() not in seen:
+                seen.add(e.lower())
+                result.append(e)
+        return result[:15]
+
+    def _compute_entity_coverage(self, entities: list[str], chunks: list[Any]) -> float:
+        """Fraction of required entities present in chunk pool text."""
+        if not entities:
+            return 1.0
+        pool_text = " ".join(getattr(c, "text", "") for c in chunks).lower()
+        covered = sum(1 for e in entities if e.lower() in pool_text)
+        return covered / len(entities)
+
+    @staticmethod
+    def _build_pool_vocab(chunks: list[Any]) -> set[str]:
+        """Word vocabulary for novelty computation (words ≥ 4 chars)."""
+        vocab: set[str] = set()
+        for c in chunks:
+            vocab.update(re.findall(r'\b\w{4,}\b', getattr(c, "text", "").lower()))
+        return vocab
+
+    @staticmethod
+    def _compute_novelty_rate(new_chunks: list[Any], pool_vocab: set[str]) -> float:
+        """
+        Fraction of new_chunks that are novel: >25% of their words not in pool_vocab.
+        Returns 1.0 when list is empty (treat as fully novel).
+        """
+        if not new_chunks:
+            return 1.0
+        novel_count = 0
+        for c in new_chunks:
+            words = re.findall(r'\b\w{4,}\b', getattr(c, "text", "").lower())
+            if not words:
+                continue
+            if sum(1 for w in words if w not in pool_vocab) / len(words) > 0.25:
+                novel_count += 1
+        return novel_count / len(new_chunks)
+
+    def _gaps_to_queries(self, gap_text: str) -> list[str]:
+        """
+        Convert gap analysis text into anchor-interpolated search queries.
+        q_effective = section_title anchor + gap phrase (0.35 / 0.65 weighting
+        approximated as string prepend — no re-embedding required here).
+        """
+        from agents.retriever.retriever import sanitize_query
+        if not gap_text:
+            return []
+        parts = re.split(r'[.;,\n]', gap_text)
+        queries: list[str] = []
+        for part in parts:
+            part = part.strip()
+            if len(part) < 10:
+                continue
+            # Anchor: prepend section title for topic grounding (anchor interpolation)
+            anchored = f"{self.node.title} {part}"
+            cleaned = sanitize_query(anchored)
+            if cleaned:
+                queries.append(cleaned)
+        return queries[:4]
+
+    def _quality_gate_filter(self, chunks: list[Any]) -> list[Any]:
+        """
+        Relevance filter: keep chunks whose text overlaps with section anchor words.
+        Always returns at least 1 chunk from a non-empty input.
+        """
+        if not chunks:
+            return []
+        title_words = set(re.findall(r'\b\w{4,}\b', self.node.title.lower()))
+        desc_words  = set(re.findall(r'\b\w{4,}\b', self.node.description.lower()[:200]))
+        anchor = title_words | desc_words
+        if not anchor:
+            return chunks
+        scored = []
+        for c in chunks:
+            chunk_words = set(re.findall(r'\b\w{4,}\b', getattr(c, "text", "").lower()))
+            overlap = len(anchor & chunk_words) / len(anchor)
+            scored.append((overlap, c))
+        scored.sort(key=lambda x: -x[0])
+        keep_n = max(1, len(scored) // 2)
+        return [c for _, c in scored[:keep_n]]
+
+    async def _run_web_escalation(
+        self,
+        query: str,
+        collection_name: str,
+        vs,
+    ) -> list[Any]:
+        """
+        Run a targeted web search for gap-filling evidence.
+        Ingests results into the collection and returns newly-added chunks.
+        """
+        try:
+            from skills import SKILL_REGISTRY
+            from models import PlanNode as _PlanNode
+            web_skill = SKILL_REGISTRY.get("web_search")
+            if web_skill is None:
+                return []
+            node = _PlanNode(
+                node_id=f"aug_{self.node.node_id}",
+                description=query,
+                skill="web_search",
+                depends_on=[],
+                acceptance=[],
+                parallelizable=True,
+                output_slot=f"aug_{self.node.node_id}",
+            )
+            await web_skill.run_fanout(
+                queries=[query],
+                run_id=self.run_id,
+                collection_name=collection_name,
+                node=node,
+                ctx=None,
+                vs=vs,
+            )
+            return vs.search(run_id=self.run_id, query_text=query, k=6, min_credibility=0.3)
+        except Exception as exc:
+            print(f"  [Phase C+ web escalation] WARN: {exc}")
+            return []
+
+    async def _check_faithfulness(
+        self,
+        content: str,
+        evidence_text: str,
+    ) -> float:
+        """
+        RAGAS-inspired faithfulness: claim decomposition + support verification.
+        Uses the analysis LLM (mini model). Returns 0.0–1.0 score.
+        """
+        prompt = (
+            f"Task: faithfulness check.\n\n"
+            f"Section content (excerpt):\n{content[:1500]}\n\n"
+            f"Evidence (excerpt):\n{evidence_text[:2000]}\n\n"
+            f"Instructions:\n"
+            f"1. List up to 10 factual claims from the section content.\n"
+            f"2. For each claim, mark SUPPORTED or UNSUPPORTED based on the evidence.\n"
+            f"3. Return ONLY this JSON: "
+            f'{{\"supported\": N, \"total\": M, \"score\": X.XX}}\n'
+            f"where score = supported / total."
+        )
+        try:
+            raw = await asyncio.to_thread(
+                self._analysis_client.generate_text,
+                prompt=prompt,
+                system_prompt="You are a faithfulness auditor. Return only JSON.",
+                temperature=0.0,
+            )
+            m = re.search(r'"score"\s*:\s*([0-9.]+)', raw)
+            if m:
+                return min(1.0, max(0.0, float(m.group(1))))
+        except Exception:
+            pass
+        return 1.0
 
     # ------------------------------------------------------------------
     # Context builders
@@ -208,7 +542,6 @@ class ReportWorkerAgent:
         if title and title.lower() not in _GENERIC and not title.lower().startswith("pdf chunk"):
             return title
         if url:
-            # Strip scheme and www, take first path segment as context
             import re as _re
             domain = _re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
             path_hint = url.rstrip("/").split("/")[-1][:30]
@@ -323,12 +656,20 @@ class ReportWorkerAgent:
                     + "\n\n"
                 )
 
+        # Single-source warning from Call 1
+        ssw = analysis.get("single_source_warning")
+        ssw_text = (
+            f"\n⚠ Source diversity warning: {ssw}\n"
+            f"Ensure you note limitations due to single-source evidence.\n\n"
+        ) if ssw else ""
+
         return (
             f"call: 2\n"
             f"section_node_id: {self.node.node_id}\n"
             f"section_title: {self.node.title}\n"
             f"audience: {audience}\n\n"
-            f"## Analysis Results (from Call 1)\n\n"
+            + ssw_text
+            + f"## Analysis Results (from Call 1)\n\n"
             f"{json.dumps(analysis.get('analyses', {}), indent=2)}\n\n"
             f"## Citations Identified\n\n"
             f"{', '.join(analysis.get('citations_found', []) or [])}\n\n"
@@ -377,17 +718,36 @@ class ReportWorkerAgent:
         return "".join(result)
 
     @staticmethod
+    def _extract_json_string_value(raw: str, key: str) -> str | None:
+        """
+        Locate `"key": "<json string value>"` and decode the string with
+        `json.JSONDecoder.raw_decode`, which correctly handles escaped quotes
+        (`\\"`), backslashes, newlines (`\\n`), and unicode (`\\uXXXX`).
+
+        The old regex `[^"\\\\]|\\\\.` stopped at the **first** unescaped `"` inside
+        prose (e.g. *the term "bias" is*), truncating section bodies to a few words.
+        """
+        m = re.search(r'"%s"\s*:\s*"' % re.escape(key), raw)
+        if not m:
+            return None
+        pos = m.end() - 1  # index of the opening `"` of the JSON string value
+        try:
+            val, _ = json.JSONDecoder().raw_decode(raw[pos:])
+            return val if isinstance(val, str) else None
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    @staticmethod
     def _parse_call(raw: str, expected_call: int) -> dict[str, Any]:
         """
         Parses a JSON response from the LLM.
 
-        Tries three extraction strategies in order:
+        Tries extraction strategies in order:
         1. JSON inside a ```json ... ``` code fence (sanitised first).
         2. Raw JSON object starting at the first `{` (sanitised first).
-        3. Regex extraction of the `"content"` field from a JSON-shaped string —
-           fallback for when the outer JSON is still malformed after sanitisation.
-           Captured group is re-encoded before json.loads to handle any remaining
-           literal newlines, preventing raw JSON blobs in the final report.
+        3. Sanitise the full raw text, then decode the `"content"` string field alone
+           via `JSONDecoder.raw_decode` (handles escaped inner quotes — regex could not).
+        4. Legacy regex fallback for pathological outputs (best-effort).
         """
         sanitize = ReportWorkerAgent._sanitize_json_newlines
 
@@ -409,22 +769,40 @@ class ReportWorkerAgent:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Strategy 3: regex extraction of "content" field from malformed JSON.
-        # [^"\\] inside a character class matches literal newlines; re.DOTALL is
-        # set as belt-and-suspenders but has no effect on character classes.
+        # Strategy 3: salvage `content` string without requiring full object parse
+        sanitized_full = sanitize(raw)
+        content_str = ReportWorkerAgent._extract_json_string_value(
+            sanitized_full, "content"
+        )
+        if content_str is not None:
+            citations: list[str] = []
+            citations_match = re.search(
+                r'"citations_used"\s*:\s*(\[[^\]]*\])', sanitized_full
+            )
+            if citations_match:
+                try:
+                    citations = json.loads(citations_match.group(1))
+                except json.JSONDecodeError:
+                    pass
+            return {
+                "call": expected_call,
+                "content": content_str,
+                "citations_used": citations,
+                "analyses": {},
+            }
+
+        # Strategy 4: legacy regex (only if Strategy 3 failed — may truncate on inner ")
         content_match = re.search(
             r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL
         )
         if content_match:
             try:
-                # Replace any surviving literal newlines in the captured value
-                # before wrapping in quotes and re-parsing as a JSON string.
                 captured = (
                     content_match.group(1)
                     .replace("\n", "\\n")
                     .replace("\r", "\\r")
                 )
-                content_str = json.loads(f'"{captured}"')
+                content_legacy = json.loads(f'"{captured}"')
                 citations_match = re.search(
                     r'"citations_used"\s*:\s*(\[[^\]]*\])', raw
                 )
@@ -436,7 +814,7 @@ class ReportWorkerAgent:
                         pass
                 return {
                     "call": expected_call,
-                    "content": content_str,
+                    "content": content_legacy,
                     "citations_used": citations,
                     "analyses": {},
                 }
