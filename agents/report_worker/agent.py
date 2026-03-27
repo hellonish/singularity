@@ -76,13 +76,14 @@ class ReportWorkerAgent:
 
         # ── Call 2: Section Write ─────────────────────────────────────
         call2_msg = self._build_call2_message(
-            analysis, chunks_text, children_content, audience
+            analysis, chunks_text, children_content, audience,
+            raw_chunks=qdrant_chunks,
         )
         raw2 = await asyncio.to_thread(
             self.client.generate_text,
             prompt=call2_msg,
             system_prompt=self._system_prompt,
-            temperature=0.3,
+            temperature=0.65,
         )
         write_out = self._parse_call(raw2, expected_call=2)
 
@@ -145,12 +146,36 @@ class ReportWorkerAgent:
         return f"[{key}]"
 
     @staticmethod
+    def _resolve_title(title: str, url: str) -> str:
+        """
+        Returns a human-readable source label for citation purposes.
+
+        If the stored title is empty, 'Unknown', or a generic placeholder,
+        derives a label from the URL domain (e.g. 'arxiv.org', 'youtube.com')
+        to avoid polluting the Reference List with [Unknown] / [Unknown2] keys.
+        """
+        _GENERIC = {"unknown", "untitled", "source", ""}
+        if title and title.lower() not in _GENERIC:
+            return title
+        if url:
+            # Strip scheme and www, take first path segment as context
+            import re as _re
+            domain = _re.sub(r"^https?://(www\.)?", "", url).split("/")[0]
+            path_hint = url.rstrip("/").split("/")[-1][:30]
+            if path_hint and not path_hint.startswith("http"):
+                return f"{domain} — {path_hint}"
+            return domain
+        return "Source"
+
+    @staticmethod
     def _format_chunks(chunks: list[Any]) -> tuple[str, dict[str, dict]]:
         """
         Format Qdrant chunks for the LLM and build a citation source map.
 
         Each chunk header embeds a pre-assigned citation key so the LLM uses
-        it verbatim instead of inventing its own.
+        it verbatim instead of inventing its own.  Titles are resolved via
+        _resolve_title so generic 'Unknown' entries are replaced with domain
+        labels before the citation key is generated.
 
         Returns:
             chunks_text: formatted string passed to the LLM prompt.
@@ -164,9 +189,10 @@ class ReportWorkerAgent:
         used_keys: set[str] = set()
         for i, chunk in enumerate(chunks):
             cred  = getattr(chunk, "credibility", 0.0)
-            title = getattr(chunk, "source_title", "Unknown")
-            url   = getattr(chunk, "source_url", "")
+            raw_title = getattr(chunk, "source_title", "") or ""
+            url   = getattr(chunk, "source_url", "") or ""
             text  = getattr(chunk, "text", str(chunk))
+            title = ReportWorkerAgent._resolve_title(raw_title, url)
             cite_id = ReportWorkerAgent._make_citation_id(title, used_keys)
             if cite_id not in source_map:
                 source_map[cite_id] = {"title": title, "url": url}
@@ -214,7 +240,32 @@ class ReportWorkerAgent:
         chunks_text: str,
         children_content: str,
         audience: str,
+        raw_chunks: list[Any] | None = None,
     ) -> str:
+        """
+        Builds the Call 2 (write) prompt.
+
+        Passes analysis results from Call 1 plus the raw text of the top-3 key
+        evidence chunks (as identified by `key_evidence_chunks` in Call 1 output)
+        so the writer has direct access to specific quotes, statistics, and formulas
+        instead of relying solely on the lossy analysis digest.
+        """
+        key_chunk_text = ""
+        if raw_chunks:
+            top_idxs = analysis.get("key_evidence_chunks", [])[:3]
+            excerpts = []
+            for idx in top_idxs:
+                if isinstance(idx, int) and idx < len(raw_chunks):
+                    chunk = raw_chunks[idx]
+                    text = getattr(chunk, "text", "")[:600]
+                    excerpts.append(f"[Chunk {idx}]\n{text}")
+            if excerpts:
+                key_chunk_text = (
+                    "## Key Evidence Chunks (direct text for quoting)\n\n"
+                    + "\n\n".join(excerpts)
+                    + "\n\n"
+                )
+
         return (
             f"call: 2\n"
             f"section_node_id: {self.node.node_id}\n"
@@ -224,6 +275,7 @@ class ReportWorkerAgent:
             f"{json.dumps(analysis.get('analyses', {}), indent=2)}\n\n"
             f"## Citations Identified\n\n"
             f"{', '.join(analysis.get('citations_found', []) or [])}\n\n"
+            + key_chunk_text
             + (f"## Children Content\n\n{children_content}\n\n" if children_content else "")
         )
 
@@ -233,17 +285,59 @@ class ReportWorkerAgent:
 
     @staticmethod
     def _parse_call(raw: str, expected_call: int) -> dict[str, Any]:
+        """
+        Parses a JSON response from the LLM.
+
+        Tries three extraction strategies in order:
+        1. JSON inside a ```json ... ``` code fence.
+        2. Raw JSON object starting at the first `{`.
+        3. Regex extraction of the `"content"` field from a JSON-shaped string
+           (fallback for when the outer JSON is malformed but the inner content
+           field is intact — prevents raw JSON blobs from appearing in the report).
+        """
+        # Strategy 1: code-fenced JSON
         m = re.search(r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL)
         text = m.group(1) if m else raw.strip()
+
+        # Strategy 2: bare JSON object
         if not text.startswith("{"):
-            # Find first {
             start = text.find("{")
-            if start == -1:
-                return {"call": expected_call, "content": raw, "analyses": {}}
-            text = text[start:]
-        try:
-            decoder = json.JSONDecoder()
-            obj, _ = decoder.raw_decode(text)
-            return obj
-        except (json.JSONDecodeError, ValueError):
-            return {"call": expected_call, "content": raw, "analyses": {}}
+            if start != -1:
+                text = text[start:]
+
+        if text.startswith("{"):
+            try:
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(text)
+                return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Strategy 3: extract "content" field from malformed JSON via regex
+        # Handles the case where the outer JSON is broken but the content string
+        # is still present — prevents the raw JSON blob ending up in the report.
+        content_match = re.search(
+            r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL
+        )
+        if content_match:
+            try:
+                content_str = json.loads(f'"{content_match.group(1)}"')
+                citations_match = re.search(
+                    r'"citations_used"\s*:\s*(\[[^\]]*\])', raw
+                )
+                citations = []
+                if citations_match:
+                    try:
+                        citations = json.loads(citations_match.group(1))
+                    except json.JSONDecodeError:
+                        pass
+                return {
+                    "call": expected_call,
+                    "content": content_str,
+                    "citations_used": citations,
+                    "analyses": {},
+                }
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        return {"call": expected_call, "content": raw, "analyses": {}}
