@@ -1,9 +1,12 @@
 """
-Phase 5 pipeline — 3-phase product research run.
+Phase 5 pipeline — research run (new execution order).
 
-Phase A — Retrieval:   select skills → adaptive query fanout → ingest to Qdrant
 Phase B — Planning:    3 Managers propose structure → Lead finalises tree
+Phase A — Retrieval:   tree-informed skill selection → targeted query fanout → Qdrant
 Phase C — Writing:     Workers write sections bottom-up through the hierarchy
+Phase D — Polish:      Programmatic fixes + LLM creative beautification
+
+Retrieval now runs AFTER planning so every query is targeted at a real section.
 
 Entry point: run_pipeline(query, strength, audience, output_language) → str (Markdown)
 """
@@ -19,7 +22,7 @@ from .config import (
 )
 from .strength import StrengthConfig
 from models import ExecutionContext
-from skills import SKILL_REGISTRY
+from skills import SKILL_REGISTRY, TIER1_SKILLS
 
 from agents.report_manager import ReportManagerAgent, ReportTree
 from agents.report_lead import ReportLeadAgent
@@ -167,11 +170,13 @@ def _format_report(
 async def _phase_b(
     query: str,
     strength: StrengthConfig,
-    active_skills: list[str],
+    available_skills: list[str],
     audience: str,
 ) -> ReportTree:
     """
     Run 3 Managers in parallel → Lead finalises.
+    Managers receive the full list of available retrieval skills (retrieval runs
+    AFTER planning, so skills are not yet filtered — we pass the full tier-1 set).
     Returns the authoritative ReportTree.
     """
     print(f"\n[Phase B] Planning — 3 Managers + Lead")
@@ -191,7 +196,7 @@ async def _phase_b(
         m.propose(
             query=query,
             target_n=target_n,
-            active_skills=active_skills,
+            available_skills=available_skills,
             audience=audience,
         )
         for m in managers
@@ -313,29 +318,27 @@ async def run_pipeline(
 
     vs = VectorStoreClient()
 
-    # ── Topic cache check (triggers lazy Qdrant init + server probe) ─
+    # ── Phase B — Planning (first: defines structure before retrieval) ─
+    tree = await _phase_b(
+        query=query,
+        strength=sc,
+        available_skills=list(TIER1_SKILLS),   # full tier-1 set — retrieval picks later
+        audience=audience,
+    )
+
+    # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
     cached_run_id = vs.find_cached_run(query)   # returns None if in-memory or no hit
 
     if cached_run_id:
         print(f"\n[Cache HIT] Reusing collection from run {cached_run_id}")
         active_run_id = cached_run_id
-        collection_name = f"run_{cached_run_id}"
-        active_skills = list(SKILL_REGISTRY.keys())[:sc.retrieval_skill_count]
     else:
-        # ── Phase A ───────────────────────────────────────────────────
-        collection_name = vs.create_collection(run_id)   # works in-memory too
+        # ── Phase A — Retrieval (tree-informed: queries target real sections) ─
+        collection_name = vs.create_collection(run_id)
         active_run_id = run_id
 
         retriever = Retriever(_make_client(PLANNER_MODEL), vs)
-        active_skills = await retriever.run(query, sc, run_id, collection_name, ctx)
-
-    # ── Phase B ───────────────────────────────────────────────────────
-    tree = await _phase_b(
-        query=query,
-        strength=sc,
-        active_skills=active_skills,
-        audience=audience,
-    )
+        await retriever.run(query, sc, run_id, collection_name, ctx, tree=tree)
 
     # ── Phase C ───────────────────────────────────────────────────────
     source_map = await _phase_c(

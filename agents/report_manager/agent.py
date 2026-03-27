@@ -63,18 +63,19 @@ class ReportManagerAgent:
         self,
         query: str,
         target_n: int,
-        active_skills: list[str],
+        available_skills: list[str],
         audience: str = "practitioner",
     ) -> ReportTree:
         """
         Generate one tree proposal using this manager's assigned perspective.
 
         Args:
-            query:         Research question driving the report.
-            target_n:      Pre-rolled section count the tree must hit exactly.
-            active_skills: Retrieval skills that ran in Phase A (so the manager
-                           knows what evidence types are available).
-            audience:      Target reader type (layperson / practitioner / expert …).
+            query:            Research question driving the report.
+            target_n:         Pre-rolled section count the tree must hit exactly.
+            available_skills: Full set of tier-1 retrieval skills that will run
+                              after planning (so the manager knows what evidence
+                              types will be available when workers write).
+            audience:         Target reader type (layperson / practitioner / expert …).
 
         Returns:
             ReportTree with exactly target_n nodes and proposal_id set.
@@ -85,7 +86,7 @@ class ReportManagerAgent:
         user_message = (
             f"query: {query}\n"
             f"strength_context: target_section_count={target_n}\n"
-            f"active_retrieval_skills: {', '.join(active_skills)}\n"
+            f"available_retrieval_skills: {', '.join(available_skills)}\n"
             f"audience: {audience}\n"
             f"proposal_id: manager_{self.manager_id}\n"
             f"structural_perspective: {perspective_name}\n"

@@ -32,22 +32,45 @@ class Retriever:
         run_id: str,
         collection_name: str,
         ctx: ExecutionContext,
+        tree=None,          # ReportTree | None — when provided, queries target real sections
     ) -> list[str]:
-        """Run retrieval phase. Returns list of active skill names."""
-        from agents.orchestrator.config import PLANNER_MODEL
+        """
+        Run retrieval phase. Returns list of active skill names.
 
+        When `tree` is provided (new flow: planning before retrieval), the
+        planner sees the actual section topics and generates queries that are
+        precisely targeted at what will be written — rather than guessing from
+        the top-level question alone.
+        """
         retrieval_registry = {k: v for k, v in SKILL_REGISTRY.items() if k in TIER1_SKILLS}
+
+        # Build the section-topics context block if tree is available
+        section_context = ""
+        if tree is not None:
+            topics = [
+                f"  - [{n.node_id}] {n.title}: {n.description[:80]}"
+                for n in tree.nodes
+            ]
+            section_context = (
+                f"report_sections ({len(tree.nodes)} planned):\n"
+                + "\n".join(topics)
+                + "\n\n"
+                "Generate queries that will fetch evidence directly needed by these sections. "
+                "Prioritise sections that require factual data, statistics, or source material.\n\n"
+            )
 
         skill_plan_raw = self.client.generate_text(
             prompt=(
                 f"mode: retrieval_plan\n"
                 f"query: {query}\n"
+                f"{section_context}"
                 f"available_skills: {', '.join(retrieval_registry.keys())}\n"
                 f"select_n_skills: {strength.retrieval_skill_count}\n"
                 f"queries_per_skill: {strength.queries_per_skill}\n\n"
                 f"Return JSON: {{\"skill_queries\": {{\"skill_name\": [\"query1\", ...]}}}}\n"
                 f"Select the {strength.retrieval_skill_count} most relevant skills for this query.\n"
-                f"Generate exactly {strength.queries_per_skill} diverse sub-queries per skill."
+                f"Generate exactly {strength.queries_per_skill} targeted sub-queries per skill, "
+                f"each serving a specific section from the list above."
             ),
             system_prompt=(
                 "You are a retrieval planner. Return ONLY valid JSON with no prose. "
@@ -59,6 +82,9 @@ class Retriever:
 
         skill_queries = self._parse_skill_queries(skill_plan_raw, strength, query, retrieval_registry)
         active_skills = list(skill_queries.keys())
+        section_hint = f" (targeting {len(tree.nodes)} sections)" if tree else ""
+        print(f"\n[Phase A] Retrieval{section_hint} — "
+              f"{strength.retrieval_skill_count} skills × {strength.queries_per_skill} queries")
         print(f"  Active skills: {active_skills}")
 
         async def _run_skill(skill_name: str, queries: list[str]) -> None:
