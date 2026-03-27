@@ -450,7 +450,7 @@ body {
 """
 
 
-_TEMPLATE = Template("""\
+_TEMPLATE = Template(r"""\
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -519,7 +519,7 @@ $css
 
     // KaTeX auto-render.  Python string.Template collapses:
     //   $$$$ → $$  (display math delimiter)
-    //   $$   → $   (inline math delimiter)
+    //   $$   → $$   (inline math delimiter)
     // Listing display before inline prevents $$ being consumed as two inlines.
     renderMathInElement(targetEl, {
       delimiters: [
@@ -594,7 +594,7 @@ $css
           bodyEl.className = 'ref-body';
 
           // Separate the meta part (italic suffix after main link)
-          const metaMatch = bodyHtml.match(/^([\s\S]*?)(\s*·\s*<em>.*<\/em>)?$/);
+          const metaMatch = bodyHtml.match(/^([\s\S]*?)(\s*·\s*<em>.*<\/em>)?$$/);
           if (metaMatch) {
             const mainHtml = metaMatch[1].trim();
             const metaHtml = metaMatch[2] ? metaMatch[2].replace(/^[\s·]+/, '') : '';

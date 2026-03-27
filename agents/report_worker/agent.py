@@ -37,13 +37,28 @@ _STOP_WORDS = frozenset({
 class ReportWorkerAgent:
     """
     One instance per section node.  Instantiate, call run(), discard.
+
+    Two LLM clients are injected for cost/quality tiering:
+      analysis_client — Call 1 (structured JSON analysis); mini model sufficient.
+      write_client    — Call 2 (prose section write); best available model.
+    If only `client` is supplied (legacy), both calls use it.
     """
 
-    def __init__(self, node: SectionNode, tree: ReportTree, run_id: str, client):
+    def __init__(
+        self,
+        node: SectionNode,
+        tree: ReportTree,
+        run_id: str,
+        client=None,               # legacy single-client path
+        analysis_client=None,      # Call 1 — mini / analysis model
+        write_client=None,         # Call 2 — best-quality write model
+    ):
         self.node    = node
         self.tree    = tree
         self.run_id  = run_id
-        self.client  = client
+        # Tiered clients: fall back to `client` when split clients not supplied
+        self._analysis_client = analysis_client or client
+        self._write_client    = write_client    or client
         self._is_leaf = len(tree.children_of(node.node_id)) == 0
 
         prompt_file = (
@@ -62,25 +77,25 @@ class ReportWorkerAgent:
         children_content = self._gather_children_content()
         chunks_text, source_map = self._format_chunks(qdrant_chunks)
 
-        # ── Call 1: Multi-Analysis ────────────────────────────────────
+        # ── Call 1: Multi-Analysis (mini model — structured JSON) ────
         call1_msg = self._build_call1_message(
             chunks_text, children_content, audience, research_query
         )
         raw1 = await asyncio.to_thread(
-            self.client.generate_text,
+            self._analysis_client.generate_text,
             prompt=call1_msg,
             system_prompt=self._system_prompt,
             temperature=0.2,
         )
         analysis = self._parse_call(raw1, expected_call=1)
 
-        # ── Call 2: Section Write ─────────────────────────────────────
+        # ── Call 2: Section Write (best-quality write model) ──────────
         call2_msg = self._build_call2_message(
             analysis, chunks_text, children_content, audience,
             raw_chunks=qdrant_chunks,
         )
         raw2 = await asyncio.to_thread(
-            self.client.generate_text,
+            self._write_client.generate_text,
             prompt=call2_msg,
             system_prompt=self._system_prompt,
             temperature=0.65,

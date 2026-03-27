@@ -14,7 +14,8 @@ import uuid
 from pathlib import Path
 
 from .config import (
-    PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL, WORKER_MODEL,
+    PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL,
+    WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL,
 )
 from .strength import StrengthConfig
 from models import ExecutionContext
@@ -199,6 +200,7 @@ async def _phase_b(
     for i, p in enumerate(proposals):
         print(f"  Manager {i+1}: {len(p.nodes)} nodes — {p.rationale[:60]}")
 
+    print(f"  Lead model     : {LEAD_MODEL}")
     lead = ReportLeadAgent(client=_make_client(LEAD_MODEL))
     final_tree = await lead.finalise(
         proposals=list(proposals),
@@ -229,13 +231,22 @@ async def _phase_c(
     Execute bottom-up: deepest level first, root last.
     Workers at the same depth level run in parallel.
 
+    Two separate LLM clients are used per worker:
+      analysis_client (WORKER_ANALYSIS_MODEL) — Call 1: structured JSON analysis,
+        high-volume, cost-sensitive; mini model is sufficient.
+      write_client    (WORKER_WRITE_MODEL)     — Call 2: the actual published prose;
+        best available non-reasoning model for maximum quality.
+
     Returns a merged source_map (citation_id → {title, url}) collected from
     all workers, used by the assembler to build the Reference List.
     """
     print(f"\n[Phase C] Writing — {len(tree.nodes)} sections, "
           f"{len(tree.leaves())} leaves")
+    print(f"  Analysis model : {WORKER_ANALYSIS_MODEL}")
+    print(f"  Write model    : {WORKER_WRITE_MODEL}")
 
-    worker_client = _make_client(WORKER_MODEL)
+    analysis_client = _make_client(WORKER_ANALYSIS_MODEL)
+    write_client    = _make_client(WORKER_WRITE_MODEL)
 
     levels = tree.topological_levels()   # deepest → root (already reversed)
 
@@ -254,7 +265,8 @@ async def _phase_c(
                 node=node,
                 tree=tree,
                 run_id=run_id,
-                client=worker_client,
+                analysis_client=analysis_client,
+                write_client=write_client,
             )
             result = await worker.run(
                 qdrant_chunks=chunks,
