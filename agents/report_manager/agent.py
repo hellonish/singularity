@@ -14,9 +14,13 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .report_tree import ReportTree, _extract_json, _enforce_node_count
 from .section_node import SectionNode
+
+if TYPE_CHECKING:
+    from trace import TraceLogger
 
 
 _PERSPECTIVES: dict[int, tuple[str, str]] = {
@@ -65,6 +69,7 @@ class ReportManagerAgent:
         target_n: int,
         available_skills: list[str],
         audience: str = "practitioner",
+        logger: "TraceLogger | None" = None,
     ) -> ReportTree:
         """
         Generate one tree proposal using this manager's assigned perspective.
@@ -76,6 +81,8 @@ class ReportManagerAgent:
                               after planning (so the manager knows what evidence
                               types will be available when workers write).
             audience:         Target reader type (layperson / practitioner / expert …).
+            logger:           Optional TraceLogger; when provided, logs prompt +
+                              raw response + parsed tree for this manager call.
 
         Returns:
             ReportTree with exactly target_n nodes and proposal_id set.
@@ -101,7 +108,18 @@ class ReportManagerAgent:
             temperature=0.7,
         )
 
-        return self._parse(raw, target_n)
+        tree = self._parse(raw, target_n)
+
+        if logger is not None:
+            logger.log_manager(
+                manager_id=self.manager_id,
+                system_prompt=self._system_prompt,
+                user_message=user_message,
+                raw_response=raw,
+                parsed_tree_dict=tree.to_dict(),
+            )
+
+        return tree
 
     # ------------------------------------------------------------------
     # Private

@@ -29,6 +29,7 @@ from agents.report_lead import ReportLeadAgent
 from agents.report_worker import ReportWorkerAgent
 from agents.retriever import Retriever
 from vector_store.client import VectorStoreClient
+from trace import TraceLogger
 
 import sys
 _ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -172,6 +173,7 @@ async def _phase_b(
     strength: StrengthConfig,
     available_skills: list[str],
     audience: str,
+    logger: TraceLogger | None = None,
 ) -> ReportTree:
     """
     Run 3 Managers in parallel → Lead finalises.
@@ -198,6 +200,7 @@ async def _phase_b(
             target_n=target_n,
             available_skills=available_skills,
             audience=audience,
+            logger=logger,
         )
         for m in managers
     ])
@@ -212,6 +215,7 @@ async def _phase_b(
         query=query,
         section_count_range=(lo, hi),
         audience=audience,
+        logger=logger,
     )
 
     print(f"  Lead finalised: {len(final_tree.nodes)} nodes, "
@@ -230,6 +234,7 @@ async def _phase_c(
     audience: str,
     query: str,
     vs: VectorStoreClient,
+    logger: TraceLogger | None = None,
 ) -> dict[str, dict]:
     """
     Spawn one ReportWorkerAgent per node.
@@ -277,6 +282,7 @@ async def _phase_c(
                 qdrant_chunks=chunks,
                 audience=audience,
                 research_query=query,
+                logger=logger,
             )
             print(f"    [{node.node_id}] '{node.title[:40]}' "
                   f"→ {result.word_count} words, {len(result.citations_used)} citations")
@@ -299,9 +305,22 @@ async def run_pipeline(
     strength: int = 5,
     audience: str = "practitioner",
     output_language: str = "en",
+    trace: bool = False,
+    trace_root: str = "traces",
 ) -> str:
     """
     Full Phase 5 pipeline. Returns the final Markdown report as a string.
+
+    Args:
+        query:           Research question.
+        strength:        1–10 run strength (controls depth, section count, retrieval).
+        audience:        Target reader type (practitioner / expert / layperson …).
+        output_language: ISO 639-1 language code for the report.
+        trace:           When True, write a structured trace directory to `trace_root`
+                         containing every LLM prompt, raw response, and parsed output
+                         for all phases (B planning, A retrieval, C writing, D polish).
+        trace_root:      Directory under which per-run trace folders are created.
+                         Each run gets its own sub-folder named by run_id.
     """
     sc = StrengthConfig(value=strength)
     run_id = uuid.uuid4().hex[:12]
@@ -314,6 +333,21 @@ async def run_pipeline(
     print(f"Audience : {audience}")
     print(f"Run ID   : {run_id}")
 
+    logger: TraceLogger | None = None
+    if trace:
+        logger = TraceLogger(run_id=run_id, query=query, trace_root=trace_root)
+        logger.write_overview({
+            "strength":             strength,
+            "audience":             audience,
+            "output_language":      output_language,
+            "manager_model":        MANAGER_MODEL,
+            "lead_model":           LEAD_MODEL,
+            "worker_analysis_model": WORKER_ANALYSIS_MODEL,
+            "worker_write_model":   WORKER_WRITE_MODEL,
+            "polisher_model":       POLISHER_MODEL,
+        })
+        print(f"  Trace    : enabled → {trace_root}/{run_id}/")
+
     ctx = ExecutionContext(language=output_language, depth="strength")
 
     vs = VectorStoreClient()
@@ -324,6 +358,7 @@ async def run_pipeline(
         strength=sc,
         available_skills=list(TIER1_SKILLS),   # full tier-1 set — retrieval picks later
         audience=audience,
+        logger=logger,
     )
 
     # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
@@ -338,7 +373,7 @@ async def run_pipeline(
         active_run_id = run_id
 
         retriever = Retriever(_make_client(PLANNER_MODEL), vs)
-        await retriever.run(query, sc, run_id, collection_name, ctx, tree=tree)
+        await retriever.run(query, sc, run_id, collection_name, ctx, tree=tree, logger=logger)
 
     # ── Phase C ───────────────────────────────────────────────────────
     source_map = await _phase_c(
@@ -348,6 +383,7 @@ async def run_pipeline(
         audience=audience,
         query=query,
         vs=vs,
+        logger=logger,
     )
 
     # ── Assemble report ───────────────────────────────────────────────
@@ -361,21 +397,28 @@ async def run_pipeline(
 
     # ── Phase D — Polish ──────────────────────────────────────────────
     print(f"\n[Phase D] Polish — programmatic fixes + creative formatting")
-    report_md = await _phase_d(report_md, query, audience)
+    report_md = await _phase_d(report_md, query, audience, logger=logger)
 
     print(f"\n{'=' * 65}")
     print("RESEARCH COMPLETE")
     print(f"  Sections written : {len(tree.nodes)}")
     print(f"  Total words      : {total_words:,}")
     print(f"  Report length    : {len(report_md):,} chars")
+    if logger is not None:
+        print(f"  Trace saved      : {trace_root}/{run_id}/")
 
     return report_md
 
 
-async def _phase_d(report_md: str, query: str, audience: str) -> str:
+async def _phase_d(
+    report_md: str,
+    query: str,
+    audience: str,
+    logger: TraceLogger | None = None,
+) -> str:
     """Phase D — Polish the assembled report for visual excellence."""
     from agents.polish import PolishAgent
-    polisher = PolishAgent(POLISHER_MODEL)
+    polisher = PolishAgent(POLISHER_MODEL, logger=logger)
     polished = await polisher.polish(report_md, query, audience)
     print(f"  Polish complete  : {len(polished):,} chars")
     return polished

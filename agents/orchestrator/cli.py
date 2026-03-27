@@ -86,7 +86,13 @@ def _legacy_run(problem: str, depth: str, audience: str, lang: str) -> None:
     asyncio.run(main_run())
 
 
-def _strength_run(problem: str, strength: int, audience: str, lang: str) -> None:
+def _strength_run(
+    problem: str,
+    strength: int,
+    audience: str,
+    lang: str,
+    trace: bool = False,
+) -> None:
     """Phase 5 strength-based product pipeline."""
 
     async def main_run():
@@ -95,6 +101,7 @@ def _strength_run(problem: str, strength: int, audience: str, lang: str) -> None
             strength=strength,
             audience=audience or "practitioner",
             output_language=lang,
+            trace=trace,
         )
         _save_report(
             report_md,
@@ -145,6 +152,16 @@ if __name__ == "__main__":
         help="layperson / student / practitioner / expert / executive",
     )
     parser.add_argument("--lang", default="en", help="Output language (default: en)")
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable execution trace logging. Writes a structured trace directory "
+            "under traces/<run_id>/ with every LLM prompt, raw response, skill "
+            "selection plan, and parsed output for all pipeline phases."
+        ),
+    )
     args = parser.parse_args()
 
     problem = " ".join(args.problem) if args.problem else (
@@ -155,7 +172,7 @@ if __name__ == "__main__":
     if args.strength is not None:
         print(f"Executing : {problem}")
         print(f"Strength  : {args.strength}")
-        _strength_run(problem, args.strength, args.audience, args.lang)
+        _strength_run(problem, args.strength, args.audience, args.lang, trace=args.trace)
     else:
         depth = args.depth or "standard"
         print(f"Executing: {problem}")

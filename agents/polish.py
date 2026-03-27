@@ -18,7 +18,10 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from trace import TraceLogger
 
 _PROMPT_PATH = Path(__file__).parent / "report_polisher" / "prompt.md"
 
@@ -62,6 +65,7 @@ async def _polish_section(
     audience: str,
     idx: int,
     total: int,
+    logger: "TraceLogger | None" = None,
 ) -> str:
     """Send one section to the LLM polisher and return polished markdown."""
     prompt = (
@@ -80,7 +84,17 @@ async def _polish_section(
     result = result.strip()
     result = re.sub(r'^```(?:markdown)?\n?', '', result)
     result = re.sub(r'\n?```$', '', result)
-    return result.strip() or section   # fall back to original if LLM returns empty
+    polished = result.strip() or section   # fall back to original if LLM returns empty
+
+    if logger is not None:
+        logger.log_polish(
+            system_prompt=system_prompt,
+            user_message=prompt,
+            raw_response=result,
+            section_idx=idx,
+        )
+
+    return polished
 
 
 # ---------------------------------------------------------------------------
@@ -88,10 +102,11 @@ async def _polish_section(
 # ---------------------------------------------------------------------------
 
 class PolishAgent:
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, logger: "TraceLogger | None" = None) -> None:
         from llm.grok import GrokClient
         self.client = GrokClient(model_name=model)
         self._system_prompt: str = _PROMPT_PATH.read_text(encoding="utf-8")
+        self._logger = logger
 
     async def polish(self, report_md: str, query: str, audience: str) -> str:
         """
@@ -113,6 +128,7 @@ class PolishAgent:
             _polish_section(
                 self.client, self._system_prompt,
                 sec, query, audience, i, len(sections),
+                logger=self._logger,
             )
             for i, sec in enumerate(sections)
         ]

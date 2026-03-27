@@ -7,9 +7,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from typing import TYPE_CHECKING
 
 from models import ExecutionContext, PlanNode
 from skills import SKILL_REGISTRY, TIER1_SKILLS
+
+if TYPE_CHECKING:
+    from trace import TraceLogger
 
 
 class Retriever:
@@ -33,6 +37,7 @@ class Retriever:
         collection_name: str,
         ctx: ExecutionContext,
         tree=None,          # ReportTree | None — when provided, queries target real sections
+        logger: "TraceLogger | None" = None,
     ) -> list[str]:
         """
         Run retrieval phase. Returns list of active skill names.
@@ -59,24 +64,26 @@ class Retriever:
                 "Prioritise sections that require factual data, statistics, or source material.\n\n"
             )
 
+        retrieval_system_prompt = (
+            "You are a retrieval planner. Return ONLY valid JSON with no prose. "
+            "The JSON must have a single key 'skill_queries' mapping skill names to "
+            "lists of query strings."
+        )
+        retrieval_user_prompt = (
+            f"mode: retrieval_plan\n"
+            f"query: {query}\n"
+            f"{section_context}"
+            f"available_skills: {', '.join(retrieval_registry.keys())}\n"
+            f"select_n_skills: {strength.retrieval_skill_count}\n"
+            f"queries_per_skill: {strength.queries_per_skill}\n\n"
+            f"Return JSON: {{\"skill_queries\": {{\"skill_name\": [\"query1\", ...]}}}}\n"
+            f"Select the {strength.retrieval_skill_count} most relevant skills for this query.\n"
+            f"Generate exactly {strength.queries_per_skill} targeted sub-queries per skill, "
+            f"each serving a specific section from the list above."
+        )
         skill_plan_raw = self.client.generate_text(
-            prompt=(
-                f"mode: retrieval_plan\n"
-                f"query: {query}\n"
-                f"{section_context}"
-                f"available_skills: {', '.join(retrieval_registry.keys())}\n"
-                f"select_n_skills: {strength.retrieval_skill_count}\n"
-                f"queries_per_skill: {strength.queries_per_skill}\n\n"
-                f"Return JSON: {{\"skill_queries\": {{\"skill_name\": [\"query1\", ...]}}}}\n"
-                f"Select the {strength.retrieval_skill_count} most relevant skills for this query.\n"
-                f"Generate exactly {strength.queries_per_skill} targeted sub-queries per skill, "
-                f"each serving a specific section from the list above."
-            ),
-            system_prompt=(
-                "You are a retrieval planner. Return ONLY valid JSON with no prose. "
-                "The JSON must have a single key 'skill_queries' mapping skill names to "
-                "lists of query strings."
-            ),
+            prompt=retrieval_user_prompt,
+            system_prompt=retrieval_system_prompt,
             temperature=0.3,
         )
 
@@ -86,6 +93,14 @@ class Retriever:
         print(f"\n[Phase A] Retrieval{section_hint} — "
               f"{strength.retrieval_skill_count} skills × {strength.queries_per_skill} queries")
         print(f"  Active skills: {active_skills}")
+
+        if logger is not None:
+            logger.log_retriever_plan(
+                system_prompt=retrieval_system_prompt,
+                user_prompt=retrieval_user_prompt,
+                raw_response=skill_plan_raw,
+                skill_queries=skill_queries,
+            )
 
         async def _run_skill(skill_name: str, queries: list[str]) -> None:
             skill = retrieval_registry.get(skill_name)
@@ -110,6 +125,13 @@ class Retriever:
                 vs=self.vs,
             )
             print(f"  [{skill_name}] {summary['sources_found']} sources → {summary['chunks_stored']} chunks")
+            if logger is not None:
+                logger.log_skill_result(
+                    skill_name=skill_name,
+                    queries=queries,
+                    sources_found=summary.get("sources_found", 0),
+                    chunks_stored=summary.get("chunks_stored", 0),
+                )
 
         await asyncio.gather(*[_run_skill(name, queries) for name, queries in skill_queries.items()])
         self.vs.register_run_in_cache(run_id, query)

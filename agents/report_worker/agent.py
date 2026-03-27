@@ -19,11 +19,14 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from agents.report_manager.section_node import SectionNode
 from agents.report_manager.report_tree import ReportTree
 from .result import WorkerResult
+
+if TYPE_CHECKING:
+    from trace import TraceLogger
 
 
 _STOP_WORDS = frozenset({
@@ -72,8 +75,15 @@ class ReportWorkerAgent:
         qdrant_chunks: list[Any],     # list of DocumentChunk objects
         audience: str = "practitioner",
         research_query: str = "",
+        logger: "TraceLogger | None" = None,
     ) -> WorkerResult:
-        """Execute Call 1 (analysis) then Call 2 (write)."""
+        """
+        Execute Call 1 (analysis) then Call 2 (write).
+
+        When `logger` is provided, both calls are fully traced: system prompt,
+        user message, raw LLM response, and parsed JSON are all written to the
+        trace directory under 03_phase_c/<node_id>_<title>/.
+        """
         children_content = self._gather_children_content()
         chunks_text, source_map = self._format_chunks(qdrant_chunks)
 
@@ -88,6 +98,16 @@ class ReportWorkerAgent:
             temperature=0.2,
         )
         analysis = self._parse_call(raw1, expected_call=1)
+
+        if logger is not None:
+            logger.log_worker_call1(
+                node_id=self.node.node_id,
+                node_title=self.node.title,
+                system_prompt=self._system_prompt,
+                user_message=call1_msg,
+                raw_response=raw1,
+                parsed=analysis,
+            )
 
         # ── Call 2: Section Write (best-quality write model) ──────────
         call2_msg = self._build_call2_message(
@@ -109,6 +129,17 @@ class ReportWorkerAgent:
         self.node.word_count = write_out.get("word_count", len(content.split()))
         self.node.citations  = citations
         self.node.source_map = source_map
+
+        if logger is not None:
+            logger.log_worker_call2(
+                node_id=self.node.node_id,
+                node_title=self.node.title,
+                system_prompt=self._system_prompt,
+                user_message=call2_msg,
+                raw_response=raw2,
+                parsed=write_out,
+                final_content=content,
+            )
 
         return WorkerResult(
             node_id=self.node.node_id,
