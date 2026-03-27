@@ -284,20 +284,59 @@ class ReportWorkerAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _sanitize_json_newlines(text: str) -> str:
+        """
+        Escapes literal newline and carriage-return characters that appear
+        inside JSON string values — turning them into the valid JSON escape
+        sequences \\n and \\r respectively.
+
+        LLMs occasionally emit multi-line JSON strings with real newlines
+        instead of \\n, producing invalid JSON that json.loads rejects.  This
+        character-by-character scan fixes that without touching escape
+        sequences that are already correctly encoded.
+
+        Only affects characters inside double-quoted string values; structural
+        JSON whitespace (newlines between keys/values) is left untouched.
+        """
+        result: list[str] = []
+        in_string = False
+        escape_next = False
+        for ch in text:
+            if escape_next:
+                result.append(ch)
+                escape_next = False
+            elif ch == "\\":
+                result.append(ch)
+                escape_next = True
+            elif ch == '"':
+                result.append(ch)
+                in_string = not in_string
+            elif in_string and ch == "\n":
+                result.append("\\n")
+            elif in_string and ch == "\r":
+                result.append("\\r")
+            else:
+                result.append(ch)
+        return "".join(result)
+
+    @staticmethod
     def _parse_call(raw: str, expected_call: int) -> dict[str, Any]:
         """
         Parses a JSON response from the LLM.
 
         Tries three extraction strategies in order:
-        1. JSON inside a ```json ... ``` code fence.
-        2. Raw JSON object starting at the first `{`.
-        3. Regex extraction of the `"content"` field from a JSON-shaped string
-           (fallback for when the outer JSON is malformed but the inner content
-           field is intact — prevents raw JSON blobs from appearing in the report).
+        1. JSON inside a ```json ... ``` code fence (sanitised first).
+        2. Raw JSON object starting at the first `{` (sanitised first).
+        3. Regex extraction of the `"content"` field from a JSON-shaped string —
+           fallback for when the outer JSON is still malformed after sanitisation.
+           Captured group is re-encoded before json.loads to handle any remaining
+           literal newlines, preventing raw JSON blobs in the final report.
         """
+        sanitize = ReportWorkerAgent._sanitize_json_newlines
+
         # Strategy 1: code-fenced JSON
         m = re.search(r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL)
-        text = m.group(1) if m else raw.strip()
+        text = sanitize(m.group(1) if m else raw.strip())
 
         # Strategy 2: bare JSON object
         if not text.startswith("{"):
@@ -313,15 +352,22 @@ class ReportWorkerAgent:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Strategy 3: extract "content" field from malformed JSON via regex
-        # Handles the case where the outer JSON is broken but the content string
-        # is still present — prevents the raw JSON blob ending up in the report.
+        # Strategy 3: regex extraction of "content" field from malformed JSON.
+        # [^"\\] inside a character class matches literal newlines; re.DOTALL is
+        # set as belt-and-suspenders but has no effect on character classes.
         content_match = re.search(
             r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL
         )
         if content_match:
             try:
-                content_str = json.loads(f'"{content_match.group(1)}"')
+                # Replace any surviving literal newlines in the captured value
+                # before wrapping in quotes and re-parsing as a JSON string.
+                captured = (
+                    content_match.group(1)
+                    .replace("\n", "\\n")
+                    .replace("\r", "\\r")
+                )
+                content_str = json.loads(f'"{captured}"')
                 citations_match = re.search(
                     r'"citations_used"\s*:\s*(\[[^\]]*\])', raw
                 )

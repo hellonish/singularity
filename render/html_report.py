@@ -361,15 +361,21 @@ $css
       return;
     }
 
-    targetEl.innerHTML = marked.parse(markdown);
+    // breaks:true — single \n renders as <br> so step-by-step derivations,
+    // worked examples, and multi-line math blocks stay on separate lines.
+    // gfm:true — GitHub Flavored Markdown: tables, task lists, strikethrough.
+    targetEl.innerHTML = marked.parse(markdown, { breaks: true, gfm: true });
 
-    // KaTeX auto-render: handles $$...$$ (display) and $$...$$ (inline)
+    // KaTeX auto-render: $$ (display) must be listed before $ (inline) so the
+    // engine does not consume the opening $$ of a display block as two inlines.
+    // Python string.Template collapses $$$$ → $$ and $$ → $ in the output HTML.
     renderMathInElement(targetEl, {
       delimiters: [
         { left: '$$$$', right: '$$$$', display: true  },
         { left: '$$',   right: '$$',   display: false }
       ],
-      throwOnError: false
+      throwOnError: false,
+      trust: true
     });
 
     renderCache.set(hash, targetEl.innerHTML);

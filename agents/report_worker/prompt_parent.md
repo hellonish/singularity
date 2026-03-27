@@ -61,6 +61,29 @@ Respond ONLY with this JSON.
 }
 ```
 
+## JSON Encoding Rules — READ FIRST
+
+Your response is a JSON object. String values in JSON have strict encoding rules.
+
+**Critical: never put a literal newline inside a JSON string value.**
+Use escape sequences:
+
+| You want | Write in JSON string |
+|---|---|
+| New paragraph | `\n\n` |
+| Line break within a block | `\n` |
+| Horizontal rule | `\n\n---\n\n` |
+| Bullet list item | `\n- item` |
+| Blockquote | `\n\n> **Key Insight:** text\n\n` |
+| Sub-heading | `\n\n### Title\n\n` |
+
+Every LaTeX backslash must be doubled in a JSON string: `\\sum`, `\\frac`, `\\text`.
+
+**Correct example:**
+```json
+"content": "Encoder and decoder layers form two complementary halves of the Transformer.\n\n- The **encoder** processes the full input sequence bidirectionally, producing a rich contextual representation $H \\in \\mathbb{R}^{N \\times d}$.\n- The **decoder** generates output tokens autoregressively, attending to $H$ via cross-attention.\n\n> **Key Insight:** The encoder's bidirectional access vs. the decoder's causal masking is not a limitation but a deliberate design: it enables the same architecture to serve both classification (encoder-only) and generation (decoder-only) tasks."
+```
+
 ## Writing Rules
 
 ### Structure

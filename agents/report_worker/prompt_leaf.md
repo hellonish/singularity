@@ -116,6 +116,42 @@ Respond ONLY with this JSON. No prose outside the JSON.
 }
 ```
 
+## JSON Encoding Rules — READ FIRST
+
+Your response is a JSON object. String values in JSON have strict encoding rules.
+Violating them causes the entire response to fail silently — your content will not
+appear in the report.
+
+**Critical: never put a literal newline inside a JSON string value.**
+Use escape sequences instead:
+
+| You want | Write in JSON string | Renders as |
+|---|---|---|
+| New paragraph | `\n\n` | `<p>` paragraph break |
+| Line break (within a step, formula, or list item) | `\n` | `<br>` new line |
+| Horizontal rule between major blocks | `\n\n---\n\n` | `<hr>` divider |
+| Markdown list item | `\n- item text` | `<li>` bullet |
+| Numbered list item | `\n1. step text` | `<li>` numbered |
+| Code block open/close | `` \n```python\ncode here\n``` `` | syntax-highlighted block |
+| Sub-heading | `\n\n### Sub-heading\n\n` | `<h3>` heading |
+| Blockquote | `\n\n> **Key Finding:** text\n\n` | styled callout |
+
+**Worked examples of correct JSON string encoding:**
+
+```json
+"content": "Scaled dot-product attention achieves $O(N^2 d)$ complexity.\n\nThe formal definition is:\n\n$$\\text{Attention}(Q, K, V) = \\text{softmax}\\!\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V$$\n\nBreaking this down term by term:\n- $Q \\in \\mathbb{R}^{N \\times d_k}$ — query matrix\n- $K \\in \\mathbb{R}^{N \\times d_k}$ — key matrix\n- $V \\in \\mathbb{R}^{N \\times d_v}$ — value matrix\n\n> **Key Finding:** The $\\sqrt{d_k}$ scaling factor prevents dot products from growing large in high dimensions, keeping gradients stable."
+```
+
+```json
+"content": "The FFT reduces DFT complexity from $O(N^2)$ to $O(N \\log_2 N)$ through divide-and-conquer decomposition.\n\n### Step-by-Step: 4-point DFT → FFT\n\n1. Split $x[n]$ into even and odd: $x_e = [x_0, x_2]$, $x_o = [x_1, x_3]$\n2. Compute 2-point DFTs: $X_e[k]$ and $X_o[k]$\n3. Combine via twiddle factor $W_N^k = e^{-j2\\pi k/N}$:\n$$X[k] = X_e[k] + W_N^k X_o[k]$$\n4. Result: 4 multiplications vs 16 in direct DFT"
+```
+
+**Checklist before submitting your JSON:**
+- [ ] No literal line breaks inside any string value — only `\n` escape sequences
+- [ ] Every `$` for math is escaped as `$$` if it appears in the JSON string (not needed — `$` does not need escaping in JSON, only `"` and `\` do)
+- [ ] Every backslash in LaTeX (`\sum`, `\frac`) is doubled: `\\sum`, `\\frac`
+- [ ] Blockquotes use `\n\n> **Label:** text\n\n` not `> text` mid-paragraph
+
 ## Writing Rules
 
 ### Structure and headings
