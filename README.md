@@ -25,6 +25,7 @@
 14. [End-to-End Data Flow Walkthrough](#14-end-to-end-data-flow-walkthrough)
 15. [Key Agentic AI Patterns Used in This Project](#15-key-agentic-ai-patterns-used-in-this-project)
 16. [What We Learned — Lessons for Agentic AI Design](#16-what-we-learned--lessons-for-agentic-ai-design)
+17. [The StrengthConfig — Scaling Math](#17-the-strengthconfig--scaling-math)
 
 ---
 
@@ -217,24 +218,25 @@ CLI _strength_run()
 
 | Module | Path | Responsibility |
 |---|---|---|
-| CLI Entry | `agents/orchestrator/cli.py` | Argument parsing, mode dispatch, `final_report.md` write |
+| CLI Entry | `agents/orchestrator/cli.py` | Argument parsing, mode dispatch, `final_report.md` / HTML write |
 | Runner (legacy) | `agents/orchestrator/runner.py` | DAG loop: plan → execute → gap-analyze → replan |
-| Pipeline (Phase 5) | `agents/orchestrator/pipeline.py` | Phases A/B/C, assembles final Markdown + Reference List |
+| Pipeline (Phase 5) | `agents/orchestrator/pipeline.py` | Phases B → A → C → D; assembles final Markdown + Reference List |
+| Config | `agents/orchestrator/config.py` | All tunable constants — models, limits, paths, cost tiers |
+| Strength | `agents/orchestrator/strength.py` | `StrengthConfig` — maps 1–10 to skill count, section range, Qdrant K |
 | Planner | `agents/planner/planner.py` | LLM call to generate/update DAG; `Planner`, `parse_plan()` |
 | Domain Registry | `agents/planner/domain_registry.py` | Domain detection, fallback chains, audience rules |
 | Executor | `agents/orchestrator/executor.py` | `FallbackRouter`, `execute_wave()`, `execute_node()` |
-| Strength | `agents/orchestrator/strength.py` | `StrengthConfig` — maps 1–10 to retrieval counts, section range |
-| Retriever | `agents/retriever/retriever.py` | LLM JSON plan of `skill_queries`; fan-out into Qdrant |
-| Report Manager | `agents/report_manager/agent.py` | One hierarchical `ReportTree` proposal per instance |
-| Report Lead | `agents/report_lead/agent.py` | Merges 3 proposals into the final `ReportTree` |
-| Report Worker | `agents/report_worker/agent.py` | 2-call writer per section node; builds `source_map` for citations |
+| Retriever | `agents/retriever/retriever.py` | Tree-informed skill selection; `skill_queries` fan-out into Qdrant |
+| Report Manager | `agents/report_manager/agent.py` | One hierarchical `ReportTree` proposal per instance (perspective-assigned) |
+| Report Lead | `agents/report_lead/agent.py` | Synthesises 3 Manager proposals into the final authoritative `ReportTree` |
+| Report Worker | `agents/report_worker/agent.py` | 2-call writer per section: analysis (mini) + prose write (grok-4) |
+| Report Polisher | `agents/polish.py` | Phase D: programmatic math/table fixes + parallel LLM creative polish |
 | Section Node | `agents/report_manager/section_node.py` | Data model: title, content, citations, `source_map` |
-| Report Tree | `agents/report_manager/report_tree.py` | Tree model; `topological_levels()` for bottom-up writing |
-| Models | `models.py` | All data contracts: `PlanNode`, `Plan`, `ExecutionContext`, `DocumentChunk`, etc. |
-| Config | `agents/orchestrator/config.py` | All tunable constants (models, limits, paths) |
-| Skills | `SKILLS/tier*/*/` | 36 skill implementations across 3 tiers |
-| Tools | `tools/*.py` | 14 API connectors (arXiv, PubMed, GitHub, etc.) |
-| Vector Store | `vector_store/client.py` | Qdrant client; in-memory fallback; topic cache |
+| Report Tree | `agents/report_manager/report_tree.py` | Tree model; `topological_levels()` for bottom-up write order |
+| Models | `models.py` | All data contracts: `PlanNode`, `Plan`, `ExecutionContext`, `DocumentChunk` |
+| Skills | `skills/tier*/*/` | 36 skill implementations across 3 tiers |
+| Vector Store | `vector_store/client.py` | Qdrant client; in-memory fallback; 7-day topic cache |
+| HTML Renderer | `render/html_report.py` | Markdown → self-contained HTML with KaTeX math + Marked.js GFM tables |
 | Budget | `context/budget.py` | `ContextBudgetManager` — context window budgeting |
 | Citations | `citations/registry.py` | `CitationRegistry` — stable `[AuthorYYYY]` IDs (legacy mode) |
 | LLM | `llm/*.py` | `GrokClient`, `GeminiClient`, `DeepSeekClient` |
@@ -1047,6 +1049,17 @@ class BaseLLMClient:
 
 ### 10.2 GrokClient (Default Planner)
 
+**Phase 5 tiered model routing** — different components use different model tiers to balance cost and quality:
+
+| Component | Model | Calls per run (s=5) | Reason |
+|-----------|-------|----------------------|--------|
+| Planner + Retriever | `grok-3-mini` | 1 + 1 | Structured JSON output — mini is sufficient |
+| 3× Manager | `grok-3-mini` | 3 | High-volume structural proposals |
+| 1× Lead | `grok-4-0709` | 1 | Reasoning synthesis — upgrade justified for 1 call |
+| Worker Analysis (Call 1) | `grok-3-mini` | N sections | Structured JSON analysis — mini is sufficient |
+| Worker Write (Call 2) | `grok-4-0709` | N sections | **This is the product** — best quality |
+| Polisher | `grok-3-mini` | N sections (parallel) | Formatting decisions — mini is sufficient |
+
 The planner uses `GrokClient(model_name="grok-3-mini")` — xAI's Grok model via the OpenAI-compatible SDK:
 
 ```python
@@ -1753,41 +1766,100 @@ The entire pipeline uses `asyncio`. The benefit is real: in Wave 0, all 6 retrie
 
 **Lesson:** If your agent makes multiple independent API calls (which almost all do), async execution is essential for performance. Use `asyncio.gather()` for parallel branches and `asyncio.to_thread()` for sync third-party libraries.
 
+### 16.9 Plan Before You Retrieve
+
+In the original pipeline, retrieval ran before planning. This meant the Retriever had to guess what evidence to fetch from only the top-level research question. Any query it generated was a bet on what the structure would eventually look like.
+
+Moving planning first — so the Retriever sees 18–30 finalised section titles and descriptions before it selects skills and writes queries — makes every retrieval call purposeful. A section on "EWC Algorithm Mechanics" gets a query about EWC mechanics. A section on "Robotics Transfer Failure Modes" gets a query about that. Zero wasted calls, zero mismatched evidence.
+
+**Lesson:** When an agent's downstream tasks are known before its upstream data-gathering step, reorder them. The data-gathering phase should be informed by what will actually be needed, not by a guess at the top of the funnel.
+
+### 16.10 A Polish Phase Is Not a Nice-to-Have
+
+Raw LLM output has systematic formatting inconsistencies: some models use `\(...\)` for math while the renderer expects `$...$`; tables get written as single-line pipe strings; key findings are buried in paragraphs. These are not random errors — they are predictable output patterns of the underlying models.
+
+A dedicated polish phase handles this in two layers:
+1. **Programmatic (Python)**: deterministic regex fixes for known delimiter mismatches — zero LLM cost, 100% reliable.
+2. **LLM creative pass (section-by-section, parallel)**: converts prose comparisons to tables, wraps key findings in callout blockquotes, adds visual separators at logical boundaries.
+
+**Lesson:** Separate "write the content" from "present the content". Workers should focus on intellectual quality. The polisher should focus on rendering correctness and visual clarity. Mixing them degrades both.
+
+---
+
+## 17. The StrengthConfig — Scaling Math
+
+The `StrengthConfig` dataclass is the single source of truth for all strength-derived quantities. Given `s` (1–10):
+
+| Quantity | Formula | s=1 | s=3 | s=5 | s=10 |
+|----------|---------|-----|-----|-----|------|
+| Retrieval skills | `int(1.8 × s)` | 1 | 5 | 9 | 18 |
+| Queries per skill | `max(3, ceil(s/2)×2)` | 3 | 4 | 6 | 10 |
+| Total retrieval calls | skills × queries | 3 | 20 | 54 | 180 |
+| Section count range | `[s×6, s×10]` | 6–10 | 18–30 | 30–50 | 60–100 |
+| Expected LLM calls | `5 + 2×s×8` | 21 | 53 | 85 | 165 |
+
+Qdrant chunk budget per worker (dynamic K by node depth):
+
+| Node level | Chunks (K) | Reason |
+|-----------|-----------|--------|
+| Leaf (deepest) | 15 | Maximum evidence — writes the actual content |
+| One above leaf | 8 | Moderate evidence — frames a subsection |
+| Chapter / root | 3 | Minimal — children already synthesised the evidence |
+
 ---
 
 ## Appendix: File Reference
 
-| File | Lines | Key Exports |
-|---|---|---|
-| `agents/orchestrator/cli.py` | ~140 | `_legacy_run()`, `_strength_run()` |
-| `agents/orchestrator/runner.py` | ~239 | `run_orchestrator()`, `run_gap_analysis()`, `detect_replan_loop()` |
-| `agents/orchestrator/pipeline.py` | ~293 | `run_pipeline()`, `_format_report()`, `_phase_c()` |
-| `agents/orchestrator/executor.py` | ~41 | `execute_node()`, `execute_wave()` |
-| `agents/orchestrator/fallback_router.py` | ~59 | `FallbackRouter` |
-| `agents/orchestrator/strength.py` | ~106 | `StrengthConfig` |
-| `agents/orchestrator/config.py` | ~47 | All constants |
-| `agents/planner/planner.py` | ~206 | `Planner`, `parse_plan()` |
-| `agents/planner/domain_registry.py` | ~50 | `DomainRegistry` |
-| `agents/retriever/retriever.py` | ~119 | `Retriever`, `run_fanout()` |
-| `agents/report_manager/agent.py` | ~70 | `ReportManagerAgent` |
-| `agents/report_manager/report_tree.py` | ~157 | `ReportTree`, `topological_levels()` |
-| `agents/report_manager/section_node.py` | ~25 | `SectionNode` (content, citations, source_map) |
-| `agents/report_lead/agent.py` | ~74 | `ReportLeadAgent` |
-| `agents/report_worker/agent.py` | ~215 | `ReportWorkerAgent`, `_make_citation_id()`, `_format_chunks()` |
-| `agents/report_worker/result.py` | ~25 | `WorkerResult` (includes source_map) |
-| `models.py` | ~477 | All data models (unified) |
-| `SKILLS/tier1_retrieval/_base.py` | ~120 | `BaseRetrievalSkill`, `_to_query()` |
-| `SKILLS/tier2_analysis/_base.py` | ~120 | `BaseAnalysisSkill`, `_extract_json()` |
-| `SKILLS/tier3_output/_base.py` | ~115 | `BaseOutputSkill` |
-| `vector_store/client.py` | — | `VectorStoreClient` (Qdrant + in-memory) |
-| `context/budget.py` | ~80 | `ContextBudgetManager` |
-| `citations/registry.py` | ~100 | `CitationRegistry` (legacy DAG mode) |
-| `llm/grok.py` | ~80 | `GrokClient` |
-| `agents/planner/system_prompt.md` | ~535 | Planner instructions (6-phase, full skill registry) |
-| `agents/planner/domain_registry.json` | ~1150 | 11 domain bundles, fallback chains, skill registry |
-| `agents/report_worker/prompt_leaf.md` | — | Leaf worker instructions (2-call, citation rules) |
-| `agents/report_worker/prompt_parent.md` | — | Parent worker instructions (synthesis, citation rules) |
+### Phase 5 Pipeline
+
+| File | Key Exports / Role |
+|---|---|
+| `agents/orchestrator/cli.py` | `_legacy_run()`, `_strength_run()` — argument parsing and mode dispatch |
+| `agents/orchestrator/pipeline.py` | `run_pipeline()` — orchestrates Phases B → A → C → D |
+| `agents/orchestrator/strength.py` | `StrengthConfig` — single source of truth for all strength-derived quantities |
+| `agents/orchestrator/config.py` | All tunable constants: model names, limits, paths, cost tiers |
+| `agents/retriever/retriever.py` | `Retriever` — tree-informed skill selection and Qdrant ingest |
+| `agents/report_manager/agent.py` | `ReportManagerAgent` — one tree proposal per perspective |
+| `agents/report_manager/report_tree.py` | `ReportTree`, `topological_levels()` — bottom-up write order |
+| `agents/report_manager/section_node.py` | `SectionNode` — content, word count, citations, source_map |
+| `agents/report_lead/agent.py` | `ReportLeadAgent` — synthesises 3 proposals → final tree |
+| `agents/report_worker/agent.py` | `ReportWorkerAgent` — 2-call writer (analysis → prose) |
+| `agents/report_worker/result.py` | `WorkerResult` — includes source_map for Reference List |
+| `agents/polish.py` | `PolishAgent` — programmatic fixes + parallel LLM creative polish |
+| `agents/report_manager/prompt.md` | Manager system prompt (perspective-assigned, node-count-strict) |
+| `agents/report_lead/prompt.md` | Lead system prompt (temperature=0.2, `final_tree` JSON) |
+| `agents/report_worker/prompt_leaf.md` | Leaf worker: 2-call schema, math/table encoding rules |
+| `agents/report_worker/prompt_parent.md` | Parent worker: synthesis-only, concise framing |
+| `agents/report_polisher/prompt.md` | Polisher brief: creative formatting, preserves facts/citations/math |
+
+### Shared Infrastructure
+
+| File | Key Exports / Role |
+|---|---|
+| `vector_store/client.py` | `VectorStoreClient` — Qdrant + in-memory fallback, 7-day topic cache |
+| `render/html_report.py` | `ReportHtmlRenderer` — Markdown → self-contained HTML (KaTeX + Marked.js) |
+| `models.py` | All data contracts: `PlanNode`, `Plan`, `ExecutionContext`, `DocumentChunk` |
+| `skills/tier1_retrieval/base.py` | `BaseRetrievalSkill`, `run_fanout()` — shared Qdrant ingest |
+| `skills/tier2_analysis/base.py` | `BaseAnalysisSkill`, `_extract_json()` |
+| `skills/tier3_output/base.py` | `BaseOutputSkill`, `_build_sections()` |
+| `context/budget.py` | `ContextBudgetManager` — context window budgeting |
+| `citations/registry.py` | `CitationRegistry` — stable `[AuthorYYYY]` IDs (legacy mode) |
+| `llm/grok.py` | `GrokClient` (default — xAI via OpenAI-compatible SDK) |
+| `llm/gemini.py` | `GeminiClient` |
+| `llm/deepseek.py` | `DeepSeekClient` |
+
+### Legacy DAG Mode
+
+| File | Key Exports / Role |
+|---|---|
+| `agents/orchestrator/runner.py` | `run_orchestrator()` — DAG loop: plan → execute → gap-analyze → replan |
+| `agents/orchestrator/executor.py` | `execute_node()`, `execute_wave()` |
+| `agents/orchestrator/fallback_router.py` | `FallbackRouter` — handles skill failure + fallback chains |
+| `agents/planner/planner.py` | `Planner`, `parse_plan()` — LLM DAG generation |
+| `agents/planner/domain_registry.py` | `DomainRegistry` — domain detection and skill bundling |
+| `agents/planner/system_prompt.md` | 6-phase planner instructions with full skill + domain registry |
+| `agents/planner/domain_registry.json` | 11 domain bundles, fallback chains, skill metadata |
 
 ---
 
-*This report was written from a complete analysis of the Singularity codebase, covering every module, every bug that was hit and fixed, and the agentic AI principles that underlie the design.*
+*This document covers the complete Singularity architecture as of March 2026: four-phase pipeline (B→A→C→D), tiered model routing, Qdrant vector store with in-memory fallback, Phase D Report Polisher, and the lessons learned building a production-grade research agent from first principles.*
