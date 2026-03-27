@@ -21,21 +21,17 @@ PLANNER_OUTPUT = PROJECT_ROOT / "planner_output.md"
 PLANNER_MODEL      = "grok-3-mini"
 MAX_TOKENS_PLANNER = 6000
 
-# Phase 5 — tiered model routing
+# Tiered model routing
 #
-# Cost/quality assignment (Strength 4, ~32 sections):
-#   PLANNER + MANAGERS + WORKER_ANALYSIS  → grok-3-mini   ($0.25/$0.50 per M)
-#   LEAD                                  → grok-4 reason  ($2.00/$6.00 per M) — 1 call
-#   WORKER_WRITE                          → grok-4         ($2.00/$6.00 per M) — 32 calls
-#
-#   Total estimated cost at Strength 4: ≈ $0.64 vs $0.12 all-mini
-#   The Lead reasoning call is a 1× cost; Writer quality affects every section.
+# All roles use fast non-reasoning models only.
+# grok-3-mini  — planner, managers, analysis calls   ($0.25/$0.50 per M)
+# grok-3       — lead synthesis, section writing      ($3.00/$15.00 per M)
 
-MANAGER_MODEL         = "grok-3-mini"          # 3 structural proposals — mini sufficient
-LEAD_MODEL            = "grok-4-0709"          # 1 reasoning synthesis call — upgrade justified
-WORKER_ANALYSIS_MODEL = "grok-3-mini"          # Call 1 (analysis) — high-volume, structured JSON
-WORKER_WRITE_MODEL    = "grok-4-0709"          # Call 2 (section write) — this IS the product
-POLISHER_MODEL        = "grok-3-mini"          # Phase D polish — parallel, formatting-focused
+MANAGER_MODEL         = "grok-3-mini"   # 3 structural proposals
+LEAD_MODEL            = "grok-3"        # 1 synthesis/merge call
+WORKER_ANALYSIS_MODEL = "grok-3-mini"   # Call 1 (analysis) — high-volume structured JSON
+WORKER_WRITE_MODEL    = "grok-3"        # Call 2 (section write) — the final product
+POLISHER_MODEL        = "grok-3-mini"   # Phase D polish — parallel, formatting-focused
 
 # Legacy alias kept for any code outside Phase C that still imports WORKER_MODEL
 WORKER_MODEL = WORKER_WRITE_MODEL
