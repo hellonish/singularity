@@ -1,0 +1,121 @@
+"""Phase D — Report Polish
+
+Two-stage polish of the assembled markdown report.
+
+Stage 1 — Programmatic (zero cost, deterministic):
+  • backslash-paren math  -> dollar-sign math  (inline)
+  • backslash-bracket math -> double-dollar math (display)
+
+Stage 2 — LLM creative (section-by-section, parallel):
+  • Convert prose comparisons to tables
+  • Add callout blockquotes for key findings / definitions
+  • Expand malformed single-line tables to multi-line GFM
+  • Add visual separators between logical blocks
+  • Preserve all facts, citations, and math content verbatim
+"""
+from __future__ import annotations
+
+import asyncio
+import re
+from pathlib import Path
+
+
+_PROMPT_PATH = Path(__file__).parent / "report_polisher" / "prompt.md"
+
+
+# ---------------------------------------------------------------------------
+# Stage 1: Programmatic fixes
+# ---------------------------------------------------------------------------
+
+def _programmatic_fixes(md: str) -> str:
+    """Deterministic rendering-correctness fixes — no LLM, instant."""
+    # \(...\) → $...$
+    md = re.sub(r'\\\((.+?)\\\)', lambda m: f'${m.group(1)}$', md, flags=re.DOTALL)
+    # \[...\] → $$\n...\n$$
+    md = re.sub(r'\\\[(.+?)\\\]', lambda m: f'$$\n{m.group(1).strip()}\n$$', md, flags=re.DOTALL)
+    return md
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: LLM polish
+# ---------------------------------------------------------------------------
+
+def _split_sections(md: str) -> list[str]:
+    """
+    Split the report into chunks at every top-level ## heading.
+    The preamble (everything before the first ##) becomes chunk 0.
+    Each ## section (including its ### children) is one chunk.
+    """
+    parts = re.split(r'(?=^## )', md, flags=re.MULTILINE)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _reassemble(sections: list[str]) -> str:
+    return "\n\n".join(sections)
+
+
+async def _polish_section(
+    client,
+    system_prompt: str,
+    section: str,
+    query: str,
+    audience: str,
+    idx: int,
+    total: int,
+) -> str:
+    """Send one section to the LLM polisher and return polished markdown."""
+    prompt = (
+        f"research_query: {query}\n"
+        f"audience: {audience}\n"
+        f"section: {idx + 1} of {total}\n\n"
+        f"---BEGIN SECTION---\n{section}\n---END SECTION---"
+    )
+    result = await asyncio.to_thread(
+        client.generate_text,
+        prompt=prompt,
+        system_prompt=system_prompt,
+        temperature=0.35,
+    )
+    # Strip any accidental code-fence wrapper the LLM may have added
+    result = result.strip()
+    result = re.sub(r'^```(?:markdown)?\n?', '', result)
+    result = re.sub(r'\n?```$', '', result)
+    return result.strip() or section   # fall back to original if LLM returns empty
+
+
+# ---------------------------------------------------------------------------
+# Public interface
+# ---------------------------------------------------------------------------
+
+class PolishAgent:
+    def __init__(self, model: str) -> None:
+        from llm.grok import GrokClient
+        self.client = GrokClient(model_name=model)
+        self._system_prompt: str = _PROMPT_PATH.read_text(encoding="utf-8")
+
+    async def polish(self, report_md: str, query: str, audience: str) -> str:
+        """
+        Full two-stage polish.
+
+        1. Programmatic fixes (always applied — free).
+        2. LLM section polish in parallel — all ## sections run concurrently.
+
+        Returns polished markdown string.
+        """
+        # Stage 1
+        md = _programmatic_fixes(report_md)
+
+        # Stage 2
+        sections = _split_sections(md)
+        print(f"  Polishing {len(sections)} sections in parallel…")
+
+        tasks = [
+            _polish_section(
+                self.client, self._system_prompt,
+                sec, query, audience, i, len(sections),
+            )
+            for i, sec in enumerate(sections)
+        ]
+        polished = await asyncio.gather(*tasks)
+
+        return _reassemble(list(polished))

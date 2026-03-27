@@ -103,11 +103,23 @@ Matrix row breaks are `\\` in LaTeX — inside JSON that becomes `\\\\` (four ch
    - Never write math as plain text. `O(N²)` is wrong; `$O(N^2)$` is correct.
    - Greek letters: `$\alpha$`, `$\omega$` — never unicode (α, ω) in math context.
 
+   **FORBIDDEN math delimiters — these will NOT render:**
+   - `\(x = y\)` — NOT supported. Use `$x = y$`.
+   - `\[x = y\]` — NOT supported. Use `$$x = y$$`.
+   - Plain parentheses `(x = y)` around math are plain text, not rendered.
+
 ### Formatting
 5. **Bold** (`**term**`) the first occurrence of any technical term introduced at
    this level that was not already bolded in a child section.
 6. If synthesising a list of distinct contributions (e.g. three child sections),
    a tight 3-item bullet list is appropriate. Otherwise write prose.
+
+   **TABLE FORMAT — CRITICAL. Multi-line with `\n` between each row in JSON string:**
+   ```json
+   "content": "Summary:\n\n| Aspect | Detail |\n|--------|--------|\n| Row A  | Value  |\n\nFurther..."
+   ```
+   NEVER write all table rows on one line. The `|---|` separator row is required.
+
 7. Use a `> **Key Insight:**` blockquote for the single cross-cutting insight that
    only this level can surface.
 

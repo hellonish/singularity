@@ -35,6 +35,7 @@ MANAGER_MODEL         = "grok-3-mini"          # 3 structural proposals — mini
 LEAD_MODEL            = "grok-4-0709"          # 1 reasoning synthesis call — upgrade justified
 WORKER_ANALYSIS_MODEL = "grok-3-mini"          # Call 1 (analysis) — high-volume, structured JSON
 WORKER_WRITE_MODEL    = "grok-4-0709"          # Call 2 (section write) — this IS the product
+POLISHER_MODEL        = "grok-3-mini"          # Phase D polish — parallel, formatting-focused
 
 # Legacy alias kept for any code outside Phase C that still imports WORKER_MODEL
 WORKER_MODEL = WORKER_WRITE_MODEL

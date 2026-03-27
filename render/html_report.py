@@ -8,8 +8,10 @@ CDN stack: KaTeX 0.16.9 · Marked 9.1.6 · Chart.js 4.4.1.
 """
 from __future__ import annotations
 
+import base64
 import json
 import re
+import urllib.request
 from datetime import datetime
 from string import Template
 
@@ -450,8 +452,7 @@ body {
 """
 
 
-_TEMPLATE = Template(r"""\
-<!DOCTYPE html>
+_TEMPLATE = Template(r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -531,11 +532,24 @@ $css
   function shieldMath(markdown) {
     const store = [];
 
-    // Display math $$...$$ first (must precede inline to avoid consuming $$
+    // \[...\] display math — shield before $$ to avoid partial matches.
+    // /\\\[[\s\S]*?\\\]/ matches literal \[ ... \]
+    let out = markdown.replace(/\\\[[\s\S]*?\\\]/g, function (match) {
+      store.push(match);
+      return 'MATHSHIELD' + (store.length - 1) + 'END';
+    });
+
+    // \(...\) inline math
+    out = out.replace(/\\\([\s\S]*?\\\)/g, function (match) {
+      store.push(match);
+      return 'MATHSHIELD' + (store.length - 1) + 'END';
+    });
+
+    // Display math $$...$$ next (must precede inline $ to avoid consuming $$
     // as two separate inline delimiters).
     // [$][$] character-class syntax avoids writing \$\$ which interacts with
     // Python string.Template substitution.
-    let out = markdown.replace(/[$][$]([\s\S]*?)[$][$]/g, function (match) {
+    out = out.replace(/[$][$]([\s\S]*?)[$][$]/g, function (match) {
       store.push(match);
       return 'MATHSHIELD' + (store.length - 1) + 'END';
     });
@@ -578,7 +592,9 @@ $css
     renderMathInElement(targetEl, {
       delimiters: [
         { left: '$$$$', right: '$$$$', display: true  },
-        { left: '$$',   right: '$$',   display: false }
+        { left: '$$',   right: '$$',   display: false },
+        { left: '\\(',  right: '\\)',  display: false },
+        { left: '\\[',  right: '\\]',  display: true  }
       ],
       throwOnError: false,
       trust: true
@@ -830,6 +846,82 @@ def _escape_html(text: str) -> str:
     )
 
 
+# ── CDN bundler ───────────────────────────────────────────────────────────────
+# Fetches external JS/CSS at report-generation time and inlines them so the
+# HTML works without any internet access (firewalls, offline environments).
+# Results are cached per URL for the lifetime of the process.
+
+_CDN_CACHE: dict[str, bytes | None] = {}
+
+
+def _cdn_get(url: str, timeout: int = 20) -> bytes | None:
+    """Fetch *url* once and cache the raw bytes. Returns None on any error."""
+    if url not in _CDN_CACHE:
+        try:
+            import ssl
+            try:
+                import certifi
+                ctx = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                ctx = ssl.create_default_context()
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "singularity-report/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                _CDN_CACHE[url] = resp.read()
+        except Exception:
+            _CDN_CACHE[url] = None
+    return _CDN_CACHE[url]
+
+
+def _bundle(html: str) -> str:
+    """
+    Replace every CDN ``<script src>`` and ``<link stylesheet>`` with an
+    inline equivalent so the report is fully self-contained.
+
+    KaTeX fonts are embedded as woff2 base64 data-URIs (adds ~2 MB).
+    Any resource that cannot be fetched falls back to the original CDN tag.
+    """
+
+    # ── Inline JS ─────────────────────────────────────────────────────────────
+    def inline_script(m: re.Match) -> str:
+        data = _cdn_get(m.group(1))
+        if data is None:
+            return m.group(0)
+        return "<script>" + data.decode("utf-8") + "</script>"
+
+    html = re.sub(r'<script src="([^"]+)"></script>', inline_script, html)
+
+    # ── Inline CSS (+ embed KaTeX fonts as data-URIs) ─────────────────────────
+    def inline_css(m: re.Match) -> str:
+        url = m.group(1)
+        data = _cdn_get(url)
+        if data is None:
+            return m.group(0)
+
+        css = data.decode("utf-8")
+        fonts_base = url.rsplit("/", 1)[0] + "/"  # …/katex@0.16.9/dist/
+
+        # Each @font-face src: lists woff2, woff, ttf alternatives.
+        # Replace the whole src: value with a single woff2 data-URI entry.
+        def embed_src(sm: re.Match) -> str:
+            wm = re.search(r"url\((fonts/[^)]+\.woff2)\)", sm.group(2))
+            if not wm:
+                return sm.group(0)
+            font_data = _cdn_get(fonts_base + wm.group(1))
+            if font_data is None:
+                # Absolute CDN URL as fallback (still needs network for fonts)
+                return sm.group(1) + "url(" + fonts_base + wm.group(1) + ') format("woff2")'
+            b64 = base64.b64encode(font_data).decode("ascii")
+            return sm.group(1) + "url('data:font/woff2;base64," + b64 + "') format(\"woff2\")"
+
+        css = re.sub(r"(src:)([^;}]+)", embed_src, css)
+        return "<style>\n" + css + "\n</style>"
+
+    html = re.sub(r'<link rel="stylesheet" href="([^"]+)">', inline_css, html)
+    return html
+
+
 class ReportHtmlRenderer:
     """
     Converts the Markdown string returned by run_pipeline (or _legacy_run) into a
@@ -892,7 +984,7 @@ class ReportHtmlRenderer:
         # patterns with $ (e.g. [$]) that are not Template variables.
         # safe_substitute leaves unrecognised $-patterns unchanged rather than
         # raising ValueError, while still substituting all real $placeholders.
-        return _TEMPLATE.safe_substitute(
+        raw_html = _TEMPLATE.safe_substitute(
             title=_escape_html(title),
             query_text=_escape_html(query),
             meta_row=meta_row,
@@ -900,3 +992,5 @@ class ReportHtmlRenderer:
             css=_CSS,
             timestamp=_escape_html(timestamp),
         )
+        # Inline all CDN resources so the report works without internet access.
+        return _bundle(raw_html)

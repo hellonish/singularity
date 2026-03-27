@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .config import (
     PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL,
-    WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL,
+    WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL, POLISHER_MODEL,
 )
 from .strength import StrengthConfig
 from models import ExecutionContext
@@ -355,6 +355,11 @@ async def run_pipeline(
     report_md = _format_report(tree, query, cred_avg, source_map=source_map)
 
     total_words = sum(n.word_count for n in tree.nodes)
+
+    # ── Phase D — Polish ──────────────────────────────────────────────
+    print(f"\n[Phase D] Polish — programmatic fixes + creative formatting")
+    report_md = await _phase_d(report_md, query, audience)
+
     print(f"\n{'=' * 65}")
     print("RESEARCH COMPLETE")
     print(f"  Sections written : {len(tree.nodes)}")
@@ -362,3 +367,12 @@ async def run_pipeline(
     print(f"  Report length    : {len(report_md):,} chars")
 
     return report_md
+
+
+async def _phase_d(report_md: str, query: str, audience: str) -> str:
+    """Phase D — Polish the assembled report for visual excellence."""
+    from agents.polish import PolishAgent
+    polisher = PolishAgent(POLISHER_MODEL)
+    polished = await polisher.polish(report_md, query, audience)
+    print(f"  Polish complete  : {len(polished):,} chars")
+    return polished

@@ -208,10 +208,29 @@ A complete 3×2 matrix example:
    - Summations: `$\sum_{k=0}^{N-1}$` not `Σ`
    - Never write math as plain text: `X[k] = sum(x[n] * e^(-j2pi*kn/N))` is wrong.
 
+   **FORBIDDEN math delimiters — these will NOT render:**
+   - `\(x = y\)` — parenthesis style is NOT supported. Use `$x = y$` instead.
+   - `\[x = y\]` — bracket style is NOT supported. Use `$$x = y$$` instead.
+   - `(x = y)` — plain parentheses around math are plain text, not rendered.
+   - Unicode math characters: `α`, `β`, `∑`, `∏`, `√` — use LaTeX: `$\alpha$`, `$\beta$`, `$\sum$`, `$\prod$`, `$\sqrt{\cdot}$`
+
+   **One-line test:** every time you write a variable, formula, or expression,
+   ask yourself: "Is this wrapped in `$...$` or `$$...$$`?" If no, fix it.
+
 ### Formatting richness — REQUIRED
 5. **Bold** (`**term**`) every key technical term on its first appearance in the section.
 6. Use a **Markdown table** whenever comparing 3 or more entities across 2 or more
    dimensions. Minimum: `| Property | A | B |` with header separator row.
+
+   **TABLE FORMAT — CRITICAL. Tables MUST be multi-line in your JSON string:**
+   ```json
+   "content": "Comparison of approaches:\n\n| Approach | Accuracy | Cost |\n|----------|----------|------|\n| Method A | 94.2%    | High |\n| Method B | 87.1%    | Low  |\n\nMethod A excels when..."
+   ```
+   - Each row on its own line: use `\n` between every row in the JSON string.
+   - The separator row (`|---|---|`) is REQUIRED on the second line.
+   - NEVER write a table all on one line: `| A | B | |---| | r1 | r2 |` is WRONG.
+   - NEVER use tab-separated columns without pipes — GFM requires `|` delimiters.
+
 7. Use `> **Key Finding:**` or `> **Definition:**` blockquotes for the single most
    important insight or formal definition in the section.
 8. Use **numbered lists** (`1.`, `2.`, `3.`) for sequential steps, proofs, or ranked
