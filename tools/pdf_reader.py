@@ -108,7 +108,8 @@ class PdfReaderTool(ToolBase):
             {
                 "title":            f"PDF chunk (pages {c['pages']})",
                 "url":              url or "local",
-                "snippet":          c["text"][:400],
+                "content":          c["text"],          # full chunk — ingested by run_fanout
+                "snippet":          c["text"][:400],    # preview only
                 "date":             None,
                 "source_type":      "pdf",
                 "credibility_base": 1.0,  # set by caller from document source
@@ -116,7 +117,6 @@ class PdfReaderTool(ToolBase):
                     "pages":       c["pages"],
                     "page_count":  len(pages),
                     "chunk_index": i,
-                    "full_text":   c["text"],
                 },
             }
             for i, c in enumerate(chunks)

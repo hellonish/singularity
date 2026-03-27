@@ -144,14 +144,14 @@ class YouTubeTranscriptTool(ToolBase):
             sources.append({
                 "title":            f"YouTube: {transcript['video_id']}",
                 "url":              transcript["url"],
-                "snippet":          transcript["text"][:400],
+                "content":          transcript["text"],      # full transcript — ingested by run_fanout
+                "snippet":          transcript["text"][:400], # preview only
                 "date":             None,
                 "source_type":      "video",
                 "credibility_base": cred,
                 "metadata": {
-                    "video_id":        transcript["video_id"],
-                    "duration_secs":   transcript["duration"],
-                    "full_transcript": transcript["text"],
+                    "video_id":      transcript["video_id"],
+                    "duration_secs": transcript["duration"],
                 },
             })
             if len(sources) >= max_results:

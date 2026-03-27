@@ -59,7 +59,8 @@ class GitHubTool(ToolBase):
             {
                 "title":            r["title"],
                 "url":              r["url"],
-                "snippet":          r["readme"][:300] or r["description"],
+                "content":          r["readme"] or r["description"],  # full README — ingested by run_fanout
+                "snippet":          (r["readme"] or r["description"])[:300],  # preview only
                 "date":             r["date"],
                 "source_type":      "code",
                 "credibility_base": r["cred"],
