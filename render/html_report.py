@@ -3,7 +3,7 @@ Converts a Markdown research report string into a self-contained HTML file.
 
 The Markdown is embedded as a JS literal; client-side Marked.js + KaTeX
 auto-render handle the full rendering pipeline — no Python-side HTML generation.
-Design system: editorial dark, monospace accents (Newsreader + JetBrains Mono).
+Design system: editorial light, monospace accents (Newsreader + JetBrains Mono).
 CDN stack: KaTeX 0.16.9 · Marked 9.1.6 · Chart.js 4.4.1.
 """
 from __future__ import annotations
@@ -18,18 +18,18 @@ _CSS = """\
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,wght@0,300;0,400;0,500;1,300;1,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg:        #0e0f11;
-  --bg2:       #14161a;
-  --bg3:       #1c1f25;
-  --border:    rgba(255,255,255,0.07);
-  --border-hi: rgba(255,255,255,0.14);
-  --text:      #d4d2c8;
-  --text-dim:  #6e6d68;
-  --text-hi:   #f0ede6;
-  --accent:    #4f9cf0;
-  --accent2:   #6dd6a0;
-  --accent3:   #f0a44f;
-  --danger:    #e05c5c;
+  --bg:        #f7f5f0;
+  --bg2:       #ffffff;
+  --bg3:       #ece9e2;
+  --border:    rgba(0,0,0,0.08);
+  --border-hi: rgba(0,0,0,0.14);
+  --text:      #2a2824;
+  --text-dim:  #5c5952;
+  --text-hi:   #141210;
+  --accent:    #1a6fd4;
+  --accent2:   #0d8a5b;
+  --accent3:   #c45c00;
+  --danger:    #c42d2d;
   --mono:      'JetBrains Mono', monospace;
   --serif:     'Newsreader', Georgia, serif;
   --radius:    8px;
@@ -38,7 +38,10 @@ _CSS = """\
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  color-scheme: light;
+}
 
 body {
   background: var(--bg);
@@ -180,7 +183,7 @@ body {
 .report-content blockquote {
   border-left: 2px solid var(--accent);
   padding: 12px 18px;
-  background: rgba(79,156,240,0.05);
+  background: rgba(26,111,212,0.06);
   border-radius: 0 var(--radius) var(--radius) 0;
   margin: 20px 0;
 }
@@ -221,7 +224,7 @@ body {
 .report-content code {
   font-family: var(--mono);
   font-size: 13px;
-  color: #a8d8a0;
+  color: #1a5c40;
   line-height: 1.7;
 }
 
@@ -262,7 +265,7 @@ body {
   line-height: 1.6;
 }
 
-.report-content tr:hover td { background: rgba(255,255,255,0.02); }
+.report-content tr:hover td { background: rgba(0,0,0,0.03); }
 
 /* ── Mobile math scroll ── */
 .katex-display {
@@ -271,6 +274,8 @@ body {
   -webkit-overflow-scrolling: touch;
   padding: 4px 0;
 }
+
+.report-content .katex { color: var(--text-hi); }
 
 /* ── Footer ── */
 .report-footer {
@@ -304,6 +309,7 @@ _TEMPLATE = Template("""\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>$title</title>
 
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
