@@ -510,17 +510,60 @@ $css
       .trim();
   }
 
-  // ── Step 1: Render Markdown + KaTeX ────────────────────────────────────────
+  // ── Step 1a: Math shield — extract before marked, restore after ────────────
+  //
+  // Problem: CommonMark (marked.js) treats \\ as an escaped backslash and
+  // reduces it to \.  A LaTeX matrix row break is \\, so marked silently
+  // converts it to \ (a thin space) before KaTeX ever runs.
+  //
+  // Fix: pull every $...$ and $$...$$ block out of the markdown string and
+  // replace it with a placeholder that marked cannot damage.  After marked
+  // produces HTML, restore the original math strings, then run KaTeX.
+  // Control chars \x02 / \x03 are safe placeholders — they cannot appear in
+  // LLM-generated content and are invisible to marked's text processing.
+
+  function shieldMath(markdown) {
+    const store = [];
+
+    // Display math $$...$$ first (must precede inline so $$ isn't consumed as two $).
+    // [$][$] avoids writing \$\$ which could interact with Python string.Template.
+    let out = markdown.replace(/[$][$]([\s\S]*?)[$][$]/g, function (match) {
+      store.push(match);
+      return '\x02M' + (store.length - 1) + '\x03';
+    });
+
+    // Inline math $...$ (no newlines inside).
+    out = out.replace(/[$]([^$\n]+?)[$]/g, function (match) {
+      store.push(match);
+      return '\x02M' + (store.length - 1) + '\x03';
+    });
+
+    return { out: out, store: store };
+  }
+
+  function restoreShield(html, store) {
+    return html.replace(/\x02M(\d+)\x03/g, function (_, idx) {
+      return store[parseInt(idx, 10)];
+    });
+  }
+
+  // ── Step 1b: Render Markdown + KaTeX ───────────────────────────────────────
 
   function renderMarkdownWithMath(markdown, targetEl) {
-    // breaks:true — single \n → <br> for step-by-step derivations and math blocks.
+    // Shield math blocks from marked's backslash-escape processing.
+    const { out: safeMarkdown, store } = shieldMath(markdown);
+
+    // breaks:true — single \n → <br> for step-by-step derivations.
     // gfm:true   — GitHub Flavored Markdown: tables, task lists, strikethrough.
-    targetEl.innerHTML = marked.parse(markdown, { breaks: true, gfm: true });
+    const rawHtml = marked.parse(safeMarkdown, { breaks: true, gfm: true });
+
+    // Re-insert original math strings untouched by marked.
+    targetEl.innerHTML = restoreShield(rawHtml, store);
 
     // KaTeX auto-render.  Python string.Template collapses:
     //   $$$$ → $$  (display math delimiter)
     //   $$   → $$   (inline math delimiter)
-    // Listing display before inline prevents $$ being consumed as two inlines.
+    // Display must be listed before inline so $$ isn't consumed as two $ inlines.
     renderMathInElement(targetEl, {
       delimiters: [
         { left: '$$$$', right: '$$$$', display: true  },
@@ -834,7 +877,11 @@ class ReportHtmlRenderer:
 
         title = f"Research Report — {query[:72]}"
 
-        return _TEMPLATE.substitute(
+        # safe_substitute instead of substitute — the JS section contains regex
+        # patterns with $ (e.g. [$]) that are not Template variables.
+        # safe_substitute leaves unrecognised $-patterns unchanged rather than
+        # raising ValueError, while still substituting all real $placeholders.
+        return _TEMPLATE.safe_substitute(
             title=_escape_html(title),
             query_text=_escape_html(query),
             meta_row=meta_row,
