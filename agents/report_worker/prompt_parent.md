@@ -78,6 +78,8 @@ Use escape sequences:
 | Sub-heading | `\n\n### Title\n\n` |
 
 Every LaTeX backslash must be doubled in a JSON string: `\\sum`, `\\frac`, `\\text`.
+Matrix row breaks are `\\` in LaTeX — inside JSON that becomes `\\\\` (four chars).
+`"\\begin{bmatrix} 1 & 0 \\\\ 0 & 1 \\end{bmatrix}"` ← correct matrix in JSON.
 
 **Correct example:**
 ```json

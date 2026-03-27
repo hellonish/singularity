@@ -146,10 +146,44 @@ Use escape sequences instead:
 "content": "The FFT reduces DFT complexity from $O(N^2)$ to $O(N \\log_2 N)$ through divide-and-conquer decomposition.\n\n### Step-by-Step: 4-point DFT → FFT\n\n1. Split $x[n]$ into even and odd: $x_e = [x_0, x_2]$, $x_o = [x_1, x_3]$\n2. Compute 2-point DFTs: $X_e[k]$ and $X_o[k]$\n3. Combine via twiddle factor $W_N^k = e^{-j2\\pi k/N}$:\n$$X[k] = X_e[k] + W_N^k X_o[k]$$\n4. Result: 4 multiplications vs 16 in direct DFT"
 ```
 
+**Matrix row breaks — CRITICAL special case:**
+
+A LaTeX matrix row break is `\\` (two backslashes). Inside a JSON string, every
+backslash must be doubled. So a row break `\\` becomes `\\\\` in the JSON.
+
+```
+WRONG  (renders as thin space, matrix stays on one line):
+"\\begin{bmatrix} 1 & 0 \\ 0 & 1 \\end{bmatrix}"
+JSON decodes to: \begin{bmatrix} 1 & 0 \ 0 & 1 \end{bmatrix}   ← \ is thin space
+
+CORRECT (renders as proper row break):
+"\\begin{bmatrix} 1 & 0 \\\\ 0 & 1 \\end{bmatrix}"
+JSON decodes to: \begin{bmatrix} 1 & 0 \\ 0 & 1 \end{bmatrix}  ← \\ is row break
+```
+
+A complete 3×2 matrix example:
+```
+"$$Q = \\begin{bmatrix} 1 & 0 \\\\ 0 & 1 \\\\ 1 & 1 \\end{bmatrix}$$"
+```
+
+**Backslash doubling summary for JSON strings:**
+
+| LaTeX you want | Write in JSON string |
+|---|---|
+| `\begin{bmatrix}` | `\\begin{bmatrix}` |
+| `\end{bmatrix}` | `\\end{bmatrix}` |
+| `\\` (row break) | `\\\\` |
+| `\frac{a}{b}` | `\\frac{a}{b}` |
+| `\sum_{i=0}^{n}` | `\\sum_{i=0}^{n}` |
+| `\text{softmax}` | `\\text{softmax}` |
+| `\sqrt{d_k}` | `\\sqrt{d_k}` |
+| `\approx` | `\\approx` |
+| `\cdot` | `\\cdot` |
+
 **Checklist before submitting your JSON:**
 - [ ] No literal line breaks inside any string value — only `\n` escape sequences
-- [ ] Every `$` for math is escaped as `$$` if it appears in the JSON string (not needed — `$` does not need escaping in JSON, only `"` and `\` do)
-- [ ] Every backslash in LaTeX (`\sum`, `\frac`) is doubled: `\\sum`, `\\frac`
+- [ ] Every backslash in LaTeX is doubled in the JSON string: `\\frac`, `\\sum`, `\\text`
+- [ ] Matrix row breaks use `\\\\` (four chars in JSON) not `\\` (which gives only one backslash)
 - [ ] Blockquotes use `\n\n> **Label:** text\n\n` not `> text` mid-paragraph
 
 ## Writing Rules
