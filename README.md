@@ -3,7 +3,7 @@
 
 > **Purpose:** This report is a complete technical reference for the Singularity project. It is written to serve as both a post-mortem of how the system was designed and debugged, and as a study guide for understanding modern agentic AI systems from first principles.
 >
-> **Last updated:** March 2026. Section 3 and the Appendix reflect the current module layout under `agents/`. The project now has two execution modes: Legacy DAG (`--depth`) and Phase 5 Strength-Based Pipeline (`--strength`).
+> **Last updated:** March 2026. Reflects the current four-phase pipeline (B → A → C → D), tiered model routing, Qdrant vector store, and Phase D Report Polisher. The project has two execution modes: Legacy DAG (`--depth`) and Phase 5 Strength-Based Pipeline (`--strength`).
 
 ---
 
@@ -181,26 +181,36 @@ The project has two execution modes that share the same skills, tools, and LLM l
 
 ### 3B. Phase 5 Strength-Based Pipeline (`--strength 1–10`)
 
+The pipeline runs in four phases. Crucially, **planning (B) precedes retrieval (A)** — the
+Retriever sees the finalised section tree and generates queries targeted at each actual section
+topic rather than guessing from the top-level question alone.
+
 ```
 CLI _strength_run()
         │
         ▼
   run_pipeline()  [agents/orchestrator/pipeline.py]
         │
-        ├── Phase A: Retrieval
-        │     Retriever → skill fan-out → Qdrant vector store
+        ├── Phase B: Structure Planning  ← FIRST
+        │     3× ReportManagerAgent (parallel, diversity via assigned perspectives)
+        │           └── ReportLeadAgent (synthesises → final ReportTree)
         │
-        ├── Phase B: Structure Planning
-        │     3× ReportManagerAgent (parallel proposals)
-        │           └── ReportLeadAgent (final tree selection)
+        ├── Phase A: Retrieval  ← SECOND (tree-informed)
+        │     Retriever receives the finalised tree; generates queries targeted
+        │     at each section's evidence needs → skill fan-out → Qdrant
         │
-        └── Phase C: Writing (bottom-up)
-              ReportWorkerAgent per SectionNode
-                    ├── Call 1: Multi-Analysis (tier-2 skills)
-                    ├── Call 2: Section Write (tier-3 output skill)
-                    └── Stores content + source_map on SectionNode
-                          ↓
-              _format_report() → Reference List from source_map
+        ├── Phase C: Writing (bottom-up)  ← THIRD
+        │     ReportWorkerAgent per SectionNode
+        │           ├── Call 1: Multi-Analysis (3 tier-2 skills, grok-3-mini)
+        │           ├── Call 2: Section Write  (1 tier-3 skill, grok-4)
+        │           └── Stores content + source_map on SectionNode (in-place)
+        │                 ↓
+        │     _format_report() → assembled Markdown + Reference List
+        │
+        └── Phase D: Polish  ← FOURTH
+              Stage 1 — Python: normalise math delimiters, fix table syntax
+              Stage 2 — LLM:   parallel section-by-section creative formatting
+                                (tables, callouts, visual separators, flow)
 ```
 
 ### Module Inventory
