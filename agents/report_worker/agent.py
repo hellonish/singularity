@@ -115,15 +115,18 @@ class ReportWorkerAgent:
     # ------------------------------------------------------------------
 
     def _gather_children_content(self) -> str:
+        """
+        Concatenates the already-written content of all direct children for
+        the parent worker's context.  Node IDs are intentionally omitted —
+        they are internal identifiers and must not appear in written prose.
+        """
         children = self.tree.children_of(self.node.node_id)
         if not children:
             return ""
         parts = []
         for child in children:
             if child.content:
-                parts.append(
-                    f"### {child.title} (node {child.node_id})\n\n{child.content}"
-                )
+                parts.append(f"### {child.title}\n\n{child.content}")
         return "\n\n---\n\n".join(parts)
 
     @staticmethod
@@ -150,12 +153,13 @@ class ReportWorkerAgent:
         """
         Returns a human-readable source label for citation purposes.
 
-        If the stored title is empty, 'Unknown', or a generic placeholder,
-        derives a label from the URL domain (e.g. 'arxiv.org', 'youtube.com')
-        to avoid polluting the Reference List with [Unknown] / [Unknown2] keys.
+        If the stored title is empty, 'Unknown', a generic placeholder, or a
+        tool-generated label like 'PDF chunk (pages X-Y)', derives a label
+        from the URL domain to avoid polluting the Reference List with
+        [Unknown] / [PdfChunkPages10] keys.
         """
         _GENERIC = {"unknown", "untitled", "source", ""}
-        if title and title.lower() not in _GENERIC:
+        if title and title.lower() not in _GENERIC and not title.lower().startswith("pdf chunk"):
             return title
         if url:
             # Strip scheme and www, take first path segment as context
@@ -188,16 +192,23 @@ class ReportWorkerAgent:
         source_map: dict[str, dict] = {}
         used_keys: set[str] = set()
         for i, chunk in enumerate(chunks):
-            cred  = getattr(chunk, "credibility", 0.0)
-            raw_title = getattr(chunk, "source_title", "") or ""
-            url   = getattr(chunk, "source_url", "") or ""
-            text  = getattr(chunk, "text", str(chunk))
+            cred        = getattr(chunk, "credibility", 0.0)
+            raw_title   = getattr(chunk, "source_title", "") or ""
+            url         = getattr(chunk, "source_url", "") or ""
+            source_type = getattr(chunk, "source_type", "") or ""
+            date        = getattr(chunk, "date", "") or ""
+            text        = getattr(chunk, "text", str(chunk))
             title = ReportWorkerAgent._resolve_title(raw_title, url)
             cite_id = ReportWorkerAgent._make_citation_id(title, used_keys)
             if cite_id not in source_map:
-                source_map[cite_id] = {"title": title, "url": url}
+                source_map[cite_id] = {
+                    "title":       title,
+                    "url":         url,
+                    "source_type": source_type,
+                    "date":        date,
+                }
             parts.append(
-                f"[Chunk {i} | Cite as: {cite_id}] "
+                f"[Evidence {i} | Cite as: {cite_id}] "
                 f"Source: {title} ({url}) | credibility={cred:.2f}\n{text}"
             )
         return "\n\n".join(parts), source_map
@@ -229,7 +240,7 @@ class ReportWorkerAgent:
             f"research_query: {research_query}\n\n"
         )
         if chunks_text and chunks_text != "(no chunks retrieved)":
-            msg += f"## Retrieved Evidence Chunks\n\n{chunks_text}\n\n"
+            msg += f"## Retrieved Evidence\n\n{chunks_text}\n\n"
         if children_content:
             msg += f"## Children Content (already written)\n\n{children_content}\n\n"
         return msg
@@ -258,10 +269,10 @@ class ReportWorkerAgent:
                 if isinstance(idx, int) and idx < len(raw_chunks):
                     chunk = raw_chunks[idx]
                     text = getattr(chunk, "text", "")[:600]
-                    excerpts.append(f"[Chunk {idx}]\n{text}")
+                    excerpts.append(f"[Evidence {idx}]\n{text}")
             if excerpts:
                 key_chunk_text = (
-                    "## Key Evidence Chunks (direct text for quoting)\n\n"
+                    "## Key Evidence Excerpts (direct text for quoting)\n\n"
                     + "\n\n".join(excerpts)
                     + "\n\n"
                 )

@@ -41,23 +41,59 @@ def _make_client(model: str) -> GrokClient:
     return GrokClient(model_name=model)
 
 
+# Domains that should never appear in a published reference list.
+# Typically translation proxies, redirectors, or content farms.
+_JUNK_DOMAINS = frozenset({
+    "translate.yandex.com",
+    "translate.google.com",
+    "translate.goo.ne.jp",
+    "web.archive.org",
+    "webcache.googleusercontent.com",
+    "cache.google.com",
+    "amp.reddit.com",
+    "l.facebook.com",
+    "t.co",
+    "bit.ly",
+    "tinyurl.com",
+})
+
+
+def _is_junk_url(url: str) -> bool:
+    """Returns True if the URL belongs to a known junk/redirect domain."""
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.lstrip("www.").lower()
+        return domain in _JUNK_DOMAINS or any(
+            domain.endswith("." + d) for d in _JUNK_DOMAINS
+        )
+    except Exception:
+        return False
+
+
 def _format_report(
     tree: ReportTree,
     query: str,
-    bib_md: str,
     cred_avg: float | None,
     source_map: dict[str, dict] | None = None,
 ) -> str:
     """
     Assemble the final Markdown document from the written tree.
 
-    Appends a Reference List built from `source_map` (citation_id → {title, url})
-    collected by the workers. Each entry links the inline citation key used in the
-    section content back to its actual source URL.
+    Appends a single Reference List built from `source_map`
+    (citation_id → {title, url, source_type, date}) collected by the workers.
+    Entries are ordered by first appearance in the tree (reading order) and
+    junk URLs are filtered out.  The legacy CitationRegistry bib_md block is
+    intentionally dropped — it duplicated entries with worse metadata.
     """
     parts = [
         f"# Research Report\n\n**Query:** {query}\n\n---\n",
     ]
+
+    # Track citation first-appearance order via reading-order tree walk
+    appearance_order: list[str] = []
+    seen_order: set[str] = set()
 
     def _walk(node_id: str, depth: int) -> None:
         node = tree.by_id(node_id)
@@ -65,28 +101,58 @@ def _format_report(
             return
         heading = "#" * min(depth + 1, 6)
         parts.append(f"{heading} {node.title}\n\n{node.content}\n")
+        # Record citation order from this node's source_map keys
+        for cite_id in (node.source_map or {}).keys():
+            if cite_id not in seen_order:
+                seen_order.add(cite_id)
+                appearance_order.append(cite_id)
         for child in tree.children_of(node_id):
             _walk(child.node_id, depth + 1)
 
     _walk(tree.root.node_id, 1)
 
     if source_map:
+        # Any keys not reached by reading-order walk (e.g. parent-only sources)
+        for cite_id in source_map:
+            if cite_id not in seen_order:
+                appearance_order.append(cite_id)
+
         ref_lines: list[str] = []
-        for cite_id in sorted(source_map.keys()):
-            info = source_map[cite_id]
-            title = info.get("title", "")
-            url   = info.get("url", "")
-            if url and title:
-                ref_lines.append(f"- {cite_id}: [{title}]({url})")
-            elif url:
-                ref_lines.append(f"- {cite_id}: {url}")
+        for cite_id in appearance_order:
+            info = source_map.get(cite_id)
+            if not info:
+                continue
+            title       = (info.get("title") or "").strip()
+            url         = (info.get("url") or "").strip()
+            source_type = (info.get("source_type") or "").strip()
+            date        = (info.get("date") or "").strip()
+
+            if _is_junk_url(url):
+                continue
+
+            # Build the entry: [CiteKey] Title (type · date) url
+            label = f"**{cite_id}**"
+            if title and url:
+                body = f"[{title}]({url})"
             elif title:
-                ref_lines.append(f"- {cite_id}: {title}")
+                body = title
+            elif url:
+                body = f"[{url}]({url})"
+            else:
+                continue   # Nothing useful — skip entirely
+
+            meta_parts = []
+            if source_type:
+                meta_parts.append(source_type)
+            if date:
+                meta_parts.append(date[:7])   # YYYY-MM at most
+            meta = f" · *{' · '.join(meta_parts)}*" if meta_parts else ""
+
+            ref_lines.append(f"- {label} {body}{meta}")
+
         if ref_lines:
             parts.append("\n---\n\n## Reference List\n\n" + "\n".join(ref_lines))
 
-    if bib_md.strip():
-        parts.append(f"\n---\n\n## References\n\n{bib_md}")
     if cred_avg is not None:
         parts.append(f"\n\n---\n\n*Mean source credibility: {cred_avg:.2f} / 1.00*\n")
 
@@ -270,17 +336,11 @@ async def run_pipeline(
     )
 
     # ── Assemble report ───────────────────────────────────────────────
-    bib_md = ""
-    if ctx.citation_registry:
-        bib_text = ctx.citation_registry.format_bibliography()
-        if bib_text.strip():
-            bib_md = bib_text
-
     cred_avg = None
     if ctx.credibility_scores:
         cred_avg = sum(ctx.credibility_scores.values()) / len(ctx.credibility_scores)
 
-    report_md = _format_report(tree, query, bib_md, cred_avg, source_map=source_map)
+    report_md = _format_report(tree, query, cred_avg, source_map=source_map)
 
     total_words = sum(n.word_count for n in tree.nodes)
     print(f"\n{'=' * 65}")

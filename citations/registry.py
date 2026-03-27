@@ -147,21 +147,42 @@ class CitationRegistry:
         return f"[{url}]({url})" if url else "*URL unavailable*"
 
     @staticmethod
-    def _apa(r: CitationRecord) -> str:
-        authors = ", ".join(r.authors[:6]) + (" et al." if len(r.authors) > 6 else "")
-        year    = f"({r.year})." if r.year else "(n.d.)."
-        url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
-        return f"{authors or 'Unknown'} {year} {r.title}.{url}"
+    def _author_label(r: "CitationRecord") -> str:
+        """
+        Returns the best available author label for a citation record.
+
+        Priority: explicit author list → URL domain (e.g. 'github.com',
+        'arxiv.org') → 'n.a.' (not available).  Never returns the generic
+        string 'Unknown' which pollutes formatted reference lists.
+        """
+        if r.authors:
+            return ", ".join(r.authors[:6]) + (" et al." if len(r.authors) > 6 else "")
+        if r.url:
+            try:
+                import re as _re
+                domain = _re.sub(r"^https?://(www\.)?", "", r.url).split("/")[0]
+                if domain:
+                    return domain
+            except Exception:
+                pass
+        return "n.a."
 
     @staticmethod
-    def _ieee(idx: int, r: CitationRecord) -> str:
-        authors = ", ".join(r.authors[:3]) + (" et al." if len(r.authors) > 3 else "")
+    def _apa(r: "CitationRecord") -> str:
+        authors = CitationRegistry._author_label(r)
+        year    = f"({r.year})." if r.year else "(n.d.)."
         url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
-        return (f'[{idx}] {authors or "Unknown"}, "{r.title}," '
+        return f"{authors} {year} {r.title}.{url}"
+
+    @staticmethod
+    def _ieee(idx: int, r: "CitationRecord") -> str:
+        authors = CitationRegistry._author_label(r)
+        url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
+        return (f'[{idx}] {authors}, "{r.title}," '
                 f'{r.year or "n.d."}. [Online]. Available:{url}')
 
     @staticmethod
-    def _vancouver(idx: int, r: CitationRecord) -> str:
-        authors = ", ".join(r.authors[:6]) + (" et al." if len(r.authors) > 6 else "")
+    def _vancouver(idx: int, r: "CitationRecord") -> str:
+        authors = CitationRegistry._author_label(r)
         url     = f"\n{CitationRegistry._md_url(r.url)}" if r.url else ""
-        return f"{idx}. {authors or 'Unknown'}. {r.title}. {r.year or 'n.d.'}.{url}"
+        return f"{idx}. {authors}. {r.title}. {r.year or 'n.d.'}.{url}"

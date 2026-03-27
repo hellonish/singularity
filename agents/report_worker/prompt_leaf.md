@@ -185,10 +185,13 @@ Use escape sequences instead:
 9. Use fenced code blocks (` ``` `) for any algorithm pseudocode or Python/code.
 
 ### Evidence and citations
-10. Use evidence from the provided chunks — every factual claim must trace to a chunk.
-11. Use the pre-assigned citation key from each chunk header ("Cite as: [Key]") verbatim.
+10. Use evidence from the provided evidence items — every factual claim must trace to one.
+11. Use the pre-assigned citation key from each evidence header ("Cite as: [Key]") verbatim.
     Do NOT invent citation keys.
-12. Every body paragraph must contain at least one specific data point, statistic,
+12. **NEVER write "Evidence X", "Chunk X", "as described in Evidence 3", "see Chunk 7",
+    or any reference to the internal evidence index numbers in your content.** The reader
+    does not see the evidence list. Use only the bracketed citation key: `[Smith2024]`.
+13. Every body paragraph must contain at least one specific data point, statistic,
     named study, year, or concrete example. Abstract paragraphs without specifics
     are not acceptable.
 

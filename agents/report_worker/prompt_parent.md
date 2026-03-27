@@ -111,8 +111,10 @@ Every LaTeX backslash must be doubled in a JSON string: `\\sum`, `\\frac`, `\\te
 
 ### Evidence and citations
 8. No new factual claims without a citation — if you add something, it must come
-   from the provided Qdrant chunks. Use pre-assigned citation keys verbatim.
-9. Do NOT re-introduce facts already cited in children. Cross-cutting insight only.
+   from the provided evidence items. Use pre-assigned citation keys verbatim.
+9. **NEVER write "Evidence X", "Chunk X", or any reference to internal index numbers
+   in your content.** Use only the bracketed citation key: `[Smith2024]`.
+10. Do NOT re-introduce facts already cited in children. Cross-cutting insight only.
 
 ### Narrative voice
 10. Banned filler phrases:

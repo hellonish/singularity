@@ -9,8 +9,10 @@ credibility_base is 1.0 — caller should set it from the source document's cred
 """
 import asyncio
 import io
+import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -46,6 +48,34 @@ def _extract_with_pymupdf(data: bytes) -> list[PdfPage]:
         text = page.get_text("text") or ""
         pages.append(PdfPage(page_num=i, text=text, tables=[]))
     return pages
+
+
+def _pdf_title_from_url(url: str | None) -> str:
+    """
+    Derives a human-readable document title from a PDF URL.
+
+    Extracts the filename stem (e.g. 'attention-is-all-you-need' from the path),
+    converts hyphens/underscores to spaces, title-cases the result, and appends
+    the domain for context.  Falls back to the domain alone when no filename
+    is present.  Never returns the generic 'PDF chunk (pages X-Y)' placeholder.
+    """
+    if not url or url == "local":
+        return "Local PDF"
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lstrip("www.")
+        # Take the last non-empty path segment and strip the .pdf extension
+        segments = [s for s in parsed.path.split("/") if s]
+        if segments:
+            stem = segments[-1]
+            stem = re.sub(r"\.pdf$", "", stem, flags=re.IGNORECASE)
+            # Convert hyphens/underscores/dots to spaces and title-case
+            stem = re.sub(r"[-_.]+", " ", stem).strip()
+            if stem:
+                return f"{stem.title()} — {domain}"
+        return domain
+    except Exception:
+        return "PDF Document"
 
 
 def _chunk_pages(pages: list[PdfPage]) -> list[dict]:
@@ -103,10 +133,11 @@ class PdfReaderTool(ToolBase):
 
         chunks = _chunk_pages(pages)
         full_text = " ".join(c["text"] for c in chunks)
+        doc_title = _pdf_title_from_url(url)
 
         sources = [
             {
-                "title":            f"PDF chunk (pages {c['pages']})",
+                "title":            f"{doc_title} (pp. {c['pages']})",
                 "url":              url or "local",
                 "content":          c["text"],          # full chunk — ingested by run_fanout
                 "snippet":          c["text"][:400],    # preview only
