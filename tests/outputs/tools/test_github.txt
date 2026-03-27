@@ -1,0 +1,71 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_github_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  GitHubTool  ✓  10 source(s)  |  cred: 0.88
+────────────────────────────────────────────────────────────
+  [1] [0.90] vllm-project/vllm
+       url     : https://github.com/vllm-project/vllm
+       date    : 2026-03-25
+       snippet : <!-- markdownlint-disable MD001 MD041 --> <p align="center">   <picture>     <source media="(prefers-color-scheme: dark)
+  [2] [0.90] sgl-project/sglang
+       url     : https://github.com/sgl-project/sglang
+       date    : 2026-03-25
+       snippet : <div align="center" id="sglangtop"> <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png"
+  [3] [0.90] kvcache-ai/Mooncake
+       url     : https://github.com/kvcache-ai/Mooncake
+       date    : 2026-03-25
+       snippet : <div align="center">   <img src=image/mooncake-icon.png width=44% />   <h2 align="center">       A KVCache-centric Disag
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_github_credibility_scales_with_stars
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  GitHubTool (credibility vs stars)  ✓  10 source(s)  |  cred: 0.88
+────────────────────────────────────────────────────────────
+  [1] [0.90] vllm-project/vllm
+       url     : https://github.com/vllm-project/vllm
+       date    : 2026-03-25
+       snippet : <!-- markdownlint-disable MD001 MD041 --> <p align="center">   <picture>     <source media="(prefers-color-scheme: dark)
+  [2] [0.90] sgl-project/sglang
+       url     : https://github.com/sgl-project/sglang
+       date    : 2026-03-25
+       snippet : <div align="center" id="sglangtop"> <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png"
+  [3] [0.90] kvcache-ai/Mooncake
+       url     : https://github.com/kvcache-ai/Mooncake
+       date    : 2026-03-25
+       snippet : <div align="center">   <img src=image/mooncake-icon.png width=44% />   <h2 align="center">       A KVCache-centric Disag
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_github_readme_in_snippet
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  GitHubTool (readme snippet)  ✓  3 source(s)  |  cred: 0.90
+────────────────────────────────────────────────────────────
+  [1] [0.90] d2l-ai/d2l-en
+       url     : https://github.com/d2l-ai/d2l-en
+       date    : 2026-03-25
+       snippet : <div align="left">   <img src="https://raw.githubusercontent.com/d2l-ai/d2l-en/master/static/logo-with-text.png" width="
+  [2] [0.90] tracel-ai/burn
+       url     : https://github.com/tracel-ai/burn
+       date    : 2026-03-25
+       snippet : <div align="center"> <img src="https://raw.githubusercontent.com/tracel-ai/burn/main/assets/logo-burn-neutral.webp" widt
+  [3] [0.90] dragen1860/Deep-Learning-with-TensorFlow-book
+       url     : https://github.com/dragen1860/Deep-Learning-with-TensorFlow-book
+       date    : 2026-03-23
+       snippet : # TensorFlow 2深度学习开源书(龙书)  基于TensorFlow 2正式版！！！ 理论与实战结合，非常适合入门学习！！！  - **[纸质书购买链接：京东](https://item.jd.com/12954866.html)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_github_rate_limit_note
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  GITHUB_TOKEN: not set (60 req/hr)

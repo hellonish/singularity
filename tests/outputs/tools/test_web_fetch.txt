@@ -1,0 +1,57 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_web_fetch_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  WebFetchTool  ✓  10 source(s)  |  cred: 0.75
+────────────────────────────────────────────────────────────
+  [1] [0.75] Generative AI Security Risks: Identifying and Mitigating LLM
+       url     : https://tekysinfo.com/generative-ai-security-risks-identifying-and-mit
+       snippet : The data of the company that is sensitive has just been handed over to a third party system that has no guidelines on wh
+  [2] [0.75] LLM Audit and Compliance Best Practices - ML Journey
+       url     : https://mljourney.com/llm-audit-and-compliance-best-practices/
+       snippet : When a user exercises their right to be forgotten under GDPR , deleting their data from databases isn ’ t sufficient if 
+  [3] [0.75] Filevault.Cloud | How to Audit Third-Party AI Tools Before
+       url     : https://filevault.cloud/how-to-audit-third-party-ai-tools-before-using
+       snippet : Privacy Policy and Data Processing : Does the privacy policy disclose whether customer images or prompts are retained an
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_web_fetch_gov_sources_get_credibility_boost
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  WebFetchTool (gov/edu query)  ✓  10 source(s)  |  cred: 0.79
+────────────────────────────────────────────────────────────
+  [1] [0.75] General Data Protection Regulation - Wikipedia
+       url     : https://en.wikipedia.org/wiki/General_Data_Protection_Regulation
+       snippet : The General Data Protection Regulation, abbreviated GDPR , is a European Union regulation on information privacy in the 
+  [2] [0.85] Regulation - 2016/679 - EN - gdpr - EUR-Lex
+       url     : https://eur-lex.europa.eu/eli/reg/2016/679/oj/eng
+       snippet : Text . 4.5.2016. EN. Official Journal of the European Union.on the protection of natural persons with regard to the proc
+  [3] [0.75] General Data Protection Regulation (GDPR) – Legal Text
+       url     : https://gdpr-info.eu/
+       snippet : Welcome to gdpr -info.eu. Here you can find the official PDF of the Regulation (EU) 2016/679 (General Data Protection Re
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_web_fetch_max_results_respected
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  WebFetchTool (max_results=5)  ✓  5 source(s)  |  cred: 0.75
+────────────────────────────────────────────────────────────
+  [1] [0.75] GDPR and Large Language Models: Technical and Legal Obstacles
+       url     : https://www.mdpi.com/1999-5903/17/4/151
+       snippet : Mar 28, 2025 · More specifically, Article 3 [3] of the GDPR defines its territorial scope, significantly extending the r
+  [2] [0.75] Data Privacy in LLM Applications: Complete GDPR Compliance ...
+       url     : https://markaicode.com/gdpr-compliance-llm-applications/
+       snippet : 3 days ago · Ensure GDPR compliance in LLM applications with practical steps, code examples, and privacy-by-design imple
+  [3] [0.75] Large Language Models (LLM) GDPR Compliance - GDPR Local
+       url     : https://gdprlocal.com/large-language-models-llm-gdpr/
+       snippet : Dec 9, 2025 · Different deployment models create distinct GDPR obligations and risk profiles that organisations must eva
+  ... and 2 more source(s)
+────────────────────────────────────────────────────────────

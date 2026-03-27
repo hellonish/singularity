@@ -1,0 +1,50 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_youtube_transcript_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  YouTubeTranscriptTool  ✓  3 source(s)  |  cred: 0.65
+────────────────────────────────────────────────────────────
+  [1] [0.65] YouTube: ZqrhuizU_Qs
+       url     : https://www.youtube.com/watch?v=ZqrhuizU_Qs
+       snippet : Welcome to the explainer. Have you ever wondered how an AI like chat GPT can actually follow a long complicated conversa
+  [2] [0.65] YouTube: ZT1QIhaaYLQ
+       url     : https://www.youtube.com/watch?v=ZT1QIhaaYLQ
+       snippet : You know, if you really sit down and think about it, human communication is just uh it's an absolute miracle of context.
+  [3] [0.65] YouTube: ly5CJ4wCklI
+       url     : https://www.youtube.com/watch?v=ly5CJ4wCklI
+       snippet : do you know how the attention mechanism in Transformers Works here's how for each decoder cell we provide information fr
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_youtube_transcript_academic_channel_boost
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  YouTubeTranscriptTool (academic query)  ✓  3 source(s)  |  cred: 0.65
+────────────────────────────────────────────────────────────
+  [1] [0.65] YouTube: gzJI1jzQkH8
+       url     : https://www.youtube.com/watch?v=gzJI1jzQkH8
+       snippet : hello everyone I am J today I'm going to talk about the linear representation hypothesis in the geometry of large langua
+  [2] [0.65] YouTube: lfOzyBIC5kQ
+       url     : https://www.youtube.com/watch?v=lfOzyBIC5kQ
+       snippet : I'm Nicholas and I've been working with hugging face on large language models and for this paper we investigated scaling
+  [3] [0.65] YouTube: LkED9wKI1TY
+       url     : https://www.youtube.com/watch?v=LkED9wKI1TY
+       snippet : hi friends in this video Let's dive into four large language model award-winning papers for news 2023 shout out to J Leo
+────────────────────────────────────────────────────────────
+
+  [0.65] https://www.youtube.com/watch?v=gzJI1jzQkH8
+
+  [0.65] https://www.youtube.com/watch?v=lfOzyBIC5kQ
+
+  [0.65] https://www.youtube.com/watch?v=LkED9wKI1TY
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_youtube_transcript_full_text_length
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  snippet: 400 chars | full_transcript: 8825 chars
+
+  snippet: 400 chars | full_transcript: 66815 chars

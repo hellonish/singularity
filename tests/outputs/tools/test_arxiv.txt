@@ -1,0 +1,76 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_arxiv_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  ArxivTool  ✓  10 source(s)  |  cred: 0.92
+────────────────────────────────────────────────────────────
+  [1] [0.95] Hallucination Detection with Small Language Models
+       url     : http://arxiv.org/abs/2506.22486v1
+       date    : 2025-06-24
+       snippet : Since the introduction of ChatGPT, large language models (LLMs) have demonstrated significant utility in various tasks, 
+  [2] [0.95] THaMES: An End-to-End Tool for Hallucination Mitigation and Evalu
+       url     : http://arxiv.org/abs/2409.11353v3
+       date    : 2024-09-17
+       snippet : Hallucination, the generation of factually incorrect content, is a growing challenge in Large Language Models (LLMs). Ex
+  [3] [0.88] Probabilistic distances-based hallucination detection in LLMs wit
+       url     : http://arxiv.org/abs/2506.09886v2
+       date    : 2025-06-11
+       snippet : Detecting hallucinations in large language models (LLMs) is critical for their safety in many applications. Without prop
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_arxiv_recency_filter
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  ArxivTool (no filter)  ✓  10 source(s)  |  cred: 0.92
+────────────────────────────────────────────────────────────
+  [1] [0.95] Hallucination Detection with Small Language Models
+       url     : http://arxiv.org/abs/2506.22486v1
+       date    : 2025-06-24
+       snippet : Since the introduction of ChatGPT, large language models (LLMs) have demonstrated significant utility in various tasks, 
+  [2] [0.95] THaMES: An End-to-End Tool for Hallucination Mitigation and Evalu
+       url     : http://arxiv.org/abs/2409.11353v3
+       date    : 2024-09-17
+       snippet : Hallucination, the generation of factually incorrect content, is a growing challenge in Large Language Models (LLMs). Ex
+  ... and 8 more source(s)
+────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────
+  ArxivTool (1-year filter)  ✓  4 source(s)  |  cred: 0.92
+────────────────────────────────────────────────────────────
+  [1] [0.95] Hallucination Detection with Small Language Models
+       url     : http://arxiv.org/abs/2506.22486v1
+       date    : 2025-06-24
+       snippet : Since the introduction of ChatGPT, large language models (LLMs) have demonstrated significant utility in various tasks, 
+  [2] [0.88] Probabilistic distances-based hallucination detection in LLMs wit
+       url     : http://arxiv.org/abs/2506.09886v2
+       date    : 2025-06-11
+       snippet : Detecting hallucinations in large language models (LLMs) is critical for their safety in many applications. Without prop
+  ... and 2 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_arxiv_credibility_levels
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  ArxivTool (credibility check)  ✓  15 source(s)  |  cred: 0.91
+────────────────────────────────────────────────────────────
+  [1] [0.95] Hallucination Detection with Small Language Models
+       url     : http://arxiv.org/abs/2506.22486v1
+       date    : 2025-06-24
+       snippet : Since the introduction of ChatGPT, large language models (LLMs) have demonstrated significant utility in various tasks, 
+  [2] [0.95] THaMES: An End-to-End Tool for Hallucination Mitigation and Evalu
+       url     : http://arxiv.org/abs/2409.11353v3
+       date    : 2024-09-17
+       snippet : Hallucination, the generation of factually incorrect content, is a growing challenge in Large Language Models (LLMs). Ex
+  [3] [0.88] Probabilistic distances-based hallucination detection in LLMs wit
+       url     : http://arxiv.org/abs/2506.09886v2
+       date    : 2025-06-11
+       snippet : Detecting hallucinations in large language models (LLMs) is critical for their safety in many applications. Without prop
+  ... and 12 more source(s)
+────────────────────────────────────────────────────────────

@@ -1,0 +1,73 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_dataset_hub_basic
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  DatasetHubTool  ✓  10 source(s)  |  cred: 0.81
+────────────────────────────────────────────────────────────
+  [1] [0.80] rajpurkar/squad
+       url     : https://huggingface.co/datasets/rajpurkar/squad
+       date    : 2024-03-04
+       snippet :  	 		 		Dataset Card for SQuAD 	   	 		 		Dataset Summary 	  Stanford Question Answering Dataset (SQuAD) is a reading co
+  [2] [0.80] Bibek1129/nepali_SQuAD
+       url     : https://huggingface.co/datasets/Bibek1129/nepali_SQuAD
+       date    : 2024-03-10
+  [3] [0.80] iapp/iapp_wiki_qa_squad
+       url     : https://huggingface.co/datasets/iapp/iapp_wiki_qa_squad
+       date    : 2024-01-18
+       snippet : `iapp_wiki_qa_squad` is an extractive question answering dataset from Thai Wikipedia articles. It is adapted from [the o
+  ... and 7 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_dataset_hub_institution_credibility_boost
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  DatasetHubTool (institution check)  ✓  20 source(s)  |  cred: 0.81
+────────────────────────────────────────────────────────────
+  [1] [0.80] rajpurkar/squad
+       url     : https://huggingface.co/datasets/rajpurkar/squad
+       date    : 2024-03-04
+       snippet :  	 		 		Dataset Card for SQuAD 	   	 		 		Dataset Summary 	  Stanford Question Answering Dataset (SQuAD) is a reading co
+  [2] [0.80] Bibek1129/nepali_SQuAD
+       url     : https://huggingface.co/datasets/Bibek1129/nepali_SQuAD
+       date    : 2024-03-10
+  [3] [0.80] iapp/iapp_wiki_qa_squad
+       url     : https://huggingface.co/datasets/iapp/iapp_wiki_qa_squad
+       date    : 2024-01-18
+       snippet : `iapp_wiki_qa_squad` is an extractive question answering dataset from Thai Wikipedia articles. It is adapted from [the o
+  ... and 17 more source(s)
+────────────────────────────────────────────────────────────
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_dataset_hub_download_counts
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  DatasetHubTool (download counts)  ✓  5 source(s)  |  cred: 0.82
+────────────────────────────────────────────────────────────
+  [1] [0.80] rajpurkar/squad
+       url     : https://huggingface.co/datasets/rajpurkar/squad
+       date    : 2024-03-04
+       snippet :  	 		 		Dataset Card for SQuAD 	   	 		 		Dataset Summary 	  Stanford Question Answering Dataset (SQuAD) is a reading co
+  [2] [0.80] Bibek1129/nepali_SQuAD
+       url     : https://huggingface.co/datasets/Bibek1129/nepali_SQuAD
+       date    : 2024-03-10
+  [3] [0.80] iapp/iapp_wiki_qa_squad
+       url     : https://huggingface.co/datasets/iapp/iapp_wiki_qa_squad
+       date    : 2024-01-18
+       snippet : `iapp_wiki_qa_squad` is an extractive question answering dataset from Thai Wikipedia articles. It is adapted from [the o
+  ... and 2 more source(s)
+────────────────────────────────────────────────────────────
+
+  rajpurkar/squad                               | downloads:    120,130 | cred: 0.8
+
+  Bibek1129/nepali_SQuAD                        | downloads:          5 | cred: 0.8
+
+  iapp/iapp_wiki_qa_squad                       | downloads:        297 | cred: 0.8
+
+  stanfordnlp/squad_adversarial                 | downloads:        451 | cred: 0.9
+
+  ccasimiro/squad_es                            | downloads:        159 | cred: 0.8

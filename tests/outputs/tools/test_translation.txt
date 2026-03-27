@@ -1,0 +1,53 @@
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_translation_french_to_english
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  TranslationTool (FR → EN)  ✓  1 source(s)  |  cred: 0.85
+────────────────────────────────────────────────────────────
+  [1] [0.85] Translation: fr → en
+       url     : 
+       snippet : Life is beautiful and full of surprises.
+────────────────────────────────────────────────────────────
+
+  Original   : La vie est belle et pleine de surprises.
+  Translated : Life is beautiful and full of surprises.
+  Confidence : 0.85
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_translation_auto_detect
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  TranslationTool (auto → EN)  ✓  1 source(s)  |  cred: 0.85
+────────────────────────────────────────────────────────────
+  [1] [0.85] Translation: en → en
+       url     : 
+       snippet : Machine learning is transforming the industry.
+────────────────────────────────────────────────────────────
+
+  Original   : El aprendizaje automático está transformando la industria.
+  Translated : Machine learning is transforming the industry.
+  Detected   : en
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_translation_confidence_in_credibility
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_translation_low_confidence_tag
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Confidence  : 0.85
+  Has low-conf tag: False
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  test_translation_multiple_languages
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────────────────────────
+  French    : Life is beautiful and full of surprises.
+  Spanish   : Machine learning is transforming the industry.
+  German    : Data protection is a fundamental human right.
+────────────────────────────────────────────────────────────
