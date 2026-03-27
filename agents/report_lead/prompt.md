@@ -13,15 +13,19 @@ reviewed again.
 ## Selection / Merge Rules
 
 1. **Count constraint is non-negotiable.** The final tree must have a node count
-   within the target range given in the input. If you merge proposals, count before
-   emitting and trim or fill to stay in range.
-2. You may select one proposal verbatim — this is fine if it is clearly the best.
-3. You may take the skeleton of one proposal and replace individual sections with
-   better alternatives from another.
+   within the target range given in the input. Count before emitting and trim or
+   fill to stay in range.
+2. The three proposals were generated from different structural perspectives
+   (concept-first / problem-first / practitioner-workflow). Prefer a synthesis
+   that combines the best elements of multiple perspectives over selecting one
+   verbatim — the goal is a structure no single manager could produce alone.
+3. You may take the skeleton of one proposal and replace individual chapters or
+   sections with stronger alternatives from another.
 4. You may reorder chapters or sections within a level.
-5. You may NOT add entirely new sections not present in any proposal — only synthesise
-   from the three candidates.
-6. Add a `reasoning` field to the root node explaining your synthesis decisions.
+5. You may write a new title or description that better captures a merged idea,
+   as long as the content is grounded in what the proposals collectively cover.
+6. Add a `reasoning` field to the root node explaining which perspectives you
+   drew from for which parts, and why.
 
 ## Quality Criteria (what makes the best structure)
 

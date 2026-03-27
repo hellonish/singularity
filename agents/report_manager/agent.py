@@ -1,8 +1,14 @@
 """
 ReportManagerAgent — proposes a hierarchical section tree for the report.
 
-Three managers run in parallel, each producing an independent proposal.
-The Report Lead then selects / merges the best one.
+Three managers run in parallel, each assigned a distinct structural perspective
+so their proposals are genuinely diverse and useful for the Lead to synthesise:
+
+  Manager 1 — concept-first:       foundations → theory → math → applications
+  Manager 2 — problem-first:       worked examples → required math → theory → generalisation
+  Manager 3 — practitioner-workflow: when/why → implementation → edge cases → validation
+
+The Report Lead then synthesises the best elements from all three.
 """
 from __future__ import annotations
 
@@ -13,10 +19,37 @@ from .report_tree import ReportTree, _extract_json, _enforce_node_count
 from .section_node import SectionNode
 
 
+_PERSPECTIVES: dict[int, tuple[str, str]] = {
+    1: (
+        "concept-first",
+        "Organise from foundational theory outward: start with definitions and axioms, "
+        "build through mathematical formalism, then move to properties, proofs, and "
+        "finally real-world applications. A reader should understand the 'why' deeply "
+        "before encountering any worked examples.",
+    ),
+    2: (
+        "problem-first",
+        "Organise around concrete problems: open with a motivating worked example, "
+        "then introduce only the mathematical machinery that example requires, then "
+        "generalise to the full theory, then present further problems that expose "
+        "each new layer. A reader learns by doing before they learn by reading.",
+    ),
+    3: (
+        "practitioner-workflow",
+        "Organise as a practitioner's guide: when and why to use this technique, "
+        "step-by-step implementation with decision points, common edge cases and "
+        "failure modes, validation strategies, and performance / complexity "
+        "considerations. Theory appears only where it directly informs a decision.",
+    ),
+}
+
+
 class ReportManagerAgent:
     """
     Calls the LLM once to produce a hierarchical section tree proposal.
-    Three instances run in parallel via asyncio.gather.
+    Each instance is assigned a distinct structural perspective via `_PERSPECTIVES`,
+    ensuring the three parallel proposals are genuinely diverse.
+    Three instances run in parallel via asyncio.gather in pipeline._phase_b.
     """
 
     def __init__(self, manager_id: int, client):
@@ -33,13 +66,30 @@ class ReportManagerAgent:
         active_skills: list[str],
         audience: str = "practitioner",
     ) -> ReportTree:
-        """Generate one tree proposal. `target_n` is the pre-rolled section count."""
+        """
+        Generate one tree proposal using this manager's assigned perspective.
+
+        Args:
+            query:         Research question driving the report.
+            target_n:      Pre-rolled section count the tree must hit exactly.
+            active_skills: Retrieval skills that ran in Phase A (so the manager
+                           knows what evidence types are available).
+            audience:      Target reader type (layperson / practitioner / expert …).
+
+        Returns:
+            ReportTree with exactly target_n nodes and proposal_id set.
+        """
+        perspective_name, perspective_desc = _PERSPECTIVES.get(
+            self.manager_id, _PERSPECTIVES[1]
+        )
         user_message = (
             f"query: {query}\n"
             f"strength_context: target_section_count={target_n}\n"
             f"active_retrieval_skills: {', '.join(active_skills)}\n"
             f"audience: {audience}\n"
-            f"proposal_id: manager_{self.manager_id}\n\n"
+            f"proposal_id: manager_{self.manager_id}\n"
+            f"structural_perspective: {perspective_name}\n"
+            f"perspective_instruction: {perspective_desc}\n\n"
             f"Produce exactly {target_n} nodes. Count before emitting."
         )
 
@@ -47,7 +97,7 @@ class ReportManagerAgent:
             self.client.generate_text,
             prompt=user_message,
             system_prompt=self._system_prompt,
-            temperature=0.7,   # diversity across 3 managers is desirable
+            temperature=0.7,
         )
 
         return self._parse(raw, target_n)
