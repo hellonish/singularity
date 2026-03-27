@@ -194,6 +194,38 @@ class VectorStoreClient:
         )
         return [DocumentChunk.from_qdrant_point(r) for r in response.points]
 
+    def search_by_embedding(
+        self,
+        run_id: str,
+        embedding: list[float],
+        k: int = 15,
+        min_credibility: float = 0.5,
+    ) -> list[DocumentChunk]:
+        """
+        Semantic search using a pre-computed embedding vector.
+        Used by Phase C+ anchor interpolation to query with blended embeddings.
+        """
+        from qdrant_client.models import Filter, FieldCondition, Range
+        response = self.qdrant.query_points(
+            collection_name=f"run_{run_id}",
+            query=embedding,
+            limit=k,
+            with_payload=True,
+            with_vectors=False,
+            query_filter=Filter(
+                must=[FieldCondition(key="credibility", range=Range(gte=min_credibility))]
+            ) if min_credibility > 0 else None,
+        )
+        return [DocumentChunk.from_qdrant_point(r) for r in response.points]
+
+    def count_chunks(self, run_id: str, query_text: str, k: int = 200) -> int:
+        """
+        Approximate chunk count for a section query via broad search.
+        Used by Layer 1 coverage audit to detect starved sections.
+        """
+        chunks = self.search(run_id=run_id, query_text=query_text, k=k, min_credibility=0.0)
+        return len(chunks)
+
     # ------------------------------------------------------------------
     # Topic cache
     # ------------------------------------------------------------------

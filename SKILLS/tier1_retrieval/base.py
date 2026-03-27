@@ -15,6 +15,45 @@ from skills.base import SkillBase
 from models import NodeStatus, PlanNode
 
 
+# ---------------------------------------------------------------------------
+# Domain credibility scoring (Issue 7)
+# ---------------------------------------------------------------------------
+
+_HIGH_CREDIBILITY_DOMAINS: tuple[str, ...] = (
+    ".gov", ".gov.uk", ".gov.au", ".gov.ca",
+    ".edu", ".ac.uk", ".ac.jp", ".edu.au",
+    "reuters.com", "apnews.com",
+    "bbc.com", "bbc.co.uk",
+    "nature.com", "science.org", "nejm.org", "thelancet.com",
+    "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov",
+    "who.int", "un.org", "worldbank.org", "imf.org", "oecd.org", "europa.eu",
+    "sciencedirect.com", "springer.com", "jstor.org", "arxiv.org",
+)
+
+_LOW_CREDIBILITY_DOMAINS: tuple[str, ...] = (
+    "dailymail.co.uk", "thesun.co.uk",
+    "infowars.com", "breitbart.com", "naturalnews.com",
+    "beforeitsnews.com", "globalresearch.ca", "zerohedge.com",
+)
+
+_CREDIBILITY_BOOST   = 0.15   # added for high-credibility domain hits
+_CREDIBILITY_PENALTY = 0.20   # subtracted for low-credibility domain hits
+
+
+def _adjust_credibility(url: str, base: float) -> float:
+    """Apply domain-based credibility adjustment. Clamped to [0.0, 1.0]."""
+    if not url:
+        return base
+    url_lower = url.lower()
+    for domain in _HIGH_CREDIBILITY_DOMAINS:
+        if domain in url_lower:
+            return min(1.0, base + _CREDIBILITY_BOOST)
+    for domain in _LOW_CREDIBILITY_DOMAINS:
+        if domain in url_lower:
+            return max(0.0, base - _CREDIBILITY_PENALTY)
+    return base
+
+
 class BaseRetrievalSkill(SkillBase):
     # Minimum sources required for NodeStatus.OK (vs PARTIAL)
     min_ok: int = 2
@@ -70,13 +109,15 @@ class BaseRetrievalSkill(SkillBase):
                 text = src.get("content", "") or src.get("snippet", "") or src.get("abstract", "")
                 if not text:
                     continue
+                base_cred = src.get("credibility_base", 0.7)
+                adjusted_cred = _adjust_credibility(src.get("url", ""), base_cred)
                 chunks = vs.ingest_text(
                     collection_name=collection_name,
                     text=text,
                     run_id=run_id,
                     source_url=src.get("url", ""),
                     source_title=src.get("title", "Unknown"),
-                    credibility=src.get("credibility_base", 0.7),
+                    credibility=adjusted_cred,
                     skill=self.name,
                     query=q,
                 )

@@ -2,11 +2,21 @@
 run_orchestrator — top-level entry point for a research run.
 Also contains gap analysis, termination check, and loop detection helpers.
 """
+import asyncio
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
-from .config import MAX_NODES, MAX_REPLAN_ROUNDS, PLANNER_MODEL, REGISTRY_PATH, SKILL_PATH
+from .config import (
+    DOMAIN_CLASSIFIER_MODEL,
+    MAX_NODES,
+    MAX_REPLAN_ROUNDS,
+    MAX_TOKENS_DOMAIN_CLASSIFIER,
+    PLANNER_MODEL,
+    REGISTRY_PATH,
+    SKILL_PATH,
+)
 from .executor import execute_wave
 from .fallback_router import FallbackRouter
 from models import ExecutionContext, GapItem, IssueType, NodeStatus, Plan
@@ -122,13 +132,21 @@ async def run_orchestrator(
     depth: str = "standard",
 ) -> ExecutionContext:
     limits   = _DEPTH_LIMITS.get(depth, _DEPTH_LIMITS["standard"])
-    client   = GrokClient(model_name=PLANNER_MODEL)
+    classifier_client = GrokClient(model_name=DOMAIN_CLASSIFIER_MODEL)
+    client = GrokClient(model_name=PLANNER_MODEL)
     registry = DomainRegistry(REGISTRY_PATH)
-    planner  = Planner(SKILL_PATH, client)
-    router   = FallbackRouter(registry, SKILL_REGISTRY)
-    ctx      = ExecutionContext(language=output_language, depth=depth)
+    planner = Planner(SKILL_PATH, client)
+    router = FallbackRouter(registry, SKILL_REGISTRY)
+    ctx = ExecutionContext(language=output_language, depth=depth)
 
-    detected_domain, confidence = registry.detect_domain(problem_statement)
+    detected_domain, confidence = await asyncio.to_thread(
+        partial(
+            registry.detect_domain_llm,
+            problem_statement,
+            classifier_client,
+            max_tokens=MAX_TOKENS_DOMAIN_CLASSIFIER,
+        )
+    )
     domain_info = registry.get_domain(detected_domain)
 
     print("=" * 65)
@@ -142,7 +160,14 @@ async def run_orchestrator(
 
     # ── Initial plan ──────────────────────────────────────────────
     print("[Round 0] Calling planner...")
-    _, plan = planner.plan(problem_statement, audience, output_language, depth)
+    _, plan = planner.plan(
+        problem_statement,
+        audience,
+        output_language,
+        depth,
+        preclassified_domain=detected_domain,
+        domain_confidence=confidence,
+    )
     ctx.audience = plan.metadata.audience
     print(f"  Goal     : {plan.metadata.core_goal}")
     print(f"  Domain   : {plan.metadata.domain}")

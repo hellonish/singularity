@@ -98,9 +98,15 @@ Respond ONLY with this JSON. No prose outside the JSON.
     "quality_check": "Evidence quality assessment: ..."
   },
   "key_evidence_chunks": [0, 3, 7],
-  "citations_found": ["[Smith2024]", "[Jones2023]"]
+  "citations_found": ["[Smith2024]", "[Jones2023]"],
+  "coverage_gaps": ["aspect X not covered", "data on Y missing"],
+  "single_source_warning": null
 }
 ```
+
+`coverage_gaps`: list the 1–3 most important aspects missing from the evidence. Be specific — "no data on post-2022 figures" not "limited coverage".
+
+`single_source_warning`: set to a short string (e.g., `"All 3 key chunks from reuters.com — source diversity low"`) if 3 or more of your `key_evidence_chunks` come from the same domain. Otherwise `null`.
 
 ### Call 2 Response:
 ```json

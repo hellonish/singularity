@@ -83,6 +83,7 @@ class ReportTree:
                 title=n["title"],
                 description=n["description"],
                 section_type=n.get("section_type", "section"),
+                requires_fresh=bool(n.get("requires_fresh", False)),
             )
             for n in data["tree"]
         ]

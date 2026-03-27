@@ -21,6 +21,10 @@ PLANNER_OUTPUT = PROJECT_ROOT / "planner_output.md"
 PLANNER_MODEL      = "grok-3-mini"
 MAX_TOKENS_PLANNER = 6000
 
+# Single cheap classifier call for domain routing (legacy planner + Phase A retrieval)
+DOMAIN_CLASSIFIER_MODEL = "grok-3-mini"
+MAX_TOKENS_DOMAIN_CLASSIFIER = 96
+
 # Tiered model routing
 #
 # All roles use fast non-reasoning models only.

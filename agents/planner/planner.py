@@ -169,12 +169,23 @@ class Planner:
         audience: str = "",
         output_language: str = "en",
         depth: str = "standard",
+        preclassified_domain: str | None = None,
+        domain_confidence: str | None = None,
     ) -> tuple[str, Plan]:
         parts = ["mode: plan", f"problem_statement: {problem}"]
         if audience:
             parts.append(f"audience: {audience}")
         if output_language and output_language != "en":
             parts.append(f"output_language: {output_language}")
+        if preclassified_domain:
+            parts.append(
+                f"preclassified_domain: {preclassified_domain}"
+                + (f" (confidence: {domain_confidence})" if domain_confidence else "")
+            )
+            parts.append(
+                "Align metadata.domain and retrieval-oriented node skills with this "
+                "preclassification unless the problem clearly contradicts it."
+            )
         parts.append(self._DEPTH_DIRECTIVE.get(depth, self._DEPTH_DIRECTIVE["standard"]))
         raw = self._call("\n".join(parts))
         return raw, parse_plan(raw)

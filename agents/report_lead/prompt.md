@@ -35,6 +35,20 @@ reviewed again.
 - **Appropriate depth**: subsections exist where genuine depth is needed, not as padding
 - **Audience fit**: complexity and framing suit the stated audience
 
+## Time-Sensitive Section Marking
+
+For any section whose content is likely to change rapidly (current events, live
+statistics, recent policy, ongoing incidents, real-time data), set `requires_fresh`
+to `true` in that node. Workers will then run a Just-In-Time web search immediately
+before writing the section, ensuring the evidence is not stale.
+
+Apply `requires_fresh: true` when the section title or description contains language
+like: "current", "latest", "recent", "2024", "2025", "ongoing", "live", "this year",
+"now", or references specific rapidly-evolving events.
+
+Default is `false` (omit the field or set explicitly). Do not mark theoretical or
+historical sections — only time-sensitive factual content needs this.
+
 ## Output — respond ONLY with this JSON, no prose
 
 ```json
@@ -53,6 +67,15 @@ reviewed again.
         "title": "...",
         "description": "...",
         "section_type": "root"
+      },
+      {
+        "node_id": "n5",
+        "parent_id": "n2",
+        "level": 2,
+        "title": "Current Supply Chain Disruptions",
+        "description": "...",
+        "section_type": "section",
+        "requires_fresh": true
       }
     ]
   }

@@ -28,6 +28,8 @@
             "label": "ML / AI Research",
             "description": "Academic and industry machine learning, AI systems, NLP, computer vision, robotics",
             "detection_signals": [
+                "machine learning",
+                "deep learning",
                 "model",
                 "dataset",
                 "benchmark",
@@ -97,7 +99,7 @@
                 "statute",
                 "regulation",
                 "court",
-                "case",
+                "case law",
                 "jurisdiction",
                 "compliance",
                 "contract",
@@ -240,13 +242,11 @@
             "detection_signals": [
                 "news",
                 "journalist",
-                "report",
                 "investigate",
                 "fact-check",
                 "media",
                 "public interest",
                 "story",
-                "source",
                 "leak",
                 "whistleblower",
                 "accountability"
