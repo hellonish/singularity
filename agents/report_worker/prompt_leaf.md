@@ -128,7 +128,7 @@ Use escape sequences instead:
 | You want | Write in JSON string | Renders as |
 |---|---|---|
 | New paragraph | `\n\n` | `<p>` paragraph break |
-| Line break (within a step, formula, or list item) | `\n` | `<br>` new line |
+| Visual line break within a paragraph | `\n\n` | new paragraph (use this; single `\n` is a soft wrap) |
 | Horizontal rule between major blocks | `\n\n---\n\n` | `<hr>` divider |
 | Markdown list item | `\n- item text` | `<li>` bullet |
 | Numbered list item | `\n1. step text` | `<li>` numbered |

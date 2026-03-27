@@ -512,37 +512,45 @@ $css
 
   // ── Step 1a: Math shield — extract before marked, restore after ────────────
   //
-  // Problem: CommonMark (marked.js) treats \\ as an escaped backslash and
-  // reduces it to \.  A LaTeX matrix row break is \\, so marked silently
-  // converts it to \ (a thin space) before KaTeX ever runs.
+  // Problem A: marked.js (CommonMark) treats \\ as an escaped backslash and
+  // reduces it to \.  A LaTeX matrix row break is \\; after marked, KaTeX
+  // only receives \ (a thin space).
   //
-  // Fix: pull every $...$ and $$...$$ block out of the markdown string and
-  // replace it with a placeholder that marked cannot damage.  After marked
-  // produces HTML, restore the original math strings, then run KaTeX.
-  // Control chars \x02 / \x03 are safe placeholders — they cannot appear in
-  // LLM-generated content and are invisible to marked's text processing.
+  // Problem B: breaks:true adds a <br> after every \n, which prevents GFM
+  // table rows from being recognised — tables render as raw pipe characters.
+  //
+  // Fix: extract every $$...$$ and $...$ block before marked runs, replacing
+  // them with safe ASCII placeholders (MATHSHIELDNEND).  These placeholders
+  // are pure alphanumeric — marked passes them through untouched.  After
+  // marked produces HTML, restore the original math strings, then run KaTeX.
+  //
+  // Note: do NOT use control-char placeholders here.  The Python template is
+  // a raw string so escape sequences like \x02 are 4-char literal text, not
+  // actual control characters.  Pure ASCII strings are immune to both issues.
 
   function shieldMath(markdown) {
     const store = [];
 
-    // Display math $$...$$ first (must precede inline so $$ isn't consumed as two $).
-    // [$][$] avoids writing \$\$ which could interact with Python string.Template.
+    // Display math $$...$$ first (must precede inline to avoid consuming $$
+    // as two separate inline delimiters).
+    // [$][$] character-class syntax avoids writing \$\$ which interacts with
+    // Python string.Template substitution.
     let out = markdown.replace(/[$][$]([\s\S]*?)[$][$]/g, function (match) {
       store.push(match);
-      return '\x02M' + (store.length - 1) + '\x03';
+      return 'MATHSHIELD' + (store.length - 1) + 'END';
     });
 
-    // Inline math $...$ (no newlines inside).
+    // Inline math $...$ (no newlines allowed inside inline math).
     out = out.replace(/[$]([^$\n]+?)[$]/g, function (match) {
       store.push(match);
-      return '\x02M' + (store.length - 1) + '\x03';
+      return 'MATHSHIELD' + (store.length - 1) + 'END';
     });
 
     return { out: out, store: store };
   }
 
   function restoreShield(html, store) {
-    return html.replace(/\x02M(\d+)\x03/g, function (_, idx) {
+    return html.replace(/MATHSHIELD(\d+)END/g, function (_, idx) {
       return store[parseInt(idx, 10)];
     });
   }
@@ -553,17 +561,20 @@ $css
     // Shield math blocks from marked's backslash-escape processing.
     const { out: safeMarkdown, store } = shieldMath(markdown);
 
-    // breaks:true — single \n → <br> for step-by-step derivations.
-    // gfm:true   — GitHub Flavored Markdown: tables, task lists, strikethrough.
-    const rawHtml = marked.parse(safeMarkdown, { breaks: true, gfm: true });
+    // gfm:true  — GitHub Flavored Markdown: tables, task lists, strikethrough.
+    // breaks:false (default) — do NOT set breaks:true; it inserts <br> after
+    // every \n which prevents GFM table row detection (tables appear as raw
+    // pipe text).  Paragraph breaks use \n\n; numbered/bullet lists use their
+    // own block structure and do not need breaks:true.
+    const rawHtml = marked.parse(safeMarkdown, { gfm: true });
 
     // Re-insert original math strings untouched by marked.
     targetEl.innerHTML = restoreShield(rawHtml, store);
 
-    // KaTeX auto-render.  Python string.Template collapses:
-    //   $$$$ → $$  (display math delimiter)
-    //   $$   → $$   (inline math delimiter)
-    // Display must be listed before inline so $$ isn't consumed as two $ inlines.
+    // KaTeX auto-render.  Python string.Template (safe_substitute) collapses:
+    //   $$$$ → $$  (display math delimiter in HTML output)
+    //   $$   → $   (inline math delimiter in HTML output)
+    // Display must be listed before inline so $$ is not consumed as two $.
     renderMathInElement(targetEl, {
       delimiters: [
         { left: '$$$$', right: '$$$$', display: true  },
