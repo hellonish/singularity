@@ -36,6 +36,7 @@ LEAD_MODEL            = "grok-3"        # 1 synthesis/merge call
 WORKER_ANALYSIS_MODEL = "grok-3-mini"   # Call 1 (analysis) — high-volume structured JSON
 WORKER_WRITE_MODEL    = "grok-3"        # Call 2 (section write) — the final product
 POLISHER_MODEL        = "grok-3-mini"   # Phase D polish — parallel, formatting-focused
+SOURCE_GATE_MODEL     = "grok-3-mini"   # 2-pass source gate — per-skill aggregate Grok call
 
 # Legacy alias kept for any code outside Phase C that still imports WORKER_MODEL
 WORKER_MODEL = WORKER_WRITE_MODEL

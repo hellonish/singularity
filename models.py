@@ -76,7 +76,7 @@ class PlanNode:
     acceptance: list[str]
     parallelizable: bool
     output_slot: str
-    depth_override: str | None = None
+    depth_override: str | int | None = None
     synthesis_hint: str | None = None
     note: str | None = None
 

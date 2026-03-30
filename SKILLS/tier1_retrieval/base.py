@@ -82,50 +82,99 @@ class BaseRetrievalSkill(SkillBase):
         node: PlanNode,
         ctx,
         vs=None,
+        original_query: str | None = None,
+        gate_client=None,
     ) -> dict[str, Any]:
         """
-        Execute all Q queries for this skill, ingest results to Qdrant.
+        Execute all Q queries for this skill, gate results, ingest to Qdrant.
         Returns a summary dict (not stored in ctx.results — Qdrant is the store).
+
+        2-pass source gate (active when original_query and gate_client are set):
+          Pass 1 — local embedding cosine similarity filter (zero LLM cost).
+          Pass 2 — aggregate Grok call across all Pass-1 survivors for the skill
+                   (one call total, not one per query).
+        Fallback at every stage: never silently empty the source pool.
         """
         import asyncio
         from vector_store.client import VectorStoreClient
 
         if vs is None:
             vs = VectorStoreClient()
-        total_chunks = 0
-        total_sources = 0
-        all_sources: list[dict] = []
 
-        # Run all queries concurrently
-        async def _run_one(q: str):
-            nonlocal total_chunks, total_sources
+        # ------------------------------------------------------------------
+        # Step 1: Fetch all queries in parallel; run Pass 1 on each batch
+        # ------------------------------------------------------------------
+
+        async def _fetch_and_filter(q: str) -> list[tuple[dict, str]]:
+            """Returns (source_dict, sub_query) pairs surviving Pass 1."""
             try:
                 result = await self._fetch(node, query=q)
             except Exception:
-                return
+                return []
             if not result or not getattr(result, "ok", False):
-                return
-            for src in result.sources:
-                text = src.get("content", "") or src.get("snippet", "") or src.get("abstract", "")
-                if not text:
-                    continue
-                base_cred = src.get("credibility_base", 0.7)
-                adjusted_cred = _adjust_credibility(src.get("url", ""), base_cred)
-                chunks = vs.ingest_text(
-                    collection_name=collection_name,
-                    text=text,
-                    run_id=run_id,
-                    source_url=src.get("url", ""),
-                    source_title=src.get("title", "Unknown"),
-                    credibility=adjusted_cred,
-                    skill=self.name,
-                    query=q,
-                )
-                total_chunks += len(chunks)
-                total_sources += 1
-                all_sources.append(src)
+                return []
 
-        await asyncio.gather(*[_run_one(q) for q in queries])
+            sources = [
+                s for s in result.sources
+                if s.get("content") or s.get("snippet") or s.get("abstract")
+            ]
+            if not sources:
+                return []
+
+            if original_query:
+                from agents.source_gate import pass1_filter
+                sources = pass1_filter(sources, original_query)
+
+            return [(src, q) for src in sources]
+
+        batches = await asyncio.gather(*[_fetch_and_filter(q) for q in queries])
+        all_survivors: list[tuple[dict, str]] = [
+            item for batch in batches for item in batch
+        ]
+
+        # ------------------------------------------------------------------
+        # Step 2: Pass 2 — one aggregate Grok gate call for the whole skill
+        # ------------------------------------------------------------------
+
+        if gate_client and all_survivors and original_query:
+            from agents.source_gate import pass2_gate
+            approved_urls = await pass2_gate(gate_client, original_query, all_survivors)
+            final_pairs = [
+                (src, q) for src, q in all_survivors
+                if src.get("url") in approved_urls
+            ]
+            if not final_pairs:
+                final_pairs = all_survivors   # fallback: gate returned nothing useful
+        else:
+            final_pairs = all_survivors
+
+        # ------------------------------------------------------------------
+        # Step 3: Ingest approved sources into Qdrant
+        # ------------------------------------------------------------------
+
+        total_chunks  = 0
+        total_sources = 0
+        all_sources: list[dict] = []
+
+        for src, q in final_pairs:
+            text = src.get("content", "") or src.get("snippet", "") or src.get("abstract", "")
+            if not text:
+                continue
+            base_cred    = src.get("credibility_base", 0.7)
+            adjusted_cred = _adjust_credibility(src.get("url", ""), base_cred)
+            chunks = vs.ingest_text(
+                collection_name=collection_name,
+                text=text,
+                run_id=run_id,
+                source_url=src.get("url", ""),
+                source_title=src.get("title", "Unknown"),
+                credibility=adjusted_cred,
+                skill=self.name,
+                query=q,
+            )
+            total_chunks  += len(chunks)
+            total_sources += 1
+            all_sources.append(src)
 
         # Register citations
         cit_reg = getattr(ctx, "citation_registry", None)
@@ -134,11 +183,18 @@ class BaseRetrievalSkill(SkillBase):
                 cid = cit_reg.register(src, self.name, node.output_slot)
                 src["citation_id"] = cid
 
+        gate_info = (
+            f", gate={len(all_survivors)}→{total_sources}"
+            if (gate_client and original_query) else ""
+        )
+        _ = gate_info   # available for callers who want to log it
+
         return {
-            "skill":         self.name,
-            "queries_run":   len(queries),
-            "sources_found": total_sources,
-            "chunks_stored": total_chunks,
+            "skill":          self.name,
+            "queries_run":    len(queries),
+            "sources_found":  total_sources,
+            "chunks_stored":  total_chunks,
+            "gate_survivors": len(all_survivors) if (gate_client and original_query) else None,
         }
 
     # ---------------------------------------------------------------------------
@@ -217,7 +273,9 @@ class BaseRetrievalSkill(SkillBase):
         return " ".join(words[:max_words])
 
     def _depth_n(self, node: PlanNode, ctx=None, default: int = 10) -> int:
-        """Map depth → max_results. Node-level override wins; ctx.depth is the global fallback."""
+        """Map depth → max_results. Integer depth_override is used directly (strength-based)."""
+        if isinstance(node.depth_override, int):
+            return node.depth_override
         _MAP = {"shallow": 5, "standard": 10, "deep": 20}
         key = node.depth_override or (getattr(ctx, "depth", None)) or ""
         return _MAP.get(key, default)

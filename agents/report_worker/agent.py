@@ -171,7 +171,7 @@ class ReportWorkerAgent:
         self.node.content    = content
         self.node.word_count = write_out.get("word_count", len(content.split()))
         self.node.citations  = citations
-        self.node.source_map = source_map
+        self.node.source_map = self._filter_cited_sources(source_map, content, citations)
         if faithfulness_score is not None:
             self.node.faithfulness_score = faithfulness_score
 
@@ -198,7 +198,7 @@ class ReportWorkerAgent:
             qdrant_chunks_used=analysis.get("key_evidence_chunks", []),
             children_consumed=[c.node_id for c in self.tree.children_of(self.node.node_id)],
             coverage_gaps=write_out.get("coverage_gaps", []),
-            source_map=source_map,
+            source_map=self.node.source_map,
             faithfulness_score=faithfulness_score,
             entity_coverage=aug_meta.get("entity_coverage"),
             augmentation_iters=aug_meta.get("augmentation_iters", 0),
@@ -549,6 +549,26 @@ class ReportWorkerAgent:
                 return f"{domain} — {path_hint}"
             return domain
         return "Source"
+
+    @staticmethod
+    def _filter_cited_sources(
+        source_map: dict[str, dict],
+        content: str,
+        citations_used: list[str],
+    ) -> dict[str, dict]:
+        """
+        Return a source_map containing only entries that are actually cited.
+
+        A key is kept when it appears in either:
+          - citations_used  (list the LLM returned in Call 2)
+          - the written content itself (scan for [BracketedKey] patterns)
+
+        This ensures the Reference List only shows sources the reader can
+        actually trace back to a claim in the text.
+        """
+        cited: set[str] = set(citations_used)
+        cited.update(re.findall(r'\[\w+\d*\]', content))
+        return {k: v for k, v in source_map.items() if k in cited}
 
     @staticmethod
     def _format_chunks(chunks: list[Any]) -> tuple[str, dict[str, dict]]:

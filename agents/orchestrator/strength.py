@@ -45,6 +45,18 @@ class StrengthConfig:
         return max(4, math.ceil(self.value / 2) * 2)
 
     @property
+    def min_results_per_query(self) -> int:
+        """
+        Strength-based floor for web results requested per query.
+        Replaces the flat depth-based default (10) for Phase 5 retrieval nodes.
+        Capped at 20 (practical DDG/Tavily ceiling).
+
+        s:  1  2  3  4  5  6  7  8  9  10
+        n:  5  5  6  8 10 12 14 16 18  20
+        """
+        return min(20, max(5, self.value * 2))
+
+    @property
     def total_retrieval_calls(self) -> int:
         return self.retrieval_skill_count * self.queries_per_skill
 

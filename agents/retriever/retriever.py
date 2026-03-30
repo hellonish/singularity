@@ -84,6 +84,7 @@ class Retriever:
         domain_key: str | None = None,
         domain_label: str | None = None,
         domain_confidence: str | None = None,
+        gate_client=None,   # GrokClient | None — enables 2-pass source gate
     ) -> list[str]:
         """
         Run retrieval phase. Returns list of active skill names.
@@ -97,7 +98,11 @@ class Retriever:
         When ``domain_key`` is set (from a small classifier call), it is passed into
         the user prompt so skill selection aligns with the research domain.
         """
-        retrieval_registry = {k: v for k, v in SKILL_REGISTRY.items() if k in TIER1_SKILLS}
+        from skills.tier1_retrieval.base import BaseRetrievalSkill as _BRS
+        retrieval_registry: dict[str, _BRS] = {
+            k: v for k, v in SKILL_REGISTRY.items()
+            if k in TIER1_SKILLS and isinstance(v, _BRS)
+        }
 
         # Build section context for targeted query generation
         leaf_count = len([n for n in tree.nodes if not tree.children_of(n.node_id)]) if tree else 0
@@ -222,6 +227,7 @@ class Retriever:
                 acceptance=[],
                 parallelizable=True,
                 output_slot=f"retrieval_{skill_name}",
+                depth_override=strength.min_results_per_query,
             )
             summary = await skill.run_fanout(
                 queries=queries,
@@ -230,10 +236,16 @@ class Retriever:
                 node=node,
                 ctx=ctx,
                 vs=self.vs,
+                original_query=query,
+                gate_client=gate_client,
+            )
+            gate_str = (
+                f", gate {summary['gate_survivors']}→{summary['sources_found']}"
+                if summary.get("gate_survivors") is not None else ""
             )
             print(
                 f"  [{skill_name}] {summary['sources_found']} sources "
-                f"→ {summary['chunks_stored']} chunks"
+                f"→ {summary['chunks_stored']} chunks{gate_str}"
             )
             if logger is not None:
                 logger.log_skill_result(

@@ -21,6 +21,7 @@ from .config import (
     PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL,
     WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL, POLISHER_MODEL,
     DOMAIN_CLASSIFIER_MODEL, MAX_TOKENS_DOMAIN_CLASSIFIER, REGISTRY_PATH,
+    SOURCE_GATE_MODEL,
 )
 from .strength import StrengthConfig
 from models import ExecutionContext
@@ -238,6 +239,7 @@ async def _layer1_coverage_audit(
     vs: VectorStoreClient,
     query: str,
     ctx,
+    gate_client=None,
 ) -> None:
     """
     Issue 1 Layer 1: Post-Phase-A coverage audit.
@@ -282,6 +284,7 @@ async def _layer1_coverage_audit(
             acceptance=[],
             parallelizable=True,
             output_slot=f"layer1_{node.node_id}",
+            depth_override=strength.min_results_per_query,
         )
         summary = await web_skill.run_fanout(
             queries=[q],
@@ -290,6 +293,8 @@ async def _layer1_coverage_audit(
             node=pnode,
             ctx=ctx,
             vs=vs,
+            original_query=query,
+            gate_client=gate_client,
         )
         print(f"    [Layer 1] {node.node_id} '{node.title[:35]}' "
               f"→ +{summary['chunks_stored']} chunks")
@@ -307,6 +312,7 @@ async def _phase_c(
     vs: VectorStoreClient,
     ctx,
     logger: TraceLogger | None = None,
+    gate_client=None,
 ) -> dict[str, dict]:
     """
     Spawn one ReportWorkerAgent per node.
@@ -369,6 +375,7 @@ async def _phase_c(
                     acceptance=[],
                     parallelizable=True,
                     output_slot=f"jit_{node.node_id}",
+                    depth_override=strength.min_results_per_query,
                 )
                 await web_skill.run_fanout(
                     queries=[fresh_q],
@@ -377,6 +384,8 @@ async def _phase_c(
                     node=fresh_node,
                     ctx=ctx,
                     vs=vs,
+                    original_query=query,
+                    gate_client=gate_client,
                 )
 
             # Issue 4: include child titles in parent node query for richer context
@@ -482,6 +491,7 @@ async def run_pipeline(
     ctx = ExecutionContext(language=output_language, depth="strength")
 
     vs = VectorStoreClient()
+    gate_client = _make_client(SOURCE_GATE_MODEL)
 
     domain_registry = DomainRegistry(REGISTRY_PATH)
     domain_client = _make_client(DOMAIN_CLASSIFIER_MODEL)
@@ -530,6 +540,7 @@ async def run_pipeline(
             domain_key=classified_domain,
             domain_label=domain_label,
             domain_confidence=domain_conf,
+            gate_client=gate_client,
         )
 
         # ── Issue 1 Layer 1: Coverage audit — re-fetch starved sections ──
@@ -541,6 +552,7 @@ async def run_pipeline(
             vs=vs,
             query=query,
             ctx=ctx,
+            gate_client=gate_client,
         )
 
     # ── Phase C ───────────────────────────────────────────────────────
@@ -554,6 +566,7 @@ async def run_pipeline(
         vs=vs,
         ctx=ctx,
         logger=logger,
+        gate_client=gate_client,
     )
 
     # ── Assemble report ───────────────────────────────────────────────
