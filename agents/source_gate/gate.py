@@ -18,13 +18,17 @@ Pass 2  (one Grok call per skill, aggregate):
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import numpy as np
 from pydantic import BaseModel
 
 from vector_store.embedder import Embedder
 
-PASS1_THRESHOLD = 0.35   # cosine similarity floor; below = off-topic
+logger = logging.getLogger(__name__)
+
+PASS1_THRESHOLD  = 0.35   # cosine similarity floor; below = off-topic
+SNIPPET_MAX_CHARS = 300   # max characters from each source excerpt for embedding + gating
 
 # ---------------------------------------------------------------------------
 # Shared embedder instance (model is loaded once globally in embedder.py)
@@ -61,7 +65,7 @@ def pass1_filter(
         return sources
 
     snippets = [
-        (src.get("content") or src.get("snippet") or src.get("abstract") or "")[:300]
+        (src.get("content") or src.get("snippet") or src.get("abstract") or "")[:SNIPPET_MAX_CHARS]
         for src in sources
     ]
     non_empty = [(i, s) for i, s in enumerate(snippets) if s.strip()]
@@ -141,5 +145,5 @@ async def pass2_gate(
         )
         return set(result.approved_urls)
     except Exception as exc:
-        print(f"  [SourceGate Pass2] WARN: gate call failed ({exc}) — passing all survivors")
+        logger.warning("[SourceGate Pass2] gate call failed (%s) — passing all survivors", exc)
         return {src.get("url", "") for src, _ in survivors}

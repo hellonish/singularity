@@ -9,8 +9,12 @@ CLI entry point — run from project root:
     python -m agents.orchestrator.cli "your question" --strength 10 --audience expert
 """
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
 
 from .runner import run_orchestrator
 from .pipeline import run_pipeline
@@ -25,7 +29,7 @@ def _save_report(report_md: str, query: str, metadata: dict) -> None:
     """
     html = ReportHtmlRenderer().render(report_md, query=query, metadata=metadata)
     Path("final_report.html").write_text(html, encoding="utf-8")
-    print("Saved  →  final_report.html")
+    logger.info("Saved  →  final_report.html")
 
 
 def _legacy_run(problem: str, depth: str, audience: str, lang: str) -> None:
@@ -170,11 +174,11 @@ if __name__ == "__main__":
     )
 
     if args.strength is not None:
-        print(f"Executing : {problem}")
-        print(f"Strength  : {args.strength}")
+        logger.info("Executing : %s", problem)
+        logger.info("Strength  : %d", args.strength)
         _strength_run(problem, args.strength, args.audience, args.lang, trace=args.trace)
     else:
         depth = args.depth or "standard"
-        print(f"Executing: {problem}")
-        print(f"Depth    : {depth}")
+        logger.info("Executing : %s", problem)
+        logger.info("Depth     : %s", depth)
         _legacy_run(problem, depth, args.audience, args.lang)

@@ -10,9 +10,12 @@ Responsibilities:
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from models import DocumentChunk
 from .config import (
@@ -59,7 +62,7 @@ class VectorStoreClient:
             except Exception:
                 self._qdrant = QdrantClient(":memory:")
                 self._in_memory = True
-                print("[VectorStore] Qdrant server unavailable — using in-memory mode")
+                logger.warning("[VectorStore] Qdrant server unavailable — using in-memory mode")
         return self._qdrant
 
     # ------------------------------------------------------------------
@@ -83,8 +86,8 @@ class VectorStoreClient:
         name = f"run_{run_id}"
         try:
             self.qdrant.delete_collection(name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[VectorStore] delete_collection %s failed: %s", name, exc)
 
     def ensure_topic_cache_index(self) -> None:
         """Create the topic-cache meta-collection if it doesn't exist."""

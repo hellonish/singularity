@@ -49,13 +49,8 @@ MAX_NODES         = 15
 RETRY_BACKOFF     = [1, 4]   # seconds between retries (len + 1 = total attempts)
 
 # ---------------------------------------------------------------------------
-# Credibility adjustments per fallback level
+# Chat Agent
 # ---------------------------------------------------------------------------
-CREDIBILITY_ADJ: dict[str, float] = {
-    "primary":       0.0,
-    "fallback_1":   -0.05,
-    "fallback_2":   -0.15,
-    "web_search":   -0.10,
-    "forum_search": -0.20,
-    "social_search":-0.25,
-}
+CHAT_THINKER_MODEL  = "grok-3-mini"   # Thinking layer — skill selection + step plan
+CHAT_RESPONSE_MODEL = "grok-3-mini"   # Chat mode generation (upgrade to grok-3 for quality)
+

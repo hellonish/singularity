@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from utils.json_parser import extract_object
+
 
 def _signal_weight(signal: str) -> float:
     """
@@ -182,24 +184,4 @@ class DomainRegistry:
 
 def _parse_domain_classifier_json(raw: str) -> dict | None:
     """Extract {\"domain\":...,\"confidence\":...} from model output."""
-    raw = raw.strip()
-    for block in re.findall(r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL):
-        try:
-            obj = json.loads(block.strip())
-            if isinstance(obj, dict):
-                return obj
-        except json.JSONDecodeError:
-            continue
-    try:
-        obj = json.loads(raw)
-        return obj if isinstance(obj, dict) else None
-    except json.JSONDecodeError:
-        pass
-    m = re.search(r"\{[^{}]*\"domain\"[^{}]*\}", raw, re.DOTALL)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            return obj if isinstance(obj, dict) else None
-        except json.JSONDecodeError:
-            return None
-    return None
+    return extract_object(raw)

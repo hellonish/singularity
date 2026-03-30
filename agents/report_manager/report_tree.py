@@ -3,13 +3,12 @@ ReportTree — hierarchical section tree and helper functions.
 """
 from __future__ import annotations
 
-import json
-import re
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 from .section_node import SectionNode
+from utils.json_parser import extract_object
 
 
 @dataclass
@@ -100,15 +99,10 @@ class ReportTree:
 # ---------------------------------------------------------------------------
 
 def _extract_json(text: str) -> dict[str, Any]:
-    m = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
-    if m:
-        return json.loads(m.group(1))
-    stripped = text.strip()
-    if stripped.startswith("{"):
-        decoder = json.JSONDecoder()
-        obj, _ = decoder.raw_decode(stripped)
-        return obj
-    raise ValueError(f"No JSON found in manager response (first 300 chars):\n{stripped[:300]}")
+    result = extract_object(text)
+    if result is not None:
+        return result
+    raise ValueError(f"No JSON found in manager response (first 300 chars):\n{text.strip()[:300]}")
 
 
 def _enforce_node_count(tree: ReportTree, target_n: int) -> ReportTree:

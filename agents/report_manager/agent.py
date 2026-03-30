@@ -22,6 +22,7 @@ from .section_node import SectionNode
 if TYPE_CHECKING:
     from trace import TraceLogger
 
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text(encoding="utf-8")
 
 _PERSPECTIVES: dict[int, dict] = {
     1: {
@@ -110,9 +111,7 @@ class ReportManagerAgent:
     def __init__(self, manager_id: int, client):
         self.manager_id = manager_id
         self.client = client
-        self._system_prompt = (Path(__file__).parent / "prompt.md").read_text(
-            encoding="utf-8"
-        )
+        self._system_prompt = _SYSTEM_PROMPT
 
     async def propose(
         self,

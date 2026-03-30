@@ -3,7 +3,7 @@
 
 > **Purpose:** This report is a complete technical reference for the Singularity project. It is written to serve as both a post-mortem of how the system was designed and debugged, and as a study guide for understanding modern agentic AI systems from first principles.
 >
-> **Last updated:** March 2026. Reflects the current four-phase pipeline (B → A → C → D), tiered model routing, Qdrant vector store, and Phase D Report Polisher. The project has two execution modes: Legacy DAG (`--depth`) and Phase 5 Strength-Based Pipeline (`--strength`).
+> **Last updated:** March 2026. Reflects the current four-phase pipeline (B → A → C → D), tiered model routing, Qdrant vector store, Phase D Report Polisher, 2-pass Source Gate (entity disambiguation), strength-based web result floors, and citation-filtered Reference Lists. The project has two execution modes: Legacy DAG (`--depth`) and Phase 5 Strength-Based Pipeline (`--strength`).
 
 ---
 
@@ -26,6 +26,7 @@
 15. [Key Agentic AI Patterns Used in This Project](#15-key-agentic-ai-patterns-used-in-this-project)
 16. [What We Learned — Lessons for Agentic AI Design](#16-what-we-learned--lessons-for-agentic-ai-design)
 17. [The StrengthConfig — Scaling Math](#17-the-strengthconfig--scaling-math)
+18. [Code Quality Audit — Technical Debt Register](#18-code-quality-audit--technical-debt-register)
 
 ---
 
@@ -1792,19 +1793,24 @@ The `StrengthConfig` dataclass is the single source of truth for all strength-de
 
 | Quantity | Formula | s=1 | s=3 | s=5 | s=10 |
 |----------|---------|-----|-----|-----|------|
-| Retrieval skills | `int(1.8 × s)` | 1 | 5 | 9 | 18 |
-| Queries per skill | `max(3, ceil(s/2)×2)` | 3 | 4 | 6 | 10 |
-| Total retrieval calls | skills × queries | 3 | 20 | 54 | 180 |
+| Retrieval skills | `max(2, int(1.8 × s))` | 2 | 5 | 9 | 18 |
+| Queries per skill | `max(4, ceil(s/2)×2)` | 4 | 4 | 6 | 10 |
+| Web results per query | `min(20, max(5, s×2))` | 5 | 6 | 10 | 20 |
+| Total retrieval calls | skills × queries | 8 | 20 | 54 | 180 |
 | Section count range | `[s×6, s×10]` | 6–10 | 18–30 | 30–50 | 60–100 |
-| Expected LLM calls | `5 + 2×s×8` | 21 | 53 | 85 | 165 |
+| Min chunks per leaf | `max(3, s)` | 3 | 3 | 5 | 10 |
+| Aug. loop max iters | 2 / 3 / 4 (s≤7 / s≤9 / s=10) | 2 | 2 | 2 | 4 |
+| Expected LLM calls | `5 + 2×s×8 + aug_overhead` | 21 | 53 | 85 | 165 |
+
+**`min_results_per_query`** is the strength-based floor for how many web results are *requested* per query (replacing the legacy flat default of 10). Higher strength means more candidates for the Source Gate to filter.
 
 Qdrant chunk budget per worker (dynamic K by node depth):
 
-| Node level | Chunks (K) | Reason |
-|-----------|-----------|--------|
-| Leaf (deepest) | 15 | Maximum evidence — writes the actual content |
-| One above leaf | 8 | Moderate evidence — frames a subsection |
-| Chapter / root | 3 | Minimal — children already synthesised the evidence |
+| Node level | Formula | s=1 | s=5 | s=10 |
+|-----------|---------|-----|-----|------|
+| Leaf (deepest) | `8 + s` | 9 | 13 | 18 |
+| One above leaf | `6 + s` | 7 | 11 | 16 |
+| Chapter / root | `4 + s` | 5 | 9 | 14 |
 
 ---
 
@@ -1824,7 +1830,8 @@ Qdrant chunk budget per worker (dynamic K by node depth):
 | `agents/report_manager/section_node.py` | `SectionNode` — content, word count, citations, source_map |
 | `agents/report_lead/agent.py` | `ReportLeadAgent` — synthesises 3 proposals → final tree |
 | `agents/report_worker/agent.py` | `ReportWorkerAgent` — 2-call writer (analysis → prose) |
-| `agents/report_worker/result.py` | `WorkerResult` — includes source_map for Reference List |
+| `agents/report_worker/result.py` | `WorkerResult` — includes citation-filtered source_map for Reference List |
+| `agents/source_gate/gate.py` | `pass1_filter()`, `pass2_gate()` — 2-pass entity disambiguation gate |
 | `agents/polish.py` | `PolishAgent` — programmatic fixes + parallel LLM creative polish |
 | `agents/report_manager/prompt.md` | Manager system prompt (perspective-assigned, node-count-strict) |
 | `agents/report_lead/prompt.md` | Lead system prompt (temperature=0.2, `final_tree` JSON) |
@@ -1862,4 +1869,199 @@ Qdrant chunk budget per worker (dynamic K by node depth):
 
 ---
 
-*This document covers the complete Singularity architecture as of March 2026: four-phase pipeline (B→A→C→D), tiered model routing, Qdrant vector store with in-memory fallback, Phase D Report Polisher, and the lessons learned building a production-grade research agent from first principles.*
+---
+
+## 18. Code Quality Audit — Technical Debt Register
+
+A full audit of the codebase was conducted in March 2026. The following is the living technical debt register. Items are grouped by severity and category. None of these affect correctness today — they are maintainability and professionalism issues that will compound as the codebase grows.
+
+---
+
+### HIGH — Fix Before Next Feature
+
+#### 1. Duplicate JSON Parsing Logic (5 independent implementations)
+
+The codebase has five separate functions that all do the same thing — extract JSON from an LLM response that may be wrapped in markdown fences or contain prose before the object:
+
+| File | Function |
+|------|----------|
+| `agents/planner/planner.py` | `_try_parse()` — 3 strategies |
+| `agents/report_worker/agent.py` | `_parse_call()` — 4 strategies + `_sanitize_json_newlines()` + `_extract_json_string_value()` |
+| `agents/report_manager/report_tree.py` | `_extract_json()` — 2 strategies |
+| `agents/planner/domain_registry.py` | `_parse_domain_classifier_json()` — 3 strategies |
+| `agents/retriever/retriever.py` | Inline JSON extraction in `_parse_and_sanitize()` |
+
+**Fix:** Extract a single `utils/json_parser.py` with `extract_object(text)`, `sanitize_string_values(text)`, and `extract_string_field(text, key)`.
+
+---
+
+#### 2. Duplicate `CREDIBILITY_ADJ` Constant
+
+Defined identically in two files:
+- `agents/orchestrator/config.py` (lines 54–61)
+- `models.py` (lines 29–36)
+
+`ExecutionContext.record()` in `models.py` uses its local copy. `FallbackRouter` imports from `config.py`. They will silently diverge if one is edited.
+
+**Fix:** Remove from `models.py`; import from `config.py` everywhere.
+
+---
+
+#### 3. Monolithic `ReportWorkerAgent` (845 lines, 5 responsibilities)
+
+`agents/report_worker/agent.py` combines:
+1. Two-call LLM orchestration
+2. Evidence augmentation loop (entity tracking, novelty scoring, gap analysis, web escalation, quality gating)
+3. Chunk formatting with citation key assignment
+4. Multi-strategy JSON parsing
+5. Faithfulness checking
+
+**Fix:** Extract `EvidenceAugmenter` and `SectionJsonParser` as separate classes; reduce `ReportWorkerAgent` to orchestration only.
+
+---
+
+#### 4. `print()` Used as Logging Everywhere
+
+Over 40 `print()` calls across `pipeline.py`, `runner.py`, `retriever.py`, `agent.py`, `gate.py`, and `client.py` serve as the only observability layer. There is no log level, no timestamps, no structured output, and no way to silence debug noise in production.
+
+**Fix:** Replace all `print()` with Python's `logging` module. Use `logging.getLogger(__name__)` per module. Configure levels (INFO for milestones, DEBUG for internals, WARNING for fallbacks, ERROR for failures).
+
+---
+
+#### 5. Bare `except Exception` Blocks (5+ locations)
+
+| File | Line | Problem |
+|------|------|---------|
+| `agents/orchestrator/pipeline.py` | ~80 | Returns `False` silently |
+| `agents/retriever/retriever.py` | ~295 | `pass` — silently ignores JSON parse failures |
+| `agents/report_worker/agent.py` | ~455 | Catches all exceptions for web escalation |
+| `skills/tier1_retrieval/base.py` | ~112 | Returns empty list with no context |
+| `agents/planner/domain_registry.py` | ~167 | Silent fallback |
+
+**Fix:** Catch specific exception types (`json.JSONDecodeError`, `ConnectionError`, `TimeoutError`). Log at WARNING or ERROR with the exception message.
+
+---
+
+### MEDIUM — Scheduled Refactors
+
+#### 6. `models.py` — 15 Classes in One File (477 lines)
+
+Contains dataclasses, Pydantic models, enums, and type aliases across 4 distinct domains:
+
+| Domain | Classes |
+|--------|---------|
+| Plan / DAG | `GapItem`, `PlanNode`, `PlanMetadata`, `Plan`, `IssueType`, `NodeStatus` |
+| Execution | `ExecutionContext` |
+| Skill contracts | `SourceRecord`, `RetrievalOutput`, `AnalysisOutput`, `AxisResult`, `QualityReport`, `OutputDocument` |
+| Storage | `DocumentChunk`, `CitationRecord` |
+
+**Fix:** Split into `models/plan.py`, `models/execution.py`, `models/contracts.py`, `models/storage.py`.
+
+---
+
+#### 7. Generic Variable Names Throughout
+
+| Name | Type | Used in |
+|------|------|---------|
+| `ctx` | `ExecutionContext` | pipeline.py, runner.py, executor.py, agent.py |
+| `vs` | `VectorStoreClient` | pipeline.py, agent.py, retriever.py |
+| `m` | regex match | planner.py, domain_registry.py |
+| `q` | query string | retriever.py, pipeline.py, agent.py |
+| `n` | count | report_tree.py, base.py |
+| `aug_meta` | dict | agent.py |
+| `_BRS` | `BaseRetrievalSkill` type alias | retriever.py |
+
+**Fix:** Use full descriptive names. `ctx` → `exec_ctx`, `vs` → `vector_store`, `aug_meta` → `augmentation_meta`.
+
+---
+
+#### 8. Large Inline Closures
+
+- `_write_node()` inside `_phase_c()` — 68 lines, captures 12 outer variables (`pipeline.py:363`)
+- `_refetch()` inside `_layer1_coverage_audit()` — 24 lines (`pipeline.py:277`)
+- `_run_one()` / `_fetch_and_filter()` inside `run_fanout()` — captures `node`, `original_query`, `gate_client`, `vs` (`base.py`)
+
+**Fix:** Extract to module-level `async def` functions or helper classes. Closures capturing more than 3 outer variables are a smell.
+
+---
+
+#### 9. Magic Numbers Without Named Constants
+
+| Value | Meaning | File |
+|-------|---------|------|
+| `0.80` | Entity coverage threshold to stop augmentation | `agent.py:249` |
+| `0.25` | Novelty rate threshold | `agent.py:293` |
+| `0.35` | Source gate Pass 1 cosine similarity threshold | `gate.py:27` |
+| `0.75` | Jaccard deduplication threshold | `retriever.py:353` |
+| `150` | Query length cap (chars) | `retriever.py:54` |
+| `300` | Snippet truncation length | `web_fetch.py:64` |
+
+**Fix:** Define as named module-level constants: `ENTITY_COVERAGE_GOAL`, `NOVELTY_RATE_CEILING`, `SOURCE_GATE_COSINE_THRESHOLD`, `QUERY_MAX_CHARS`.
+
+---
+
+#### 10. Inconsistent Type Annotations
+
+`from __future__ import annotations` is used in some files but not all. Functions in `agent.py` (`__init__`) accept `client=None`, `analysis_client=None`, `write_client=None` with no type. `Retriever.__init__` takes `client` and `vs` untyped.
+
+**Fix:** Add `from __future__ import annotations` to every file. Type all function signatures consistently.
+
+---
+
+#### 11. I/O in Constructors
+
+`ReportWorkerAgent.__init__` reads two markdown files from disk synchronously. `ReportLeadAgent.__init__` and `ReportManagerAgent.__init__` do the same.
+
+**Fix:** Read prompts once at module level into a module constant, or accept pre-loaded prompt text as a constructor argument.
+
+---
+
+#### 12. Scattered Domain Constants
+
+Credibility-related logic appears in four locations:
+- `_HIGH_CREDIBILITY_DOMAINS` / `_LOW_CREDIBILITY_DOMAINS` in `skills/tier1_retrieval/base.py`
+- `_CREDIBILITY_BOOST` / `_CREDIBILITY_PENALTY` in the same file
+- `CREDIBILITY_ADJ` in `config.py` (duplicated in `models.py` — see issue #2)
+- `_cred()` helper in `tools/web_fetch.py`
+
+**Fix:** Consolidate all credibility logic into `config.py` or a dedicated `credibility.py`.
+
+---
+
+### LOW — Nice to Have
+
+#### 13. `pipeline.py` Function Signature Complexity
+
+`_phase_c()` takes 10 parameters; `_layer1_coverage_audit()` takes 9. This is a sign these functions are doing too much or that a context object should carry the shared pipeline state.
+
+**Fix:** Introduce a `PipelineRunContext` dataclass holding `run_id`, `collection_name`, `strength`, `vs`, `ctx`, `gate_client`, `logger` — pass it as one argument.
+
+---
+
+#### 14. Inconsistent Async/Sync LLM Call Wrapping
+
+Some LLM calls use `await asyncio.to_thread(client.generate_text, ...)` (report workers). Others call `client.generate_text(...)` synchronously (planner, domain classifier). The inconsistency is because the planner runs in a thread via `asyncio.to_thread` at the call site, but it's not obvious.
+
+**Fix:** Either make all LLM clients async-native (`async def generate_text`) or document the threading contract explicitly at each call site.
+
+---
+
+#### 15. Local Import Aliases for the Same Class
+
+Three different aliases for `PlanNode` appear in `pipeline.py`:
+```python
+from models import PlanNode as _AuditPlanNode   # Layer 1
+from models import PlanNode as _JITPlanNode      # JIT
+from models import PlanNode as _PlanNode         # Phase C+
+```
+These are the same class. The aliases exist only to add local context — that context should live in the variable name at the call site, not the import alias.
+
+**Fix:** Import once as `PlanNode` at the top of the file.
+
+---
+
+*This register was last updated March 2026. Items are not bugs — the system produces correct output. They are the gap between working code and maintainable code.*
+
+---
+
+*This document covers the complete Singularity architecture as of March 2026: four-phase pipeline (B→A→C→D), tiered model routing, Qdrant vector store with in-memory fallback, Phase D Report Polisher, 2-pass Source Gate for entity disambiguation, and the lessons learned building a production-grade research agent from first principles.*

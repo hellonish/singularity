@@ -13,12 +13,18 @@ at least one dedicated query across the skill set.
 from __future__ import annotations
 
 import asyncio
-import json
+import logging
 import re
 from typing import TYPE_CHECKING
 
 from models import ExecutionContext, PlanNode
 from skills import SKILL_REGISTRY, TIER1_SKILLS
+from utils.json_parser import extract_object
+
+logger = logging.getLogger(__name__)
+
+QUERY_MAX_CHARS         = 150   # hard cap on query string length
+JACCARD_DEDUP_THRESHOLD = 0.75  # queries with Jaccard similarity above this are duplicates
 
 if TYPE_CHECKING:
     from trace import TraceLogger
@@ -49,9 +55,9 @@ def sanitize_query(q: str) -> str:
     for pattern in _ANNOTATION_PATTERNS:
         q = pattern.sub('', q)
     q = q.strip(' .,;:-')
-    # Hard cap at 150 chars, breaking at a word boundary
-    if len(q) > 150:
-        q = q[:150].rsplit(' ', 1)[0]
+    # Hard cap at QUERY_MAX_CHARS, breaking at a word boundary
+    if len(q) > QUERY_MAX_CHARS:
+        q = q[:QUERY_MAX_CHARS].rsplit(' ', 1)[0]
     return q.strip()
 
 
@@ -98,10 +104,10 @@ class Retriever:
         When ``domain_key`` is set (from a small classifier call), it is passed into
         the user prompt so skill selection aligns with the research domain.
         """
-        from skills.tier1_retrieval.base import BaseRetrievalSkill as _BRS
-        retrieval_registry: dict[str, _BRS] = {
+        from skills.tier1_retrieval.base import BaseRetrievalSkill
+        retrieval_registry: dict[str, BaseRetrievalSkill] = {
             k: v for k, v in SKILL_REGISTRY.items()
-            if k in TIER1_SKILLS and isinstance(v, _BRS)
+            if k in TIER1_SKILLS and isinstance(v, BaseRetrievalSkill)
         }
 
         # Build section context for targeted query generation
@@ -199,11 +205,11 @@ class Retriever:
 
         active_skills = list(skill_queries.keys())
         section_hint = f" (targeting {len(tree.nodes)} sections)" if tree else ""
-        print(
-            f"\n[Phase A] Retrieval{section_hint} — "
-            f"{len(active_skills)} skills × {effective_qps} queries"
+        logger.info(
+            "\n[Phase A] Retrieval%s — %d skills × %d queries",
+            section_hint, len(active_skills), effective_qps,
         )
-        print(f"  Active skills: {active_skills}")
+        logger.info("  Active skills: %s", active_skills)
 
         if logger is not None:
             logger.log_retriever_plan(
@@ -217,7 +223,7 @@ class Retriever:
         async def _run_skill(skill_name: str, queries: list[str]) -> None:
             skill = retrieval_registry.get(skill_name)
             if skill is None:
-                print(f"  [WARN] skill '{skill_name}' not in retrieval registry — skipping")
+                logger.warning("  skill '%s' not in retrieval registry — skipping", skill_name)
                 return
             node = PlanNode(
                 node_id=f"retrieval_{skill_name}",
@@ -243,9 +249,9 @@ class Retriever:
                 f", gate {summary['gate_survivors']}→{summary['sources_found']}"
                 if summary.get("gate_survivors") is not None else ""
             )
-            print(
-                f"  [{skill_name}] {summary['sources_found']} sources "
-                f"→ {summary['chunks_stored']} chunks{gate_str}"
+            logger.info(
+                "  [%s] %d sources → %d chunks%s",
+                skill_name, summary["sources_found"], summary["chunks_stored"], gate_str,
             )
             if logger is not None:
                 logger.log_skill_result(
@@ -281,19 +287,7 @@ class Retriever:
           1. New format: skill_queries values are [{query: str, for_sections: [...]}]
           2. Legacy format: skill_queries values are [str, str, ...]
         """
-        # Extract JSON
-        m = re.search(r'```(?:json)?\s*\n(.*?)\n```', raw, re.DOTALL)
-        text = m.group(1) if m else raw.strip()
-        start = text.find("{")
-        if start != -1:
-            text = text[start:]
-
-        obj: dict = {}
-        try:
-            decoder = json.JSONDecoder()
-            obj, _ = decoder.raw_decode(text)
-        except Exception:
-            pass
+        obj: dict = extract_object(raw) or {}
 
         # Support both the new nested structure and legacy flat structure
         sq_raw = obj.get("skill_queries", obj)
@@ -362,7 +356,7 @@ def _deduplicate_queries(queries: list[str]) -> list[str]:
         if not words:
             continue
         is_dup = any(
-            len(words & acc) / len(words | acc) > 0.75
+            len(words & acc) / len(words | acc) > JACCARD_DEDUP_THRESHOLD
             for acc in accepted_sets
         )
         if not is_dup:

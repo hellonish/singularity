@@ -8,11 +8,14 @@ Phase 5 additions:
   - run_fanout(): execute Q(s) queries per skill and ingest all results to Qdrant
   - _ingest_to_qdrant(): chunk + embed + upsert a source to the run's collection
 """
+import logging
 import re
 from typing import Any
 
 from skills.base import SkillBase
 from models import NodeStatus, PlanNode
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +112,8 @@ class BaseRetrievalSkill(SkillBase):
             """Returns (source_dict, sub_query) pairs surviving Pass 1."""
             try:
                 result = await self._fetch(node, query=q)
-            except Exception:
+            except Exception as exc:
+                logger.warning("[%s] fetch failed for query %r: %s", self.name, q, exc)
                 return []
             if not result or not getattr(result, "ok", False):
                 return []

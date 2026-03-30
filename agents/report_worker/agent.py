@@ -21,13 +21,25 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
 from agents.report_manager.section_node import SectionNode
 from agents.report_manager.report_tree import ReportTree
+from models import PlanNode
+from utils.json_parser import extract_object, sanitize_string_values, extract_string_field
 from .result import WorkerResult
+
+logger = logging.getLogger(__name__)
+
+_PROMPT_DIR    = Path(__file__).parent
+_PROMPT_LEAF   = (_PROMPT_DIR / "prompt_leaf.md").read_text(encoding="utf-8")
+_PROMPT_PARENT = (_PROMPT_DIR / "prompt_parent.md").read_text(encoding="utf-8")
+
+ENTITY_COVERAGE_GOAL  = 0.80   # augmentation loop: target fraction of entities covered
+NOVELTY_RATE_CEILING  = 0.25   # augmentation loop: stop when new chunks are this novel or less
 
 if TYPE_CHECKING:
     from trace import TraceLogger
@@ -67,12 +79,7 @@ class ReportWorkerAgent:
         self._analysis_client = analysis_client or client
         self._write_client    = write_client    or client
         self._is_leaf = len(tree.children_of(node.node_id)) == 0
-
-        prompt_file = (
-            "prompt_leaf.md" if self._is_leaf
-            else "prompt_parent.md"
-        )
-        self._system_prompt = (Path(__file__).parent / prompt_file).read_text(encoding="utf-8")
+        self._system_prompt = _PROMPT_LEAF if self._is_leaf else _PROMPT_PARENT
 
     async def run(
         self,
@@ -266,7 +273,7 @@ class ReportWorkerAgent:
                 gap_stable_rounds = 0
             last_gap_text = gap_text
 
-            signals_fired = int(entity_cov >= 0.80) + int(gap_stable_rounds >= 2)
+            signals_fired = int(entity_cov >= ENTITY_COVERAGE_GOAL) + int(gap_stable_rounds >= 2)
             if signals_fired >= 2:
                 break
 
@@ -290,7 +297,7 @@ class ReportWorkerAgent:
             # ── Stopping signal 2: novelty rate ──────────────────────
             if new_chunks:
                 novelty = self._compute_novelty_rate(new_chunks, pool_vocab)
-                if novelty < 0.25:
+                if novelty < NOVELTY_RATE_CEILING:
                     signals_fired += 1
                     if signals_fired >= 2:
                         break
@@ -371,7 +378,7 @@ class ReportWorkerAgent:
             words = re.findall(r'\b\w{4,}\b', getattr(c, "text", "").lower())
             if not words:
                 continue
-            if sum(1 for w in words if w not in pool_vocab) / len(words) > 0.25:
+            if sum(1 for w in words if w not in pool_vocab) / len(words) > NOVELTY_RATE_CEILING:
                 novel_count += 1
         return novel_count / len(new_chunks)
 
@@ -430,11 +437,10 @@ class ReportWorkerAgent:
         """
         try:
             from skills import SKILL_REGISTRY
-            from models import PlanNode as _PlanNode
             web_skill = SKILL_REGISTRY.get("web_search")
             if web_skill is None:
                 return []
-            node = _PlanNode(
+            node = PlanNode(
                 node_id=f"aug_{self.node.node_id}",
                 description=query,
                 skill="web_search",
@@ -453,7 +459,7 @@ class ReportWorkerAgent:
             )
             return vs.search(run_id=self.run_id, query_text=query, k=6, min_credibility=0.3)
         except Exception as exc:
-            print(f"  [Phase C+ web escalation] WARN: {exc}")
+            logger.warning("[Phase C+ web escalation] %s", exc)
             return []
 
     async def _check_faithfulness(
@@ -486,8 +492,8 @@ class ReportWorkerAgent:
             m = re.search(r'"score"\s*:\s*([0-9.]+)', raw)
             if m:
                 return min(1.0, max(0.0, float(m.group(1))))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("[faithfulness check] failed: %s", exc)
         return 1.0
 
     # ------------------------------------------------------------------
@@ -702,102 +708,24 @@ class ReportWorkerAgent:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _sanitize_json_newlines(text: str) -> str:
-        """
-        Escapes literal newline and carriage-return characters that appear
-        inside JSON string values — turning them into the valid JSON escape
-        sequences \\n and \\r respectively.
-
-        LLMs occasionally emit multi-line JSON strings with real newlines
-        instead of \\n, producing invalid JSON that json.loads rejects.  This
-        character-by-character scan fixes that without touching escape
-        sequences that are already correctly encoded.
-
-        Only affects characters inside double-quoted string values; structural
-        JSON whitespace (newlines between keys/values) is left untouched.
-        """
-        result: list[str] = []
-        in_string = False
-        escape_next = False
-        for ch in text:
-            if escape_next:
-                result.append(ch)
-                escape_next = False
-            elif ch == "\\":
-                result.append(ch)
-                escape_next = True
-            elif ch == '"':
-                result.append(ch)
-                in_string = not in_string
-            elif in_string and ch == "\n":
-                result.append("\\n")
-            elif in_string and ch == "\r":
-                result.append("\\r")
-            else:
-                result.append(ch)
-        return "".join(result)
-
-    @staticmethod
-    def _extract_json_string_value(raw: str, key: str) -> str | None:
-        """
-        Locate `"key": "<json string value>"` and decode the string with
-        `json.JSONDecoder.raw_decode`, which correctly handles escaped quotes
-        (`\\"`), backslashes, newlines (`\\n`), and unicode (`\\uXXXX`).
-
-        The old regex `[^"\\\\]|\\\\.` stopped at the **first** unescaped `"` inside
-        prose (e.g. *the term "bias" is*), truncating section bodies to a few words.
-        """
-        m = re.search(r'"%s"\s*:\s*"' % re.escape(key), raw)
-        if not m:
-            return None
-        pos = m.end() - 1  # index of the opening `"` of the JSON string value
-        try:
-            val, _ = json.JSONDecoder().raw_decode(raw[pos:])
-            return val if isinstance(val, str) else None
-        except (json.JSONDecodeError, ValueError):
-            return None
-
-    @staticmethod
     def _parse_call(raw: str, expected_call: int) -> dict[str, Any]:
         """
         Parses a JSON response from the LLM.
 
-        Tries extraction strategies in order:
-        1. JSON inside a ```json ... ``` code fence (sanitised first).
-        2. Raw JSON object starting at the first `{` (sanitised first).
-        3. Sanitise the full raw text, then decode the `"content"` string field alone
-           via `JSONDecoder.raw_decode` (handles escaped inner quotes — regex could not).
-        4. Legacy regex fallback for pathological outputs (best-effort).
+        Strategy 1: full JSON parse on sanitized text (fenced block or bare object).
+        Strategy 2: salvage `content` string alone via raw_decode (handles inner quotes).
         """
-        sanitize = ReportWorkerAgent._sanitize_json_newlines
+        sanitized = sanitize_string_values(raw)
 
-        # Strategy 1: code-fenced JSON
-        m = re.search(r"```(?:json)?\s*\n(.*?)\n```", raw, re.DOTALL)
-        text = sanitize(m.group(1) if m else raw.strip())
+        obj = extract_object(sanitized)
+        if obj is not None:
+            return obj
 
-        # Strategy 2: bare JSON object
-        if not text.startswith("{"):
-            start = text.find("{")
-            if start != -1:
-                text = text[start:]
-
-        if text.startswith("{"):
-            try:
-                decoder = json.JSONDecoder()
-                obj, _ = decoder.raw_decode(text)
-                return obj
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        # Strategy 3: salvage `content` string without requiring full object parse
-        sanitized_full = sanitize(raw)
-        content_str = ReportWorkerAgent._extract_json_string_value(
-            sanitized_full, "content"
-        )
+        content_str = extract_string_field(sanitized, "content")
         if content_str is not None:
             citations: list[str] = []
             citations_match = re.search(
-                r'"citations_used"\s*:\s*(\[[^\]]*\])', sanitized_full
+                r'"citations_used"\s*:\s*(\[[^\]]*\])', sanitized
             )
             if citations_match:
                 try:
@@ -810,35 +738,5 @@ class ReportWorkerAgent:
                 "citations_used": citations,
                 "analyses": {},
             }
-
-        # Strategy 4: legacy regex (only if Strategy 3 failed — may truncate on inner ")
-        content_match = re.search(
-            r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL
-        )
-        if content_match:
-            try:
-                captured = (
-                    content_match.group(1)
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
-                )
-                content_legacy = json.loads(f'"{captured}"')
-                citations_match = re.search(
-                    r'"citations_used"\s*:\s*(\[[^\]]*\])', raw
-                )
-                citations = []
-                if citations_match:
-                    try:
-                        citations = json.loads(citations_match.group(1))
-                    except json.JSONDecodeError:
-                        pass
-                return {
-                    "call": expected_call,
-                    "content": content_legacy,
-                    "citations_used": citations,
-                    "analyses": {},
-                }
-            except (json.JSONDecodeError, ValueError):
-                pass
 
         return {"call": expected_call, "content": raw, "analyses": {}}
