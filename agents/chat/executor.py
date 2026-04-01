@@ -16,11 +16,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from pathlib import Path
 from typing import AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
 from agents.chat.thinker import ThinkPlan, ThinkStep
+
+_CHAT_DIR = Path(__file__).parent
+SINGULARITY_IDENTITY = (_CHAT_DIR / "identity.md").read_text(encoding="utf-8")
+_RESPONSE_SYSTEM     = (_CHAT_DIR / "response_system_prompt.md").read_text(encoding="utf-8")
+_SUMMARIZE_SYSTEM    = (_CHAT_DIR / "summarize_system_prompt.md").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -48,51 +54,6 @@ def _is_uncertain(text: str) -> bool:
     return bool(_UNCERTAINTY_RE.search(text))
 
 
-# ---------------------------------------------------------------------------
-# Singularity identity response
-# ---------------------------------------------------------------------------
-
-SINGULARITY_IDENTITY = """\
-```
- ███████╗██╗███╗   ██╗ ██████╗ ██╗   ██╗██╗      █████╗ ██████╗ ██╗████████╗██╗   ██╗
- ██╔════╝██║████╗  ██║██╔════╝ ██║   ██║██║     ██╔══██╗██╔══██╗██║╚══██╔══╝╚██╗ ██╔╝
- ███████╗██║██╔██╗ ██║██║  ███╗██║   ██║██║     ███████║██████╔╝██║   ██║    ╚████╔╝ 
- ╚════██║██║██║╚██╗██║██║   ██║██║   ██║██║     ██╔══██║██╔══██╗██║   ██║     ╚██╔╝  
- ███████║██║██║ ╚████║╚██████╔╝╚██████╔╝███████╗██║  ██║██║  ██║██║   ██║      ██║   
- ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝  ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝   ╚═╝      ╚═╝  
-```
-
-**I am Singularity** — a dual-mode AI research agent built for depth, speed, and intelligence.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**What I can do:**
-
-🧠 **Think** — Before every response, I reason through your query, select the right tools,
-   and build a transparent step-by-step plan that you can see.
-
-⚡ **Chat Mode** — For direct questions, I answer in 1–5 focused steps using my knowledge
-   or live web search when needed.
-
-🔬 **Research Mode** — For complex investigations, I orchestrate a full multi-agent pipeline:
-   plan → retrieve → analyze → synthesize → polish. The result is a structured research report.
-
-🛠️ **44 Skills** across 3 tiers:
-   • Tier 1: Web search, academic papers, legal, clinical, financial, patent, code, and more
-   • Tier 2: Synthesis, gap analysis, causal analysis, claim verification, contradiction detection
-   • Tier 3: Report generation, decision matrices, explainers, executive summaries
-
-🤖 **Multi-Model** — Switch between Grok, Gemini, or DeepSeek with `/model`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**To get started**, just ask me anything — or try:
-- `What is transformer attention?` → fast chat answer
-- `Explain CRISPR gene editing --research` → full research report
-- `/model` → switch your AI model
-- `/skills` → see all 44 capabilities
-- `/extended on` → unlock deeper 10-step research thinking
-"""
 
 _IDENTITY_RE = re.compile(
     r"\b(who|what)\s+(are|is)\s+you\b"
@@ -164,26 +125,6 @@ def _skill_summary(skill_name: str, query: str, client) -> str:
     except Exception as exc:
         logger.warning("[skill_call] %s failed: %s", skill_name, exc)
         return f"[Skill {skill_name} encountered an error: {exc}]"
-
-
-# ---------------------------------------------------------------------------
-# Core system prompt (no audience leakage)
-# ---------------------------------------------------------------------------
-
-_RESPONSE_SYSTEM = (
-    "You are Singularity, a powerful AI research assistant. "
-    "Answer accurately, concisely, and helpfully. "
-    "Never mention the user's audience category, role classification, or calibration instructions in your response. "
-    "Never say phrases like 'as a layperson' or 'for an expert audience' or 'as you are a...' in your output. "
-    "Just answer the question directly and naturally. "
-    "Use markdown (headers, bullets, bold) where it improves clarity."
-)
-
-_SUMMARIZE_SYSTEM = (
-    "You are Singularity, synthesising gathered research into a clean, well-structured answer. "
-    "Never mention audience classification or calibration in your output. "
-    "Use markdown formatting where helpful. Be direct and thorough."
-)
 
 
 # ---------------------------------------------------------------------------

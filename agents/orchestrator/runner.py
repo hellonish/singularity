@@ -1,6 +1,24 @@
 """
-run_orchestrator — top-level entry point for a research run.
-Also contains gap analysis, termination check, and loop detection helpers.
+run_orchestrator — DAG-based research orchestrator (legacy path).
+
+WHEN TO USE THIS vs run_pipeline
+---------------------------------
+Use ``run_orchestrator`` (this module) when:
+  - Running a skill-DAG style research flow where tier-2 and tier-3 skills are
+    executed directly by the FallbackRouter as plan nodes.
+  - You need gap analysis → replan loops (MAX_REPLAN_ROUNDS).
+  - You want the full skill registry (all 44 skills) to be accessible as
+    first-class plan nodes.
+
+Use ``run_pipeline`` (agents/orchestrator/pipeline.py) when:
+  - Running the Phase 5 pipeline: plan → retrieval → vector store → writing.
+  - You want the report_manager / report_lead / report_worker architecture with
+    tree-structured sections, targeted retrieval per section, and Phase D polish.
+  - This is the CURRENT primary production path.
+
+Relationship: ``run_pipeline`` supersedes ``run_orchestrator`` for full research
+reports.  ``run_orchestrator`` remains useful for targeted skill-DAG execution
+and as a reference implementation of the replan loop.
 """
 import asyncio
 import json

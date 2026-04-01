@@ -1,20 +1,17 @@
-"""Tier-3 output skills."""
-from .report_generator.skill import ReportGeneratorSkill
-from .exec_summary.skill import ExecSummarySkill
-from .bibliography_gen.skill import BibliographyGenSkill
-from .decision_matrix.skill import DecisionMatrixSkill
-from .explainer.skill import ExplainerSkill
-from .annotation_gen.skill import AnnotationGenSkill
-from .visualization_spec.skill import VisualizationSpecSkill
-from .knowledge_delta.skill import KnowledgeDeltaSkill
+"""Tier-3 output skills.
 
-__all__ = [
-    "ReportGeneratorSkill",
-    "ExecSummarySkill",
-    "BibliographyGenSkill",
-    "DecisionMatrixSkill",
-    "ExplainerSkill",
-    "AnnotationGenSkill",
-    "VisualizationSpecSkill",
-    "KnowledgeDeltaSkill",
-]
+Importing this package automatically imports every ``<skill>/skill.py`` module
+found in the skill subdirectories.  Each import triggers
+``SkillBase.__init_subclass__``, which self-registers the skill class into
+``skills.base._SKILL_REGISTRY``.
+
+To add a new tier-3 skill: create the directory and ``skill.py`` — no changes
+here are required.
+"""
+import importlib
+from pathlib import Path
+
+_HERE = Path(__file__).parent
+for _skill_dir in sorted(_HERE.iterdir()):
+    if _skill_dir.is_dir() and not _skill_dir.name.startswith("_"):
+        importlib.import_module(f"{__name__}.{_skill_dir.name}")

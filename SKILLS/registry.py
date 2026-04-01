@@ -1,90 +1,67 @@
-"""
-Skill registry — populated at startup by _register_real_skills().
-Import SKILL_REGISTRY and TIER1_SKILLS from here.
-"""
-from skills.base import SkillBase
+"""Skill registry — auto-populated via SkillBase.__init_subclass__ on import.
 
-TIER1_SKILLS: frozenset[str] = frozenset({
-    "web_search", "academic_search", "clinical_search", "legal_search",
-    "financial_search", "patent_search", "news_archive", "standards_search",
-    "forum_search", "video_search", "dataset_search", "gov_search",
-    "book_search", "social_search", "pdf_deep_extract", "multimedia_search",
-    "code_search", "data_extraction",
-})
+Usage
+-----
+Call ``_register_real_skills()`` once at startup (done by
+``agents/orchestrator/__init__.py``).  After that, import
+``SKILL_REGISTRY`` and ``TIER1_SKILLS`` from here.
+
+How registration works
+----------------------
+1. ``_register_real_skills`` imports all three tier packages.
+2. Each tier ``__init__.py`` imports its skill classes.
+3. Each class definition triggers ``SkillBase.__init_subclass__``, which
+   inserts the class into ``skills.base._SKILL_REGISTRY``.
+4. This function then instantiates every registered class into
+   ``SKILL_REGISTRY`` and derives ``TIER1_SKILLS`` from those that are
+   ``BaseRetrievalSkill`` subclasses.
+"""
+import logging
+
+from skills.base import SkillBase, _SKILL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 SKILL_REGISTRY: dict[str, SkillBase] = {}
+# Mutable set so that callers using `from skills import TIER1_SKILLS` see
+# the populated version after _register_real_skills() runs in-place.
+TIER1_SKILLS: set[str] = set()
 
 
 def _register_real_skills() -> None:
-    """Populate SKILL_REGISTRY with real skill instances."""
+    """Import all skill packages and instantiate every discovered skill class.
+
+    Imports trigger ``SkillBase.__init_subclass__`` on every concrete skill,
+    populating ``_SKILL_REGISTRY``.  This function then instantiates each class
+    once and derives ``TIER1_SKILLS`` from ``BaseRetrievalSkill`` subclasses.
+
+    Both ``SKILL_REGISTRY`` and ``TIER1_SKILLS`` are mutated in-place so that
+    callers who bound them with ``from skills import X`` see the updated values.
+    """
     try:
-        from skills.tier1_retrieval import (
-            WebSearchSkill, AcademicSearchSkill, ClinicalSearchSkill,
-            LegalSearchSkill, FinancialSearchSkill, NewsArchiveSkill,
-            GovSearchSkill, CodeSearchSkill, PatentSearchSkill,
-            StandardsSearchSkill, ForumSearchSkill, VideoSearchSkill,
-            DatasetSearchSkill, BookSearchSkill, SocialSearchSkill,
-            PdfDeepExtractSkill, MultimediaSearchSkill, DataExtractionSkill,
+        import skills.tier1_retrieval  # noqa: F401 — side-effect: registers all tier-1 classes
+        import skills.tier2_analysis   # noqa: F401 — side-effect: registers all tier-2 classes
+        import skills.tier3_output     # noqa: F401 — side-effect: registers all tier-3 classes
+    except ImportError as exc:
+        logger.error(
+            "Skill packages could not be imported — SKILL_REGISTRY will be empty. "
+            "Ensure all dependencies are installed. Error: %s",
+            exc,
         )
-        from skills.tier2_analysis import (
-            SynthesisSkill, ComparativeAnalysisSkill, GapAnalysisSkill,
-            QualityCheckSkill, ContradictionDetectSkill, ClaimVerificationSkill,
-            CausalAnalysisSkill, StatisticalAnalysisSkill, MetaAnalysisSkill,
-            TrendAnalysisSkill, TimelineConstructSkill, HypothesisGenSkill,
-            EntityExtractionSkill, CitationGraphSkill, SentimentClusterSkill,
-            CredibilityScoreSkill, TranslationSkill, FallbackRouterSkill,
-        )
-        from skills.tier3_output import (
-            ReportGeneratorSkill, ExecSummarySkill, BibliographyGenSkill,
-            DecisionMatrixSkill, ExplainerSkill, AnnotationGenSkill,
-            VisualizationSpecSkill, KnowledgeDeltaSkill,
-        )
-    except ImportError:
         return
 
-    SKILL_REGISTRY.update({
-        "web_search":         WebSearchSkill(),
-        "academic_search":    AcademicSearchSkill(),
-        "clinical_search":    ClinicalSearchSkill(),
-        "legal_search":       LegalSearchSkill(),
-        "financial_search":   FinancialSearchSkill(),
-        "news_archive":       NewsArchiveSkill(),
-        "gov_search":         GovSearchSkill(),
-        "code_search":        CodeSearchSkill(),
-        "patent_search":      PatentSearchSkill(),
-        "standards_search":   StandardsSearchSkill(),
-        "forum_search":       ForumSearchSkill(),
-        "video_search":       VideoSearchSkill(),
-        "dataset_search":     DatasetSearchSkill(),
-        "book_search":        BookSearchSkill(),
-        "social_search":      SocialSearchSkill(),
-        "pdf_deep_extract":   PdfDeepExtractSkill(),
-        "multimedia_search":  MultimediaSearchSkill(),
-        "data_extraction":    DataExtractionSkill(),
-        "synthesis":            SynthesisSkill(),
-        "comparative_analysis": ComparativeAnalysisSkill(),
-        "gap_analysis":         GapAnalysisSkill(),
-        "quality_check":        QualityCheckSkill(),
-        "contradiction_detect": ContradictionDetectSkill(),
-        "claim_verification":   ClaimVerificationSkill(),
-        "causal_analysis":      CausalAnalysisSkill(),
-        "statistical_analysis": StatisticalAnalysisSkill(),
-        "meta_analysis":        MetaAnalysisSkill(),
-        "trend_analysis":       TrendAnalysisSkill(),
-        "timeline_construct":   TimelineConstructSkill(),
-        "hypothesis_gen":       HypothesisGenSkill(),
-        "entity_extraction":    EntityExtractionSkill(),
-        "citation_graph":       CitationGraphSkill(),
-        "sentiment_cluster":    SentimentClusterSkill(),
-        "credibility_score":    CredibilityScoreSkill(),
-        "translation":          TranslationSkill(),
-        "fallback_router":      FallbackRouterSkill(),
-        "report_generator":   ReportGeneratorSkill(),
-        "exec_summary":       ExecSummarySkill(),
-        "bibliography_gen":   BibliographyGenSkill(),
-        "decision_matrix":    DecisionMatrixSkill(),
-        "explainer":          ExplainerSkill(),
-        "annotation_gen":     AnnotationGenSkill(),
-        "visualization_spec": VisualizationSpecSkill(),
-        "knowledge_delta":    KnowledgeDeltaSkill(),
-    })
+    for name, cls in _SKILL_REGISTRY.items():
+        SKILL_REGISTRY[name] = cls()
+
+    # Derive TIER1_SKILLS from the concrete type rather than a hardcoded list.
+    from skills.tier1_retrieval.base import BaseRetrievalSkill
+    TIER1_SKILLS.update(
+        name for name, skill in SKILL_REGISTRY.items()
+        if isinstance(skill, BaseRetrievalSkill)
+    )
+
+    logger.debug(
+        "Skill registry loaded: %d skills (%d tier-1).",
+        len(SKILL_REGISTRY),
+        len(TIER1_SKILLS),
+    )

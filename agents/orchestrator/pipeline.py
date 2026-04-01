@@ -1,12 +1,22 @@
 """
-Phase 5 pipeline — research run (new execution order).
+run_pipeline — Phase 5 research pipeline (current primary production path).
 
-Phase B — Planning:    3 Managers propose structure → Lead finalises tree
+WHEN TO USE THIS vs run_orchestrator
+--------------------------------------
+Use ``run_pipeline`` (this module) for all full research reports.  It is the
+CURRENT production path.
+
+Use ``run_orchestrator`` (agents/orchestrator/runner.py) for legacy DAG-style
+skill execution or the replan-loop flow.  See runner.py for the full comparison.
+
+Phase sequence
+--------------
+Phase B — Planning:    3 Managers propose tree structure → Lead finalises
 Phase A — Retrieval:   tree-informed skill selection → targeted query fanout → Qdrant
-Phase C — Writing:     Workers write sections bottom-up through the hierarchy
+Phase C — Writing:     Workers write sections bottom-up through the report tree
 Phase D — Polish:      Programmatic fixes + LLM creative beautification
 
-Retrieval now runs AFTER planning so every query is targeted at a real section.
+Retrieval runs AFTER planning so every query targets a real planned section.
 
 Entry point: run_pipeline(query, strength, audience, output_language) → str (Markdown)
 """
@@ -28,7 +38,7 @@ from .config import (
 )
 from .strength import StrengthConfig
 from models import ExecutionContext, PlanNode
-from skills import SKILL_REGISTRY, TIER1_SKILLS
+from skills import SKILL_REGISTRY, TIER1_SKILLS, SKILL_DOCS
 
 from agents.planner import DomainRegistry
 from agents.report_manager import ReportManagerAgent, ReportTree
@@ -185,7 +195,10 @@ async def _phase_b(
     """
     Run 3 Managers in parallel → Lead finalises.
     Managers receive the full list of available retrieval skills (retrieval runs
-    AFTER planning, so skills are not yet filtered — we pass the full tier-1 set).
+    AFTER planning, so skills are not yet filtered — we pass the full tier-1 set)
+    plus their full skill contracts (When to Use, Output Contract, Constraints)
+    sourced from each skill's skill.md so managers can assign skills to sections
+    with full awareness of what each skill produces.
     Returns the authoritative ReportTree.
     """
     logger.info("\n[Phase B] Planning — 3 Managers + Lead")
@@ -194,6 +207,8 @@ async def _phase_b(
     target_n = strength.sample_section_count()
     lo, hi = strength.section_count_range
     logger.info("  Section count rolled: %d  (range %d–%d)", target_n, lo, hi)
+
+    skill_context = SKILL_DOCS.planner_context(available_skills)
 
     manager_client = _make_client(MANAGER_MODEL)
     managers = [
@@ -207,6 +222,7 @@ async def _phase_b(
             target_n=target_n,
             available_skills=available_skills,
             audience=audience,
+            skill_context=skill_context,
             logger=trace_logger,
         )
         for m in managers
@@ -599,6 +615,14 @@ async def run_pipeline(
     logger.info("  Report length    : %s chars", f"{len(report_md):,}")
     if trace_logger is not None:
         logger.info("  Trace saved      : %s/%s/", trace_root, run_id)
+
+    # Enforce TTL on stale run collections so Qdrant does not grow unbounded.
+    try:
+        deleted = vs.cleanup_expired_collections()
+        if deleted:
+            logger.debug("[VectorStore] Expired collections removed: %s", deleted)
+    except Exception as exc:
+        logger.warning("[VectorStore] cleanup_expired_collections failed: %s", exc)
 
     return report_md
 

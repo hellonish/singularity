@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 
 import numpy as np
 from pydantic import BaseModel
@@ -26,6 +27,8 @@ from pydantic import BaseModel
 from vector_store.embedder import Embedder
 
 logger = logging.getLogger(__name__)
+
+_GATE_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
 
 PASS1_THRESHOLD  = 0.35   # cosine similarity floor; below = off-topic
 SNIPPET_MAX_CHARS = 300   # max characters from each source excerpt for embedding + gating
@@ -122,14 +125,7 @@ async def pass2_gate(
             f"excerpt={excerpt}"
         )
 
-    system_prompt = (
-        "You are a source relevance gate. Given a research query and a list of "
-        "retrieved web sources, return only the URLs of sources that are directly "
-        "and unambiguously relevant to the specific entity, product, or topic named "
-        "in the research query. Reject sources about different entities that merely "
-        "share a name or keyword with the query. When genuinely unsure, include the "
-        "source — do not over-filter legitimate results."
-    )
+    system_prompt = _GATE_SYSTEM_PROMPT
     user_prompt = (
         f"research_query: {original_query}\n\n"
         f"sources ({len(lines)} total):\n" + "\n".join(lines)

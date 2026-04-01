@@ -49,8 +49,9 @@ _register_real_skills()
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 from agents.chat.agent import ChatAgent
-from agents.chat.thinker import ThinkPlan, _SKILL_MENU
+from agents.chat.thinker import ThinkPlan
 from agents.chat.models import AVAILABLE_MODELS, DEFAULT_MODEL_ID, get_model_info
+from skills import SKILL_DOCS
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +242,15 @@ def _handle_command(cmd: str, session: Session, agent: ChatAgent) -> bool:
         return True
 
     elif head == "/skills":
-        print(f"\n  {bold('Available Skills')} ({len(_SKILL_MENU)}):\n")
-        for name, desc in _SKILL_MENU.items():
-            print(f"    {cyan(name):<28} {dim(desc)}")
+        # Skill menu is sourced live from skill.md via SkillDocs.
+        skill_lines = [line for line in SKILL_DOCS.thinker_menu().splitlines() if line.strip()]
+        skill_rows = [line for line in skill_lines if not line.startswith("Tier ")]
+        print(f"\n  {bold('Available Skills')} ({len(skill_rows)}):\n")
+        for line in skill_lines:
+            if line.startswith("Tier "):
+                print(f"  {bold(line)}")
+            else:
+                print(f"    {dim(line.strip())}")
         print()
         return True
 

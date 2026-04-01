@@ -22,7 +22,7 @@ from .section_node import SectionNode
 if TYPE_CHECKING:
     from trace import TraceLogger
 
-_SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text(encoding="utf-8")
+_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
 
 _PERSPECTIVES: dict[int, dict] = {
     1: {
@@ -119,6 +119,7 @@ class ReportManagerAgent:
         target_n: int,
         available_skills: list[str],
         audience: str = "practitioner",
+        skill_context: str = "",
         logger: "TraceLogger | None" = None,
     ) -> ReportTree:
         """
@@ -131,6 +132,10 @@ class ReportManagerAgent:
                               after planning (so the manager knows what evidence
                               types will be available when workers write).
             audience:         Target reader type (layperson / practitioner / expert …).
+            skill_context:    Full "When to Use" + "Output Contract" + "Constraints"
+                              for each available_skill, sourced from skill.md files.
+                              Lets the manager understand what evidence type each
+                              skill produces when assigning skills to sections.
             logger:           Optional TraceLogger; when provided, logs prompt +
                               raw response + parsed tree for this manager call.
 
@@ -147,10 +152,14 @@ class ReportManagerAgent:
             + "\n\nANTI-PATTERNS — explicitly avoid:\n"
             + "\n".join(f"  ✗ {ap}" for ap in p["anti_patterns"])
         )
+        skills_block = (
+            f"available_retrieval_skills: {', '.join(available_skills)}\n"
+            + (f"\nskill_contracts:\n{skill_context}\n" if skill_context else "")
+        )
         user_message = (
             f"query: {query}\n"
             f"strength_context: target_section_count={target_n}\n"
-            f"available_retrieval_skills: {', '.join(available_skills)}\n"
+            f"{skills_block}"
             f"audience: {audience}\n"
             f"proposal_id: manager_{self.manager_id}\n"
             f"structural_perspective: {perspective_name}\n"

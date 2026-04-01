@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from trace import TraceLogger
 
-_PROMPT_PATH = Path(__file__).parent / "report_polisher" / "prompt.md"
+_PROMPT_PATH = Path(__file__).parent / "report_polisher" / "system_prompt.md"
 
 
 # ---------------------------------------------------------------------------

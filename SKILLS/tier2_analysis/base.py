@@ -2,11 +2,13 @@
 BaseAnalysisSkill — shared pattern for all LLM-based tier-2 analysis skills.
 
 Subclass this and set:
-  - name        : str           (skill name matching SKILL_REGISTRY key)
-  - PROMPT_FILE : str           (filename — kept for backward compat, but prompt is loaded from skill's own dir)
+  - name : str  (skill name matching SKILL_REGISTRY key)
 
-Override _parse_findings() if your skill needs custom finding extraction.
-The default implementation already handles the standard AnalysisOutput shape.
+The system prompt is loaded from ``prompt.md`` in the skill's own directory at
+runtime via ``importlib.__file__``.  Subclasses do not need to declare a prompt
+path; just place ``prompt.md`` next to ``skill.py``.
+
+Override run() only for non-LLM skills (e.g. CredibilityScoreSkill).
 """
 import asyncio
 import importlib
@@ -23,8 +25,8 @@ _budget = ContextBudgetManager()
 
 
 class BaseAnalysisSkill(SkillBase):
-    name: str = "base_analysis"
-    PROMPT_FILE: str = ""   # e.g. "synthesis.md" — kept for compat, but ignored (prompt.md used)
+    """Base class for LLM-driven tier-2 skills.  Do not set ``name`` here;
+    concrete subclasses must declare it to trigger auto-registration."""
 
     # ------------------------------------------------------------------
     # Main entry — override run() only for non-LLM skills

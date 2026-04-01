@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from models import ExecutionContext, PlanNode
@@ -22,6 +23,8 @@ from skills import SKILL_REGISTRY, TIER1_SKILLS
 from utils.json_parser import extract_object
 
 logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
 
 QUERY_MAX_CHARS         = 150   # hard cap on query string length
 JACCARD_DEDUP_THRESHOLD = 0.75  # queries with Jaccard similarity above this are duplicates
@@ -128,18 +131,7 @@ class Retriever:
         effective_qps = strength.effective_queries_per_skill(leaf_count) if leaf_count else strength.queries_per_skill
 
         # ── Step 1 + Step 2: Single structured LLM call ──────────────────
-        system_prompt = (
-            "You are a retrieval planner. Return ONLY valid JSON — no prose, no markdown fences.\n"
-            "Your JSON must have exactly these two keys: 'skill_selection' and 'skill_queries'.\n\n"
-            "CRITICAL — query strings are clean web search strings. Rules:\n"
-            "  ✗ NEVER: \"India LPG shortage (for Section 3: Geopolitical Context)\"\n"
-            "  ✗ NEVER: \"supply chain impact [node_id: n5]\"\n"
-            "  ✗ NEVER: annotating queries with section IDs or parenthetical notes\n"
-            "  ✓ CORRECT: \"India LPG shortage 2026\"\n"
-            "  ✓ CORRECT: \"Hormuz strait closure LPG supply chain impact\"\n"
-            "The 'for_sections' field in each query entry is metadata only — it NEVER "
-            "appears in the query string itself."
-        )
+        system_prompt = _SYSTEM_PROMPT
 
         domain_block = ""
         if domain_key:
