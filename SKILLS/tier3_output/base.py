@@ -2,11 +2,12 @@
 BaseOutputSkill — shared pattern for all LLM-based tier-3 output skills.
 
 Subclass this and set:
-  - name        : str
-  - PROMPT_FILE : str  (kept for compat, but prompt.md is loaded from skill's own dir)
-  - format_type : str (matches OutputFormat literal: "report", "exec_summary", etc.)
+  - name        : str           (skill name matching SKILL_REGISTRY key)
+  - format_type : str           (matches OutputFormat literal: "report", "exec_summary", etc.)
 
-It fetches LLM output (which is JSON) and converts it to an OutputDocument.
+The system prompt is loaded from ``prompt.md`` in the skill's own directory at
+runtime via ``importlib.__file__``.  Subclasses do not need to declare a prompt
+path; just place ``prompt.md`` next to ``skill.py``.
 """
 import asyncio
 import importlib
@@ -22,8 +23,8 @@ _budget = ContextBudgetManager()
 
 
 class BaseOutputSkill(SkillBase):
-    name: str = "base_output"
-    PROMPT_FILE: str = ""  # kept for compat; actual prompt loaded from skill dir
+    """Base class for LLM-driven tier-3 skills.  Do not set ``name`` here;
+    concrete subclasses must declare it to trigger auto-registration."""
     format_type: OutputFormat = "report"
 
     async def run(self, node: PlanNode, ctx, client, registry) -> tuple[Any, NodeStatus, float]:

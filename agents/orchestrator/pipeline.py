@@ -1,29 +1,46 @@
 """
-Phase 5 pipeline — research run (new execution order).
+run_pipeline — Phase 5 research pipeline (current primary production path).
 
-Phase B — Planning:    3 Managers propose structure → Lead finalises tree
+WHEN TO USE THIS vs run_orchestrator
+--------------------------------------
+Use ``run_pipeline`` (this module) for all full research reports.  It is the
+CURRENT production path.
+
+Use ``run_orchestrator`` (agents/orchestrator/runner.py) for legacy DAG-style
+skill execution or the replan-loop flow.  See runner.py for the full comparison.
+
+Phase sequence
+--------------
+Phase B — Planning:    3 Managers propose tree structure → Lead finalises
 Phase A — Retrieval:   tree-informed skill selection → targeted query fanout → Qdrant
-Phase C — Writing:     Workers write sections bottom-up through the hierarchy
+Phase C — Writing:     Workers write sections bottom-up through the report tree
 Phase D — Polish:      Programmatic fixes + LLM creative beautification
 
-Retrieval now runs AFTER planning so every query is targeted at a real section.
+Retrieval runs AFTER planning so every query targets a real planned section.
 
 Entry point: run_pipeline(query, strength, audience, output_language) → str (Markdown)
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
+from functools import partial
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from .config import (
     PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL,
     WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL, POLISHER_MODEL,
+    DOMAIN_CLASSIFIER_MODEL, MAX_TOKENS_DOMAIN_CLASSIFIER, REGISTRY_PATH,
+    SOURCE_GATE_MODEL,
 )
 from .strength import StrengthConfig
-from models import ExecutionContext
-from skills import SKILL_REGISTRY, TIER1_SKILLS
+from models import ExecutionContext, PlanNode
+from skills import SKILL_REGISTRY, TIER1_SKILLS, SKILL_DOCS
 
+from agents.planner import DomainRegistry
 from agents.report_manager import ReportManagerAgent, ReportTree
 from agents.report_lead import ReportLeadAgent
 from agents.report_worker import ReportWorkerAgent
@@ -173,20 +190,25 @@ async def _phase_b(
     strength: StrengthConfig,
     available_skills: list[str],
     audience: str,
-    logger: TraceLogger | None = None,
+    trace_logger: TraceLogger | None = None,
 ) -> ReportTree:
     """
     Run 3 Managers in parallel → Lead finalises.
     Managers receive the full list of available retrieval skills (retrieval runs
-    AFTER planning, so skills are not yet filtered — we pass the full tier-1 set).
+    AFTER planning, so skills are not yet filtered — we pass the full tier-1 set)
+    plus their full skill contracts (When to Use, Output Contract, Constraints)
+    sourced from each skill's skill.md so managers can assign skills to sections
+    with full awareness of what each skill produces.
     Returns the authoritative ReportTree.
     """
-    print(f"\n[Phase B] Planning — 3 Managers + Lead")
+    logger.info("\n[Phase B] Planning — 3 Managers + Lead")
 
     # Roll section count once — immutable for this run
     target_n = strength.sample_section_count()
     lo, hi = strength.section_count_range
-    print(f"  Section count rolled: {target_n}  (range {lo}–{hi})")
+    logger.info("  Section count rolled: %d  (range %d–%d)", target_n, lo, hi)
+
+    skill_context = SKILL_DOCS.planner_context(available_skills)
 
     manager_client = _make_client(MANAGER_MODEL)
     managers = [
@@ -200,26 +222,26 @@ async def _phase_b(
             target_n=target_n,
             available_skills=available_skills,
             audience=audience,
-            logger=logger,
+            skill_context=skill_context,
+            logger=trace_logger,
         )
         for m in managers
     ])
 
     for i, p in enumerate(proposals):
-        print(f"  Manager {i+1}: {len(p.nodes)} nodes — {p.rationale[:60]}")
+        logger.info("  Manager %d: %d nodes — %s", i + 1, len(p.nodes), p.rationale[:60])
 
-    print(f"  Lead model     : {LEAD_MODEL}")
+    logger.info("  Lead model     : %s", LEAD_MODEL)
     lead = ReportLeadAgent(client=_make_client(LEAD_MODEL))
     final_tree = await lead.finalise(
         proposals=list(proposals),
         query=query,
         section_count_range=(lo, hi),
         audience=audience,
-        logger=logger,
+        logger=trace_logger,
     )
 
-    print(f"  Lead finalised: {len(final_tree.nodes)} nodes, "
-          f"depth={final_tree.max_depth}")
+    logger.info("  Lead finalised: %d nodes, depth=%d", len(final_tree.nodes), final_tree.max_depth)
     return final_tree
 
 
@@ -227,14 +249,93 @@ async def _phase_b(
 # Phase C — Writing (Worker agents, bottom-up)
 # ---------------------------------------------------------------------------
 
+async def _layer1_coverage_audit(
+    tree: ReportTree,
+    run_id: str,
+    collection_name: str,
+    strength: StrengthConfig,
+    vs: VectorStoreClient,
+    query: str,
+    ctx,
+    gate_client=None,
+) -> None:
+    """
+    Issue 1 Layer 1: Post-Phase-A coverage audit.
+
+    For each leaf section with fewer than strength.min_chunks_per_leaf evidence
+    chunks, run a targeted web search follow-up to fill the gap before writing.
+    """
+    from agents.retriever.retriever import sanitize_query
+    from skills import SKILL_REGISTRY
+
+    leaves = tree.leaves()
+    min_chunks = strength.min_chunks_per_leaf
+    starved: list = []
+
+    for leaf in leaves:
+        section_q = f"{leaf.title}: {leaf.description}"
+        count = vs.count_chunks(run_id=run_id, query_text=section_q, k=min_chunks + 10)
+        if count < min_chunks:
+            starved.append(leaf)
+
+    if not starved:
+        logger.info(
+            "\n[Layer 1 Audit] All %d leaf sections meet coverage threshold (min=%d)",
+            len(leaves), min_chunks,
+        )
+        return
+
+    logger.info(
+        "\n[Layer 1 Audit] %d/%d sections starved (< %d chunks) — targeted re-retrieval",
+        len(starved), len(leaves), min_chunks,
+    )
+
+    web_skill = SKILL_REGISTRY.get("web_search")
+    if web_skill is None:
+        logger.warning("[Layer 1] web_search skill not found — skipping re-retrieval")
+        return
+
+    async def _refetch(node) -> None:
+        q = sanitize_query(f"{query} {node.title} {node.description[:60]}")
+        pnode = PlanNode(
+            node_id=f"layer1_{node.node_id}",
+            description=q,
+            skill="web_search",
+            depends_on=[],
+            acceptance=[],
+            parallelizable=True,
+            output_slot=f"layer1_{node.node_id}",
+            depth_override=strength.min_results_per_query,
+        )
+        summary = await web_skill.run_fanout(
+            queries=[q],
+            run_id=run_id,
+            collection_name=collection_name,
+            node=pnode,
+            ctx=ctx,
+            vs=vs,
+            original_query=query,
+            gate_client=gate_client,
+        )
+        logger.info(
+            "    [Layer 1] %s '%s' → +%d chunks",
+            node.node_id, node.title[:35], summary["chunks_stored"],
+        )
+
+    await asyncio.gather(*[_refetch(n) for n in starved])
+
+
 async def _phase_c(
     tree: ReportTree,
     run_id: str,
+    collection_name: str,
     strength: StrengthConfig,
     audience: str,
     query: str,
     vs: VectorStoreClient,
-    logger: TraceLogger | None = None,
+    ctx,
+    trace_logger: TraceLogger | None = None,
+    gate_client=None,
 ) -> dict[str, dict]:
     """
     Spawn one ReportWorkerAgent per node.
@@ -247,30 +348,80 @@ async def _phase_c(
       write_client    (WORKER_WRITE_MODEL)     — Call 2: the actual published prose;
         best available non-reasoning model for maximum quality.
 
+    Issue 3 (Phase C+): leaf workers receive strength/vs/collection_name so they
+    can run the evidence augmentation loop between Call 1 and Call 2.
+
+    Issue 4: parent node Qdrant queries include child titles for richer context.
+
+    Issue 5: time-sensitive nodes (requires_fresh=True) get a JIT web search
+    immediately before their worker runs.
+
     Returns a merged source_map (citation_id → {title, url}) collected from
     all workers, used by the assembler to build the Reference List.
     """
-    print(f"\n[Phase C] Writing — {len(tree.nodes)} sections, "
-          f"{len(tree.leaves())} leaves")
-    print(f"  Analysis model : {WORKER_ANALYSIS_MODEL}")
-    print(f"  Write model    : {WORKER_WRITE_MODEL}")
+    from agents.retriever.retriever import sanitize_query
+    from skills import SKILL_REGISTRY
+
+    logger.info("\n[Phase C] Writing — %d sections, %d leaves", len(tree.nodes), len(tree.leaves()))
+    logger.info("  Analysis model : %s", WORKER_ANALYSIS_MODEL)
+    logger.info("  Write model    : %s", WORKER_WRITE_MODEL)
+    aug_enabled = strength.max_augmentation_iters > 0
+    logger.info(
+        "  Phase C+ augmentation: %s (max_iters=%d, max_web_esc=%d)",
+        "enabled" if aug_enabled else "disabled",
+        strength.max_augmentation_iters,
+        strength.max_web_escalations,
+    )
 
     analysis_client = _make_client(WORKER_ANALYSIS_MODEL)
     write_client    = _make_client(WORKER_WRITE_MODEL)
+    web_skill = SKILL_REGISTRY.get("web_search")
 
     levels = tree.topological_levels()   # deepest → root (already reversed)
 
     for level_nodes in levels:
         depth = level_nodes[0].level
-        print(f"  Writing depth={depth} ({len(level_nodes)} nodes) in parallel…")
+        is_leaf_level = (depth == tree.max_depth)
+        logger.info("  Writing depth=%d (%d nodes) in parallel…", depth, len(level_nodes))
 
         async def _write_node(node) -> None:
             k = strength.qdrant_k(node.level, tree.max_depth)
-            chunks = vs.search(
-                run_id=run_id,
-                query_text=f"{node.title}: {node.description}",
-                k=k,
-            )
+            is_leaf = len(tree.children_of(node.node_id)) == 0
+
+            # Issue 5: JIT fresh search for time-sensitive sections
+            if getattr(node, "requires_fresh", False) and web_skill is not None:
+                fresh_q = sanitize_query(f"{query} {node.title} {node.description[:60]}")
+                fresh_node = PlanNode(
+                    node_id=f"jit_{node.node_id}",
+                    description=fresh_q,
+                    skill="web_search",
+                    depends_on=[],
+                    acceptance=[],
+                    parallelizable=True,
+                    output_slot=f"jit_{node.node_id}",
+                    depth_override=strength.min_results_per_query,
+                )
+                await web_skill.run_fanout(
+                    queries=[fresh_q],
+                    run_id=run_id,
+                    collection_name=collection_name,
+                    node=fresh_node,
+                    ctx=ctx,
+                    vs=vs,
+                    original_query=query,
+                    gate_client=gate_client,
+                )
+
+            # Issue 4: include child titles in parent node query for richer context
+            children = tree.children_of(node.node_id)
+            if children:
+                child_titles = " ".join(c.title for c in children[:4])
+                query_text = f"{node.title}: {node.description} {child_titles}"
+            else:
+                query_text = f"{node.title}: {node.description}"
+
+            chunks = vs.search(run_id=run_id, query_text=query_text, k=k)
+
             worker = ReportWorkerAgent(
                 node=node,
                 tree=tree,
@@ -282,10 +433,25 @@ async def _phase_c(
                 qdrant_chunks=chunks,
                 audience=audience,
                 research_query=query,
-                logger=logger,
+                logger=trace_logger,
+                # Issue 3: Phase C+ parameters (leaf nodes only)
+                strength=strength if is_leaf else None,
+                collection_name=collection_name if is_leaf else None,
+                vs=vs if is_leaf else None,
+                ctx=ctx,
             )
-            print(f"    [{node.node_id}] '{node.title[:40]}' "
-                  f"→ {result.word_count} words, {len(result.citations_used)} citations")
+
+            aug_info = ""
+            if is_leaf and result.augmentation_iters > 0:
+                aug_info = (f", aug_iters={result.augmentation_iters}"
+                            f", faith={result.faithfulness_score:.2f}"
+                            if result.faithfulness_score is not None
+                            else f", aug_iters={result.augmentation_iters}")
+            logger.info(
+                "    [%s] '%s' → %d words, %d citations%s",
+                node.node_id, node.title[:40],
+                result.word_count, len(result.citations_used), aug_info,
+            )
 
         await asyncio.gather(*[_write_node(n) for n in level_nodes])
 
@@ -325,18 +491,18 @@ async def run_pipeline(
     sc = StrengthConfig(value=strength)
     run_id = uuid.uuid4().hex[:12]
 
-    print("=" * 65)
-    print("RESEARCH AGENT — PHASE 5 STRENGTH-BASED PIPELINE")
-    print("=" * 65)
-    print(f"Query    : {query}")
-    print(f"Strength : {sc}")
-    print(f"Audience : {audience}")
-    print(f"Run ID   : {run_id}")
+    logger.info("=" * 65)
+    logger.info("RESEARCH AGENT — PHASE 5 STRENGTH-BASED PIPELINE")
+    logger.info("=" * 65)
+    logger.info("Query    : %s", query)
+    logger.info("Strength : %s", sc)
+    logger.info("Audience : %s", audience)
+    logger.info("Run ID   : %s", run_id)
 
-    logger: TraceLogger | None = None
+    trace_logger: TraceLogger | None = None
     if trace:
-        logger = TraceLogger(run_id=run_id, query=query, trace_root=trace_root)
-        logger.write_overview({
+        trace_logger = TraceLogger(run_id=run_id, query=query, trace_root=trace_root)
+        trace_logger.write_overview({
             "strength":             strength,
             "audience":             audience,
             "output_language":      output_language,
@@ -346,11 +512,26 @@ async def run_pipeline(
             "worker_write_model":   WORKER_WRITE_MODEL,
             "polisher_model":       POLISHER_MODEL,
         })
-        print(f"  Trace    : enabled → {trace_root}/{run_id}/")
+        logger.info("  Trace    : enabled → %s/%s/", trace_root, run_id)
 
     ctx = ExecutionContext(language=output_language, depth="strength")
 
     vs = VectorStoreClient()
+    gate_client = _make_client(SOURCE_GATE_MODEL)
+
+    domain_registry = DomainRegistry(REGISTRY_PATH)
+    domain_client = _make_client(DOMAIN_CLASSIFIER_MODEL)
+    classified_domain, domain_conf = await asyncio.to_thread(
+        partial(
+            domain_registry.detect_domain_llm,
+            query,
+            domain_client,
+            max_tokens=MAX_TOKENS_DOMAIN_CLASSIFIER,
+        )
+    )
+    dinfo = domain_registry.get_domain(classified_domain)
+    domain_label = dinfo.get("label", classified_domain)
+    logger.info("  Domain     : %s — %s (%s)", classified_domain, domain_label, domain_conf)
 
     # ── Phase B — Planning (first: defines structure before retrieval) ─
     tree = await _phase_b(
@@ -358,32 +539,60 @@ async def run_pipeline(
         strength=sc,
         available_skills=list(TIER1_SKILLS),   # full tier-1 set — retrieval picks later
         audience=audience,
-        logger=logger,
+        trace_logger=trace_logger,
     )
 
     # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
     cached_run_id = vs.find_cached_run(query)   # returns None if in-memory or no hit
 
     if cached_run_id:
-        print(f"\n[Cache HIT] Reusing collection from run {cached_run_id}")
+        logger.info("\n[Cache HIT] Reusing collection from run %s", cached_run_id)
         active_run_id = cached_run_id
+        active_collection = f"run_{cached_run_id}"
     else:
         # ── Phase A — Retrieval (tree-informed: queries target real sections) ─
-        collection_name = vs.create_collection(run_id)
+        active_collection = vs.create_collection(run_id)
         active_run_id = run_id
 
         retriever = Retriever(_make_client(PLANNER_MODEL), vs)
-        await retriever.run(query, sc, run_id, collection_name, ctx, tree=tree, logger=logger)
+        await retriever.run(
+            query,
+            sc,
+            run_id,
+            active_collection,
+            ctx,
+            tree=tree,
+            logger=trace_logger,
+            domain_key=classified_domain,
+            domain_label=domain_label,
+            domain_confidence=domain_conf,
+            gate_client=gate_client,
+        )
+
+        # ── Issue 1 Layer 1: Coverage audit — re-fetch starved sections ──
+        await _layer1_coverage_audit(
+            tree=tree,
+            run_id=active_run_id,
+            collection_name=active_collection,
+            strength=sc,
+            vs=vs,
+            query=query,
+            ctx=ctx,
+            gate_client=gate_client,
+        )
 
     # ── Phase C ───────────────────────────────────────────────────────
     source_map = await _phase_c(
         tree=tree,
         run_id=active_run_id,
+        collection_name=active_collection,
         strength=sc,
         audience=audience,
         query=query,
         vs=vs,
-        logger=logger,
+        ctx=ctx,
+        trace_logger=trace_logger,
+        gate_client=gate_client,
     )
 
     # ── Assemble report ───────────────────────────────────────────────
@@ -396,16 +605,24 @@ async def run_pipeline(
     total_words = sum(n.word_count for n in tree.nodes)
 
     # ── Phase D — Polish ──────────────────────────────────────────────
-    print(f"\n[Phase D] Polish — programmatic fixes + creative formatting")
-    report_md = await _phase_d(report_md, query, audience, logger=logger)
+    logger.info("\n[Phase D] Polish — programmatic fixes + creative formatting")
+    report_md = await _phase_d(report_md, query, audience, trace_logger=trace_logger)
 
-    print(f"\n{'=' * 65}")
-    print("RESEARCH COMPLETE")
-    print(f"  Sections written : {len(tree.nodes)}")
-    print(f"  Total words      : {total_words:,}")
-    print(f"  Report length    : {len(report_md):,} chars")
-    if logger is not None:
-        print(f"  Trace saved      : {trace_root}/{run_id}/")
+    logger.info("\n%s", "=" * 65)
+    logger.info("RESEARCH COMPLETE")
+    logger.info("  Sections written : %d", len(tree.nodes))
+    logger.info("  Total words      : %s", f"{total_words:,}")
+    logger.info("  Report length    : %s chars", f"{len(report_md):,}")
+    if trace_logger is not None:
+        logger.info("  Trace saved      : %s/%s/", trace_root, run_id)
+
+    # Enforce TTL on stale run collections so Qdrant does not grow unbounded.
+    try:
+        deleted = vs.cleanup_expired_collections()
+        if deleted:
+            logger.debug("[VectorStore] Expired collections removed: %s", deleted)
+    except Exception as exc:
+        logger.warning("[VectorStore] cleanup_expired_collections failed: %s", exc)
 
     return report_md
 
@@ -414,11 +631,11 @@ async def _phase_d(
     report_md: str,
     query: str,
     audience: str,
-    logger: TraceLogger | None = None,
+    trace_logger: TraceLogger | None = None,
 ) -> str:
     """Phase D — Polish the assembled report for visual excellence."""
     from agents.polish import PolishAgent
-    polisher = PolishAgent(POLISHER_MODEL, logger=logger)
+    polisher = PolishAgent(POLISHER_MODEL, logger=trace_logger)
     polished = await polisher.polish(report_md, query, audience)
-    print(f"  Polish complete  : {len(polished):,} chars")
+    logger.info("  Polish complete  : %s chars", f"{len(polished):,}")
     return polished

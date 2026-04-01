@@ -6,13 +6,23 @@ Responsibilities:
   - Ingest DocumentChunk objects (with embedding)
   - Semantic search returning DocumentChunk objects
   - Topic-cache index: detect near-duplicate queries across runs
-  - Collection TTL cleanup
+  - Collection TTL cleanup (call cleanup_expired_collections after each run)
+
+Connection modes:
+  - Server mode (default): connects to QDRANT_URL; raises on failure.
+  - In-memory mode: enabled by QDRANT_FORCE_IN_MEMORY=1 env var or by
+    passing ``force_in_memory=True`` to the constructor.  Topic-cache and
+    cross-run persistence are disabled in this mode.
 """
 from __future__ import annotations
 
+import logging
 import os
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from models import DocumentChunk
 from .config import (
@@ -20,23 +30,32 @@ from .config import (
     TOPIC_CACHE_COLLECTION,
     TOPIC_CACHE_SIMILARITY_THRESHOLD,
     TOPIC_CACHE_TTL_DAYS,
+    QDRANT_CONNECT_TIMEOUT,
+    FORCE_IN_MEMORY,
+    UPSERT_BATCH_SIZE,
 )
 from .embedder import Embedder
 
 _QDRANT_URL     = os.getenv("QDRANT_URL", "http://localhost:6333")
 _QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
-_UPSERT_BATCH   = 64   # points per upsert call
+
+_UPSERT_MAX_RETRIES = 3
+_UPSERT_RETRY_DELAY = 1.0   # seconds between retries
 
 
 class VectorStoreClient:
     """
-    Thin wrapper around qdrant-client.  Lazy-initialises the client on first
-    use so the module can be imported without qdrant running.
+    Thin wrapper around qdrant-client.  Lazy-initialises the Qdrant connection
+    on first use so the module can be imported without a running Qdrant server.
+
+    Args:
+        force_in_memory: If True, always use an in-memory Qdrant instance.
+            Overrides the QDRANT_FORCE_IN_MEMORY env variable.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, force_in_memory: bool = False) -> None:
         self._qdrant = None
-        self._in_memory = False
+        self._in_memory: bool = FORCE_IN_MEMORY or force_in_memory
         self._embedder = Embedder()
 
     # ------------------------------------------------------------------
@@ -45,21 +64,32 @@ class VectorStoreClient:
 
     @property
     def qdrant(self):
-        if self._qdrant is None:
-            from qdrant_client import QdrantClient
-            # Try connecting to the configured server; fall back to in-memory
-            try:
-                kwargs: dict[str, Any] = {"url": _QDRANT_URL, "timeout": 3}
-                if _QDRANT_API_KEY:
-                    kwargs["api_key"] = _QDRANT_API_KEY
-                client = QdrantClient(**kwargs)
-                client.get_collections()   # probe — raises if server is down
-                self._qdrant = client
-                self._in_memory = False
-            except Exception:
-                self._qdrant = QdrantClient(":memory:")
-                self._in_memory = True
-                print("[VectorStore] Qdrant server unavailable — using in-memory mode")
+        if self._qdrant is not None:
+            return self._qdrant
+
+        from qdrant_client import QdrantClient
+
+        if self._in_memory:
+            self._qdrant = QdrantClient(":memory:")
+            logger.info("[VectorStore] Using in-memory Qdrant (persistence disabled).")
+            return self._qdrant
+
+        kwargs: dict[str, Any] = {"url": _QDRANT_URL, "timeout": QDRANT_CONNECT_TIMEOUT}
+        if _QDRANT_API_KEY:
+            kwargs["api_key"] = _QDRANT_API_KEY
+
+        try:
+            client = QdrantClient(**kwargs)
+            client.get_collections()   # probe — raises if server is unreachable
+            self._qdrant = client
+            logger.debug("[VectorStore] Connected to Qdrant at %s.", _QDRANT_URL)
+        except Exception as exc:
+            raise RuntimeError(
+                f"[VectorStore] Cannot connect to Qdrant at {_QDRANT_URL!r}. "
+                f"Start the server, fix QDRANT_URL, or set QDRANT_FORCE_IN_MEMORY=1 "
+                f"for development. Original error: {exc}"
+            ) from exc
+
         return self._qdrant
 
     # ------------------------------------------------------------------
@@ -67,7 +97,7 @@ class VectorStoreClient:
     # ------------------------------------------------------------------
 
     def create_collection(self, run_id: str) -> str:
-        """Create a fresh collection for this run. Returns collection name."""
+        """Create a fresh collection for this run. Returns the collection name."""
         from qdrant_client.models import VectorParams, Distance
         name = f"run_{run_id}"
         self.qdrant.recreate_collection(
@@ -80,14 +110,15 @@ class VectorStoreClient:
         return name
 
     def delete_collection(self, run_id: str) -> None:
+        """Delete the collection for the given run_id.  Swallows errors (best-effort)."""
         name = f"run_{run_id}"
         try:
             self.qdrant.delete_collection(name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[VectorStore] delete_collection %s failed: %s", name, exc)
 
     def ensure_topic_cache_index(self) -> None:
-        """Create the topic-cache meta-collection if it doesn't exist."""
+        """Create the topic-cache meta-collection if it does not yet exist."""
         from qdrant_client.models import VectorParams, Distance
         existing = {c.name for c in self.qdrant.get_collections().collections}
         if TOPIC_CACHE_COLLECTION not in existing:
@@ -104,9 +135,10 @@ class VectorStoreClient:
     # ------------------------------------------------------------------
 
     def ingest_chunks(self, collection_name: str, chunks: list[DocumentChunk]) -> None:
-        """
-        Upsert DocumentChunk objects into the collection.
-        Chunks must already have embeddings set.
+        """Upsert DocumentChunk objects into the collection.
+
+        Chunks must already have embeddings set.  Retries up to
+        ``_UPSERT_MAX_RETRIES`` times on transient errors before raising.
         """
         from qdrant_client.models import PointStruct
 
@@ -118,12 +150,24 @@ class VectorStoreClient:
             )
             for chunk in chunks
         ]
-        # Batch upsert to avoid large payloads
-        for i in range(0, len(points), _UPSERT_BATCH):
-            self.qdrant.upsert(
-                collection_name=collection_name,
-                points=points[i : i + _UPSERT_BATCH],
-            )
+
+        for i in range(0, len(points), UPSERT_BATCH_SIZE):
+            batch = points[i : i + UPSERT_BATCH_SIZE]
+            for attempt in range(_UPSERT_MAX_RETRIES):
+                try:
+                    self.qdrant.upsert(collection_name=collection_name, points=batch)
+                    break
+                except Exception as exc:
+                    if attempt == _UPSERT_MAX_RETRIES - 1:
+                        raise RuntimeError(
+                            f"[VectorStore] upsert failed after {_UPSERT_MAX_RETRIES} "
+                            f"attempts for collection {collection_name!r}: {exc}"
+                        ) from exc
+                    logger.warning(
+                        "[VectorStore] upsert attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt + 1, _UPSERT_MAX_RETRIES, exc, _UPSERT_RETRY_DELAY,
+                    )
+                    time.sleep(_UPSERT_RETRY_DELAY)
 
     def ingest_text(
         self,
@@ -136,9 +180,9 @@ class VectorStoreClient:
         skill: str,
         query: str,
     ) -> list[DocumentChunk]:
-        """
-        Chunk, embed, and ingest a raw text document.
-        Returns the list of DocumentChunk objects created.
+        """Chunk, embed, and ingest a raw text document.
+
+        Returns the list of ``DocumentChunk`` objects created and stored.
         """
         chunk_embeddings = self._embedder.chunk_and_embed(text)
         chunks = [
@@ -170,9 +214,16 @@ class VectorStoreClient:
         k: int = 15,
         min_credibility: float = 0.5,
     ) -> list[DocumentChunk]:
-        """
-        Semantic search in the run's collection.
-        Returns up to k chunks sorted by relevance descending.
+        """Semantic search in the run's collection.
+
+        Args:
+            run_id:          The run whose collection to search.
+            query_text:      Natural-language query to embed and search.
+            k:               Maximum number of results to return.
+            min_credibility: Minimum credibility score filter (0.0 = no filter).
+
+        Returns:
+            Up to ``k`` DocumentChunk objects sorted by relevance descending.
         """
         from qdrant_client.models import Filter, FieldCondition, Range
 
@@ -184,27 +235,30 @@ class VectorStoreClient:
             with_payload=True,
             with_vectors=False,
             query_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="credibility",
-                        range=Range(gte=min_credibility),
-                    )
-                ]
+                must=[FieldCondition(key="credibility", range=Range(gte=min_credibility))]
             ) if min_credibility > 0 else None,
         )
         return [DocumentChunk.from_qdrant_point(r) for r in response.points]
+
+    def count_chunks(self, run_id: str, query_text: str, k: int = 200) -> int:
+        """Approximate chunk count for a section query via broad search.
+
+        Used by the Layer 1 coverage audit to detect starved sections.
+        """
+        return len(self.search(run_id=run_id, query_text=query_text, k=k, min_credibility=0.0))
 
     # ------------------------------------------------------------------
     # Topic cache
     # ------------------------------------------------------------------
 
     def find_cached_run(self, query: str) -> str | None:
+        """Return a cached run_id if a semantically similar query ran recently.
+
+        Returns None when in-memory mode is active (no cross-run persistence).
+        """
         if self._in_memory:
-            return None   # no cross-run cache in memory mode
-        """
-        Returns a cached collection name (run_id) if a semantically similar
-        query was run recently (within TTL), else None.
-        """
+            return None
+
         self.ensure_topic_cache_index()
         query_embedding = self._embedder.embed(query)
         response = self.qdrant.query_points(
@@ -229,9 +283,13 @@ class VectorStoreClient:
         return None
 
     def register_run_in_cache(self, run_id: str, query: str) -> None:
+        """Index this run's query embedding so future runs can cache-hit it.
+
+        No-op when in-memory mode is active.
+        """
         if self._in_memory:
-            return   # nothing to persist in memory mode
-        """Index this run's query embedding so future runs can cache-hit it."""
+            return
+
         import uuid
         from qdrant_client.models import PointStruct
 
@@ -257,15 +315,20 @@ class VectorStoreClient:
     # ------------------------------------------------------------------
 
     def cleanup_expired_collections(self) -> list[str]:
+        """Delete run collections whose cache entry is older than TTL.
+
+        Should be called after each run completes to prevent unbounded
+        collection growth in Qdrant.  Returns a list of deleted collection names.
+
+        No-op when in-memory mode is active.
         """
-        Delete run collections older than TTL.
-        Returns list of deleted collection names.
-        """
+        if self._in_memory:
+            return []
+
         self.ensure_topic_cache_index()
         cutoff = datetime.now(timezone.utc) - timedelta(days=TOPIC_CACHE_TTL_DAYS)
         deleted: list[str] = []
 
-        # Scroll all entries in the cache index
         offset = None
         while True:
             scroll_result = self.qdrant.scroll(
@@ -291,4 +354,6 @@ class VectorStoreClient:
                 break
             offset = next_offset
 
+        if deleted:
+            logger.info("[VectorStore] Cleaned up %d expired collections.", len(deleted))
         return deleted

@@ -20,3 +20,8 @@ class WorkerResult:
     children_consumed: list[str]        # node_ids of children (parent workers only)
     coverage_gaps: list[str] = field(default_factory=list)
     source_map: dict = field(default_factory=dict)  # citation_id → {title, url}
+
+    # Phase C+ augmentation metadata
+    faithfulness_score: float | None = None   # 0.0–1.0; None = not evaluated
+    entity_coverage:    float | None = None   # fraction of required entities covered
+    augmentation_iters: int = 0               # how many loop iterations ran

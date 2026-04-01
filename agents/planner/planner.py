@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from models import ExecutionContext, GapItem, Plan, PlanMetadata, PlanNode
+from utils.json_parser import extract_object
 
 
 # ---------------------------------------------------------------------------
@@ -37,45 +38,8 @@ def _find_dag_block(obj, _depth: int = 0) -> dict | None:
 
 def parse_plan(markdown: str) -> Plan:
     """Extract the JSON DAG block from the planner's raw Markdown response."""
-    dag_block: dict | None = None
-    _decoder = json.JSONDecoder()
-
-    def _try_parse(text: str) -> dict | None:
-        """Try json.loads then raw_decode; return _find_dag_block result or None."""
-        for loader in (
-            lambda t: json.loads(t),
-            lambda t: _decoder.raw_decode(t)[0],
-        ):
-            try:
-                parsed = loader(text)
-                hit = _find_dag_block(parsed)
-                if hit:
-                    return hit
-            except (json.JSONDecodeError, ValueError):
-                continue
-        return None
-
-    # Strategy 1: any fenced ```json block in the response
-    for raw_block in re.findall(r"```(?:json)?\s*\n(.*?)\n```", markdown, re.DOTALL):
-        dag_block = _try_parse(raw_block.strip())
-        if dag_block:
-            break
-
-    # Strategy 2: the whole text is / starts with a JSON object
-    if not dag_block:
-        dag_block = _try_parse(markdown.strip())
-
-    # Strategy 3: scan every `{` position and try parsing from there.
-    # Catches cases where the outer JSON is malformed but an inner object is valid.
-    if not dag_block:
-        for m in re.finditer(r'\{', markdown):
-            try:
-                candidate, _ = _decoder.raw_decode(markdown, m.start())
-                dag_block = _find_dag_block(candidate)
-                if dag_block:
-                    break
-            except (json.JSONDecodeError, ValueError):
-                continue
+    parsed = extract_object(markdown)
+    dag_block = _find_dag_block(parsed) if parsed else None
 
     if dag_block is None:
         raise ValueError(
@@ -169,12 +133,23 @@ class Planner:
         audience: str = "",
         output_language: str = "en",
         depth: str = "standard",
+        preclassified_domain: str | None = None,
+        domain_confidence: str | None = None,
     ) -> tuple[str, Plan]:
         parts = ["mode: plan", f"problem_statement: {problem}"]
         if audience:
             parts.append(f"audience: {audience}")
         if output_language and output_language != "en":
             parts.append(f"output_language: {output_language}")
+        if preclassified_domain:
+            parts.append(
+                f"preclassified_domain: {preclassified_domain}"
+                + (f" (confidence: {domain_confidence})" if domain_confidence else "")
+            )
+            parts.append(
+                "Align metadata.domain and retrieval-oriented node skills with this "
+                "preclassification unless the problem clearly contradicts it."
+            )
         parts.append(self._DEPTH_DIRECTIVE.get(depth, self._DEPTH_DIRECTIVE["standard"]))
         raw = self._call("\n".join(parts))
         return raw, parse_plan(raw)

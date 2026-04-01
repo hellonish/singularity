@@ -21,6 +21,10 @@ PLANNER_OUTPUT = PROJECT_ROOT / "planner_output.md"
 PLANNER_MODEL      = "grok-3-mini"
 MAX_TOKENS_PLANNER = 6000
 
+# Single cheap classifier call for domain routing (legacy planner + Phase A retrieval)
+DOMAIN_CLASSIFIER_MODEL = "grok-3-mini"
+MAX_TOKENS_DOMAIN_CLASSIFIER = 96
+
 # Tiered model routing
 #
 # All roles use fast non-reasoning models only.
@@ -32,6 +36,7 @@ LEAD_MODEL            = "grok-3"        # 1 synthesis/merge call
 WORKER_ANALYSIS_MODEL = "grok-3-mini"   # Call 1 (analysis) — high-volume structured JSON
 WORKER_WRITE_MODEL    = "grok-3"        # Call 2 (section write) — the final product
 POLISHER_MODEL        = "grok-3-mini"   # Phase D polish — parallel, formatting-focused
+SOURCE_GATE_MODEL     = "grok-3-mini"   # 2-pass source gate — per-skill aggregate Grok call
 
 # Legacy alias kept for any code outside Phase C that still imports WORKER_MODEL
 WORKER_MODEL = WORKER_WRITE_MODEL
@@ -44,13 +49,8 @@ MAX_NODES         = 15
 RETRY_BACKOFF     = [1, 4]   # seconds between retries (len + 1 = total attempts)
 
 # ---------------------------------------------------------------------------
-# Credibility adjustments per fallback level
+# Chat Agent
 # ---------------------------------------------------------------------------
-CREDIBILITY_ADJ: dict[str, float] = {
-    "primary":       0.0,
-    "fallback_1":   -0.05,
-    "fallback_2":   -0.15,
-    "web_search":   -0.10,
-    "forum_search": -0.20,
-    "social_search":-0.25,
-}
+CHAT_THINKER_MODEL  = "grok-3-mini"   # Thinking layer — skill selection + step plan
+CHAT_RESPONSE_MODEL = "grok-3-mini"   # Chat mode generation (upgrade to grok-3 for quality)
+

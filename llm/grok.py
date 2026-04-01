@@ -67,22 +67,33 @@ class GrokClient(BaseLLMClient):
         return schema.model_validate(data)
 
     def generate_text(
-        self, prompt: str, system_prompt: str, temperature: float = 0.5
+        self,
+        prompt: str,
+        system_prompt: str,
+        temperature: float = 0.5,
+        max_tokens: int | None = None,
     ) -> str:
         """
         Generates a text response from the LLM.
+
+        Args:
+            max_tokens: Optional cap on completion length (e.g. cheap classifiers).
         """
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            messages=messages,
-            stream=False,
-            temperature=temperature,
-        )
+        kwargs: dict = {
+            "model": self.model_name,
+            "messages": messages,
+            "stream": False,
+            "temperature": temperature,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        response = self.client.chat.completions.create(**kwargs)
         return response.choices[0].message.content or ""
 
     def generate_text_stream(

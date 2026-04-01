@@ -1,1 +1,0 @@
-python -m agents.orchestrator.cli "Explain Transformer Architecture, Latest Research in the area, and the math that is used in this area, give concepts and then the problems mathematical derivations, etc to learn the concept completely" --strength 4

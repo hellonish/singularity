@@ -4,8 +4,8 @@ FallbackRouter — wraps skills with retry + fallback chain logic.
 import asyncio
 from typing import Any
 
-from .config import CREDIBILITY_ADJ, RETRY_BACKOFF
-from models import NodeStatus
+from .config import RETRY_BACKOFF
+from models import NodeStatus, CREDIBILITY_ADJ
 
 
 class FallbackRouter:
