@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #ffffff;
+  --color-card: #f7f5f0;
+  --color-border: #e5e2db;
+  --color-accent: #6366f1;
+  --color-text: #2a2824;
+  --color-muted: #6b7280;
+  --font-sans: var(--font-newsreader), 'Newsreader', Georgia, serif;
+  --font-serif: var(--font-newsreader), 'Newsreader', Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+}
+
+:root {
+  --shell-bg:       #ffffff;
+  --shell-card:     #f7f5f0;
+  --shell-border:   #e5e2db;
+  --shell-accent:   #6366f1;
+  --shell-text:     #2a2824;
+  --shell-muted:    #6b7280;
+  /* Editorial paper palette — mirrors render/html_report.py */
+  --rpt-bg:         #f7f5f0;
+  --rpt-bg2:        #ffffff;
+  --rpt-bg3:        #ece9e2;
+  --rpt-border:     rgba(0,0,0,0.08);
+  --rpt-border-hi:  rgba(0,0,0,0.14);
+  --rpt-text:       #2a2824;
+  --rpt-text-dim:   #5c5952;
+  --rpt-text-hi:    #141210;
+  --rpt-accent:     #1a6fd4;
+  --rpt-accent2:    #0d8a5b;
+  --rpt-accent3:    #c45c00;
+  --mono:           var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
+  --serif:          var(--font-newsreader), 'Newsreader', Georgia, serif;
+}
+
+/**
+ * Universal reset must live inside @layer base. An unlayered `* { padding: 0 }` after
+ * `@import "tailwindcss"` outranks Tailwind’s layered utilities in the cascade, which
+ * zeros horizontal padding from `px-*` / `p-*` across the app (buttons, menus, shells).
+ */
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--shell-bg);
+    color: var(--rpt-text);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+::selection { background: #6366f1; color: white; }
+.report-content ::selection { background: #1a6fd4; color: white; }
+
+/* KaTeX math display */
+.katex-display {
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 0;
+}
+.report-content .katex { color: var(--rpt-text-hi); }

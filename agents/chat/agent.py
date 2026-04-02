@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +90,20 @@ class ChatAgent:
         self,
         message: str,
         history: list[dict[str, str]],
+        *,
+        extended_override: bool | None = None,
     ) -> ThinkPlan:
         """
         Synchronous — returns the ThinkPlan for the given message.
+
+        Inputs:
+            extended_override: When set, overrides instance ``extended`` for this call only.
         """
+        ext = self.extended if extended_override is None else extended_override
         return self._thinker.think(
             message=message,
             history=history,
-            extended=self.extended,
+            extended=ext,
         )
 
     # ------------------------------------------------------------------
@@ -167,3 +173,69 @@ class ChatAgent:
             result = self.run_chat_mode(plan, message, history)
 
         return plan, result
+
+    async def stream_turn(
+        self,
+        message: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        execution_mode: str = "chat",
+        chat_variant: str = "standard",
+        research_strength: int = 5,
+    ) -> AsyncGenerator[dict[str, Any] | str, None]:
+        """
+        Stream one assistant turn for HTTP/SSE clients.
+
+        Yields:
+            - {"kind": "plan", "plan": <ThinkPlan dict>} once after planning.
+            - {"kind": "step", "step_id", "step_type", "description"} for chat-mode step markers.
+            - str fragments for visible assistant text (chat tokens or research markdown chunks).
+
+        Inputs:
+            execution_mode: "chat" or "research" — user-selected run mode.
+            chat_variant: "standard" or "extended" — thinker extended flag when execution_mode is chat.
+            research_strength: 1–10 when execution_mode is research (applied to the plan before pipeline).
+        """
+        history = history or []
+        think_extended = (
+            chat_variant == "extended"
+            if execution_mode == "chat"
+            else True
+        )
+        plan = await asyncio.to_thread(
+            self.think,
+            message,
+            history,
+            extended_override=think_extended,
+        )
+        if execution_mode == "research":
+            plan.mode = "research"
+            plan.strength = max(1, min(10, int(research_strength)))
+        else:
+            plan.mode = "chat"
+
+        yield {"kind": "plan", "plan": plan.model_dump(mode="json")}
+
+        if plan.mode == "research":
+            report_md = await self.run_research_mode(plan, message)
+            chunk_size = 160
+            for i in range(0, len(report_md), chunk_size):
+                yield report_md[i : i + chunk_size]
+            return
+
+        async for chunk in self.run_chat_mode(plan, message, history):
+            if chunk.startswith("§STEP:"):
+                line = chunk.rstrip("\n")
+                try:
+                    rest = line[len("§STEP:") :]
+                    sid_str, stype, sdesc = rest.split(":", 2)
+                    yield {
+                        "kind": "step",
+                        "step_id": int(sid_str),
+                        "step_type": stype,
+                        "description": sdesc,
+                    }
+                except (ValueError, IndexError):
+                    continue
+            else:
+                yield chunk

@@ -562,7 +562,7 @@ async def run_pipeline(
             active_collection,
             ctx,
             tree=tree,
-            logger=trace_logger,
+            trace_logger=trace_logger,
             domain_key=classified_domain,
             domain_label=domain_label,
             domain_confidence=domain_conf,

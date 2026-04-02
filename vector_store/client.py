@@ -21,6 +21,7 @@ import os
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +37,40 @@ from .config import (
 )
 from .embedder import Embedder
 
-_QDRANT_URL     = os.getenv("QDRANT_URL", "http://localhost:6333")
-_QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+_QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
 _UPSERT_MAX_RETRIES = 3
 _UPSERT_RETRY_DELAY = 1.0   # seconds between retries
+
+
+def _qdrant_connection_kwargs(url: str, timeout: int) -> dict[str, Any]:
+    """
+    Build QdrantClient kwargs: avoid HTTP + api_key (library warns; key is cleartext).
+
+    Local Docker Qdrant is usually open on http://localhost without auth — omit key.
+    Qdrant Cloud and other remote hosts must use https:// when an API key is set.
+    """
+    raw_key = (os.getenv("QDRANT_API_KEY") or "").strip()
+    kwargs: dict[str, Any] = {"url": url.strip(), "timeout": timeout}
+    if not raw_key:
+        return kwargs
+    parsed = urlparse(url.strip())
+    scheme = (parsed.scheme or "").lower()
+    host = (parsed.hostname or "").lower()
+    local_hosts = frozenset({"localhost", "127.0.0.1", "::1"})
+    if scheme == "http" and host in local_hosts:
+        logger.info(
+            "[VectorStore] HTTP localhost — omitting QDRANT_API_KEY (default Qdrant has no auth). "
+            "For Qdrant Cloud set QDRANT_URL to https://…"
+        )
+        return kwargs
+    if scheme == "http":
+        raise RuntimeError(
+            "[VectorStore] QDRANT_URL must use https:// when QDRANT_API_KEY is set "
+            "(plain HTTP would expose the key). Update QDRANT_URL or clear the key for insecure dev only."
+        )
+    kwargs["api_key"] = raw_key
+    return kwargs
 
 
 class VectorStoreClient:
@@ -74,9 +104,7 @@ class VectorStoreClient:
             logger.info("[VectorStore] Using in-memory Qdrant (persistence disabled).")
             return self._qdrant
 
-        kwargs: dict[str, Any] = {"url": _QDRANT_URL, "timeout": QDRANT_CONNECT_TIMEOUT}
-        if _QDRANT_API_KEY:
-            kwargs["api_key"] = _QDRANT_API_KEY
+        kwargs = _qdrant_connection_kwargs(_QDRANT_URL, QDRANT_CONNECT_TIMEOUT)
 
         try:
             client = QdrantClient(**kwargs)
