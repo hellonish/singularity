@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 async def _recover_orphaned_jobs(redis) -> None:
     """
-    On worker startup, any job still in 'running' state was interrupted by a
-    previous crash. Mark them failed and publish job_error so the frontend
-    SSE stream or polling fallback surfaces the error immediately.
+    On worker startup, any job still in 'running' or 'pending' state was
+    interrupted by a previous crash. Mark them failed and publish job_error
+    so the frontend SSE stream or polling fallback surfaces the error immediately.
     """
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(ResearchJob).where(ResearchJob.status == "running")
+            select(ResearchJob).where(ResearchJob.status.in_(["running", "pending"]))
         )
         orphans = result.scalars().all()
 
