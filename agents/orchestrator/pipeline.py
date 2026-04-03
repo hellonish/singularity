@@ -702,7 +702,11 @@ async def run_pipeline(
     )
 
     # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
-    cached_run_id = vs.find_cached_run(query)   # returns None if in-memory or no hit
+    try:
+        cached_run_id = vs.find_cached_run(query)   # returns None if in-memory or no hit
+    except Exception:
+        logger.warning("[Pipeline] Topic cache lookup failed — treating as cache miss", exc_info=True)
+        cached_run_id = None
 
     if cached_run_id:
         logger.info("\n[Cache HIT] Reusing collection from run %s", cached_run_id)
