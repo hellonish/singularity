@@ -90,6 +90,13 @@ Coverage, logical flow through your chosen perspective, no redundancy between
 sibling sections, appropriate depth for the audience, clear intellectual progression
 that a reader can follow from the opening chapter to the last.
 
+## Title Rules
+
+- Section and chapter titles must describe **subject matter**, not the imagined reader.
+- Do **not** use audience-indicating titles or subtitles such as “A Practitioner’s Guide…”, “For Beginners”, “Expert Notes”, “Layperson’s Introduction”, or similar reader-label framing.
+- Do **not** use meta titles that announce the document type (“Complete Overview of…”, “Everything You Need to Know…”) unless the query explicitly asks for that format.
+- Prefer concrete, scoped titles (what the section proves, compares, or explains).
+
 ## Output — respond ONLY with this JSON, no prose
 
 ```json

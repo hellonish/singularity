@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from llm.base import BaseLLMClient
     from trace import TraceLogger
 
 _PROMPT_PATH = Path(__file__).parent / "report_polisher" / "system_prompt.md"
@@ -102,9 +103,16 @@ async def _polish_section(
 # ---------------------------------------------------------------------------
 
 class PolishAgent:
-    def __init__(self, model: str, logger: "TraceLogger | None" = None) -> None:
-        from llm.grok import GrokClient
-        self.client = GrokClient(model_name=model)
+    """
+    Phase D polish using an injected LLM client (same BYOK model as the rest of the pipeline).
+    """
+
+    def __init__(
+        self,
+        client: "BaseLLMClient",
+        logger: "TraceLogger | None" = None,
+    ) -> None:
+        self.client = client
         self._system_prompt: str = _PROMPT_PATH.read_text(encoding="utf-8")
         self._logger = logger
 
@@ -122,7 +130,6 @@ class PolishAgent:
 
         # Stage 2
         sections = _split_sections(md)
-        print(f"  Polishing {len(sections)} sections in parallel…")
 
         tasks = [
             _polish_section(

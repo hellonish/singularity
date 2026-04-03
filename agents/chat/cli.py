@@ -1,11 +1,11 @@
 """
 Interactive REPL for the Singularity Chat Agent.
 
-Run from project root:
+Run from project root (BYOK: pass --api-key for the model's provider):
 
-    python -m agents.chat.cli
-    python -m agents.chat.cli --extended
-    python -m agents.chat.cli --model grok-3
+    python -m agents.chat.cli --api-key YOUR_KEY
+    python -m agents.chat.cli --api-key YOUR_KEY --extended
+    python -m agents.chat.cli --api-key YOUR_KEY --model grok-3
 
 Commands (type during chat session):
     /model                — show current model + available models
@@ -394,9 +394,18 @@ async def _run_chat_turn(
 # REPL main loop
 # ---------------------------------------------------------------------------
 
-async def main(extended: bool = False, model_id: str = DEFAULT_MODEL_ID) -> None:
+async def main(
+    extended: bool = False,
+    model_id: str = DEFAULT_MODEL_ID,
+    *,
+    api_key: str,
+) -> None:
     session = Session(extended=extended, model_id=model_id)
-    agent   = ChatAgent(model_id=model_id, extended=extended)
+    agent = ChatAgent(
+        model_id=model_id,
+        extended=extended,
+        api_key=api_key,
+    )
 
     _print_banner(extended, model_id)
 
@@ -460,9 +469,9 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
-              python -m agents.chat.cli
-              python -m agents.chat.cli --extended
-              python -m agents.chat.cli --model gemini-2.5-pro-preview-03-25
+              python -m agents.chat.cli --api-key YOUR_KEY
+              python -m agents.chat.cli --api-key YOUR_KEY --extended
+              python -m agents.chat.cli --api-key YOUR_KEY --model gemini-2.5-pro-preview-03-25
 
             In-session commands:
               /model                     List all available models
@@ -485,5 +494,16 @@ if __name__ == "__main__":
         default=DEFAULT_MODEL_ID,
         help=f"Response model ID (default: {DEFAULT_MODEL_ID})",
     )
+    parser.add_argument(
+        "--api-key",
+        required=True,
+        help="API key for the selected model's provider (BYOK; not read from .env).",
+    )
     args = parser.parse_args()
-    asyncio.run(main(extended=args.extended, model_id=args.model))
+    asyncio.run(
+        main(
+            extended=args.extended,
+            model_id=args.model,
+            api_key=args.api_key,
+        )
+    )

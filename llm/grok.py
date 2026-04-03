@@ -1,11 +1,19 @@
 import json
-import os
 from typing import Generator
 
 from openai import OpenAI
 from pydantic import BaseModel
 
 from .base import BaseLLMClient
+
+
+def _require_api_key(api_key: str | None, provider_label: str = "xAI") -> str:
+    k = (api_key or "").strip()
+    if not k:
+        raise ValueError(
+            f"{provider_label} API key is required (BYOK). Add it in Profile or pass api_key explicitly."
+        )
+    return k
 
 
 class GrokClient(BaseLLMClient):
@@ -15,9 +23,9 @@ class GrokClient(BaseLLMClient):
 
         Args:
             model_name: Model ID (e.g. grok-beta, grok-2-latest).
-            api_key: Optional API key; falls back to XAI_API_KEY env var.
+            api_key: User-provided API key (required; no environment fallback).
         """
-        key = api_key or os.environ.get("GROK_API_KEY") or os.environ.get("XAI_API_KEY")
+        key = _require_api_key(api_key)
         self.client = OpenAI(
             api_key=key,
             base_url="https://api.x.ai/v1",

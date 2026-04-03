@@ -1,21 +1,31 @@
 """
 StrengthConfig — single source of truth for all strength-derived quantities.
 
-strength: int 1–10 controls retrieval breadth, section count, query fanout,
-Qdrant chunk budget per worker, and Phase C+ augmentation budgets.
+Public ``value`` is a 3-level intensity: 1 = low, 2 = medium, 3 = high.
+Internal formulas map each tier to a legacy 1–10 scale (3 / 6 / 10) so depth
+and retrieval behave like former light / mid / heavy runs.
 """
 import math
 import random
 from dataclasses import dataclass
 
+_TIER_TO_LEGACY = {1: 3, 2: 6, 3: 10}
+
 
 @dataclass(frozen=True)
 class StrengthConfig:
-    value: int  # 1–10
+    value: int  # 1 = low, 2 = medium, 3 = high
 
     def __post_init__(self) -> None:
-        if not 1 <= self.value <= 10:
-            raise ValueError(f"strength must be 1–10, got {self.value}")
+        if self.value not in _TIER_TO_LEGACY:
+            raise ValueError(
+                f"strength must be 1, 2, or 3 (low/medium/high), got {self.value}"
+            )
+
+    @property
+    def legacy_scale(self) -> int:
+        """Maps tier to the former 1–10 scale used by retrieval thresholds and budgets."""
+        return _TIER_TO_LEGACY[self.value]
 
     # ------------------------------------------------------------------
     # Retrieval Phase
@@ -30,7 +40,7 @@ class StrengthConfig:
         s:  1  2  3  4  5  6  7  8  9  10
         n:  2  3  5  7  9 10 12 14 16  18
         """
-        return max(2, int(1.8 * self.value))
+        return max(2, int(1.8 * self.legacy_scale))
 
     @property
     def queries_per_skill(self) -> int:
@@ -42,7 +52,7 @@ class StrengthConfig:
         s:  1  2  3  4  5  6  7  8  9  10
         Q:  4  4  4  4  6  6  8  8  10 10
         """
-        return max(4, math.ceil(self.value / 2) * 2)
+        return max(4, math.ceil(self.legacy_scale / 2) * 2)
 
     @property
     def min_results_per_query(self) -> int:
@@ -54,7 +64,7 @@ class StrengthConfig:
         s:  1  2  3  4  5  6  7  8  9  10
         n:  5  5  6  8 10 12 14 16 18  20
         """
-        return min(20, max(5, self.value * 2))
+        return min(20, max(5, self.legacy_scale * 2))
 
     @property
     def total_retrieval_calls(self) -> int:
@@ -67,7 +77,8 @@ class StrengthConfig:
     @property
     def section_count_range(self) -> tuple[int, int]:
         """Inclusive range [lo, hi] for total section-tree node count."""
-        return (self.value * 6, self.value * 10)
+        ls = self.legacy_scale
+        return (ls * 6, ls * 10)
 
     def sample_section_count(self) -> int:
         """
@@ -93,12 +104,13 @@ class StrengthConfig:
 
         Previously: leaf=15, parent-of-leaf=8, chapter=3 (flat, no strength scaling).
         """
+        ls = self.legacy_scale
         if node_level >= max_depth:
-            return 8 + self.value        # leaf
+            return 8 + ls        # leaf
         elif node_level >= max_depth - 1:
-            return 6 + self.value        # parent of leaf (was fixed 8, now 7–16)
+            return 6 + ls        # parent of leaf (was fixed 8, now 7–16)
         else:
-            return 4 + self.value        # chapter / root (was fixed 3, now 5–14)
+            return 4 + ls        # chapter / root (was fixed 3, now 5–14)
 
     @property
     def min_chunks_per_leaf(self) -> int:
@@ -106,7 +118,7 @@ class StrengthConfig:
         Minimum acceptable Qdrant chunks for a leaf section before the
         Layer 1 coverage audit flags it for a targeted follow-up retrieval.
         """
-        return max(3, self.value)
+        return max(3, self.legacy_scale)
 
     # ------------------------------------------------------------------
     # Phase C+ Augmentation Budgets  (Issue 3)
@@ -120,9 +132,10 @@ class StrengthConfig:
 
         s:  1–7 → 2,  8–9 → 3,  10 → 4
         """
-        if self.value <= 7:
+        ls = self.legacy_scale
+        if ls <= 7:
             return 2
-        elif self.value <= 9:
+        elif ls <= 9:
             return 3
         return 4
 
@@ -134,9 +147,10 @@ class StrengthConfig:
 
         s:  1–7 → 1,  8–9 → 2,  10 → 3
         """
-        if self.value <= 7:
+        ls = self.legacy_scale
+        if ls <= 7:
             return 1
-        elif self.value <= 9:
+        elif ls <= 9:
             return 2
         return 3
 
@@ -177,7 +191,7 @@ class StrengthConfig:
     @property
     def expected_section_count(self) -> int:
         """Expected value of section count: s × 8."""
-        return self.value * 8
+        return self.legacy_scale * 8
 
     @property
     def expected_llm_calls(self) -> int:
@@ -191,7 +205,7 @@ class StrengthConfig:
     def __repr__(self) -> str:
         lo, hi = self.section_count_range
         return (
-            f"StrengthConfig(s={self.value}, "
+            f"StrengthConfig(tier={self.value}, "
             f"skills={self.retrieval_skill_count}, "
             f"queries/skill={self.queries_per_skill}, "
             f"sections={lo}–{hi}, "

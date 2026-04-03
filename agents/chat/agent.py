@@ -5,7 +5,7 @@ Supports runtime model switching via .set_model(model_id).
 
 Usage:
     from agents.chat import ChatAgent
-    agent = ChatAgent()
+    agent = ChatAgent(model_id="grok-3-mini", api_key="<provider-api-key>")
     async for chunk in agent.chat("What is transformer attention?"):
         print(chunk, end="", flush=True)
 """
@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,21 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from agents.chat.thinker import Thinker, ThinkPlan
+
+
+def _coerce_research_intensity(raw: int) -> int:
+    """
+    Normalize to tier 1–3. Accepts API values 1–3 or legacy thinker outputs 1–10.
+    """
+    x = int(raw)
+    if x in (1, 2, 3):
+        return x
+    x = max(1, min(10, x))
+    if x <= 3:
+        return 1
+    if x <= 7:
+        return 2
+    return 3
 from agents.chat.executor import ChatModeExecutor
 from agents.chat.models import (
     AVAILABLE_MODELS, DEFAULT_MODEL_ID, make_client, get_model_info
@@ -42,30 +57,29 @@ class ChatAgent:
     Chat Mode    — lightweight: Thinker plans 1-5 steps → ChatModeExecutor runs them.
     Research Mode — heavy: Thinker plans 5-10 steps → delegates to run_pipeline().
 
-    Args:
-        model_id:  Initial response model (defaults to grok-3-mini).
-        extended:  If True, thinker may use research mode + more steps.
-    """
+    Planning (Thinker), chat responses, and the full research pipeline all use the
+    **same** user-selected model and the same provider API key (BYOK).
 
-    # Thinker always uses grok-3-mini (fast, structured output)
-    _THINKER_MODEL = "grok-3-mini"
+    Args:
+        model_id: Model for planning, chat, and research pipeline (defaults to grok-3-mini).
+        extended: If True, thinker may use research mode + more steps.
+        api_key: Required provider API key for ``model_id`` (BYOK).
+    """
 
     def __init__(
         self,
         model_id: str = DEFAULT_MODEL_ID,
         extended: bool = False,
+        *,
+        api_key: str,
     ) -> None:
         self._model_id = model_id
-        self.extended  = extended
+        self.extended = extended
+        self._api_key = api_key
 
-        # Thinker is always grok-3-mini (structured planning)
-        from llm.grok import GrokClient
-        self._thinker_client  = GrokClient(model_name=self._THINKER_MODEL)
-        self._thinker         = Thinker(self._thinker_client)
-
-        # Response client — switchable
-        self._response_client = make_client(model_id)
-        self._executor        = ChatModeExecutor(self._response_client)
+        self._client = make_client(model_id, api_key=api_key)
+        self._thinker = Thinker(self._client)
+        self._executor = ChatModeExecutor(self._client)
 
     # ------------------------------------------------------------------
     # Model management
@@ -75,11 +89,32 @@ class ChatAgent:
     def model_id(self) -> str:
         return self._model_id
 
-    def set_model(self, model_id: str) -> None:
-        """Switch the response model at runtime."""
-        self._model_id        = model_id
-        self._response_client = make_client(model_id)
-        self._executor        = ChatModeExecutor(self._response_client)
+    def set_model(self, model_id: str, api_key: str | None = None) -> None:
+        """
+        Switch the chat model at runtime.
+
+        Raises:
+            ValueError: If the new model uses a different provider than the current
+                API key (CLI must restart with the correct ``--api-key``).
+        """
+        old = get_model_info(self._model_id)
+        new = get_model_info(model_id)
+        if (
+            old is not None
+            and new is not None
+            and old.provider != new.provider
+            and api_key is None
+        ):
+            raise ValueError(
+                "That model uses a different provider than your current API key. "
+                "Restart with --api-key for the target provider."
+            )
+        self._model_id = model_id
+        key = api_key if api_key is not None else self._api_key
+        self._api_key = key
+        self._client = make_client(model_id, api_key=key)
+        self._thinker = Thinker(self._client)
+        self._executor = ChatModeExecutor(self._client)
         logger.info("Model switched to: %s", model_id)
 
     # ------------------------------------------------------------------
@@ -90,14 +125,20 @@ class ChatAgent:
         self,
         message: str,
         history: list[dict[str, str]],
+        *,
+        extended_override: bool | None = None,
     ) -> ThinkPlan:
         """
         Synchronous — returns the ThinkPlan for the given message.
+
+        Inputs:
+            extended_override: When set, overrides instance ``extended`` for this call only.
         """
+        ext = self.extended if extended_override is None else extended_override
         return self._thinker.think(
             message=message,
             history=history,
-            extended=self.extended,
+            extended=ext,
         )
 
     # ------------------------------------------------------------------
@@ -126,16 +167,23 @@ class ChatAgent:
         """Execute research mode via the full run_pipeline(). Returns Markdown."""
         from agents.orchestrator.pipeline import run_pipeline
 
-        strength = max(1, min(10, plan.strength))
+        strength = _coerce_research_intensity(plan.strength)
         audience = plan.audience or "practitioner"
 
         logger.info("[Research Mode] strength=%d audience=%s", strength, audience)
+
+        if not (self._api_key or "").strip():
+            raise ValueError(
+                "Research mode requires an API key for the selected model's provider (BYOK)."
+            )
 
         report_md = await run_pipeline(
             query=message,
             strength=strength,
             audience=audience,
             output_language="en",
+            model_id=self._model_id,
+            llm_api_key=self._api_key,
         )
         return report_md
 
@@ -167,3 +215,69 @@ class ChatAgent:
             result = self.run_chat_mode(plan, message, history)
 
         return plan, result
+
+    async def stream_turn(
+        self,
+        message: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        execution_mode: str = "chat",
+        chat_variant: str = "standard",
+        research_strength: int = 2,
+    ) -> AsyncGenerator[dict[str, Any] | str, None]:
+        """
+        Stream one assistant turn for HTTP/SSE clients.
+
+        Yields:
+            - {"kind": "plan", "plan": <ThinkPlan dict>} once after planning.
+            - {"kind": "step", "step_id", "step_type", "description"} for chat-mode step markers.
+            - str fragments for visible assistant text (chat tokens or research markdown chunks).
+
+        Inputs:
+            execution_mode: "chat" or "research" — user-selected run mode.
+            chat_variant: "standard" or "extended" — thinker extended flag when execution_mode is chat.
+            research_strength: 1–3 (low/medium/high) when execution_mode is research.
+        """
+        history = history or []
+        think_extended = (
+            chat_variant == "extended"
+            if execution_mode == "chat"
+            else True
+        )
+        plan = await asyncio.to_thread(
+            self.think,
+            message,
+            history,
+            extended_override=think_extended,
+        )
+        if execution_mode == "research":
+            plan.mode = "research"
+            plan.strength = _coerce_research_intensity(int(research_strength))
+        else:
+            plan.mode = "chat"
+
+        yield {"kind": "plan", "plan": plan.model_dump(mode="json")}
+
+        if plan.mode == "research":
+            report_md = await self.run_research_mode(plan, message)
+            chunk_size = 160
+            for i in range(0, len(report_md), chunk_size):
+                yield report_md[i : i + chunk_size]
+            return
+
+        async for chunk in self.run_chat_mode(plan, message, history):
+            if chunk.startswith("§STEP:"):
+                line = chunk.rstrip("\n")
+                try:
+                    rest = line[len("§STEP:") :]
+                    sid_str, stype, sdesc = rest.split(":", 2)
+                    yield {
+                        "kind": "step",
+                        "step_id": int(sid_str),
+                        "step_type": stype,
+                        "description": sdesc,
+                    }
+                except (ValueError, IndexError):
+                    continue
+            else:
+                yield chunk

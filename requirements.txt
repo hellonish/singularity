@@ -34,6 +34,10 @@ youtube-transcript-api>=0.6.2  # YouTubeTranscriptTool (free, no key)
 pdfplumber>=0.11.0        # PdfReaderTool primary
 PyMuPDF>=1.24.0           # PdfReaderTool fallback for scanned/broken PDFs
 
+# ── Vector store (research worker / pipeline) ────────────────────────────────
+# Keep in sync with the Qdrant server image in docker-compose.yml (major.minor).
+qdrant-client>=1.14.2,<1.15
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

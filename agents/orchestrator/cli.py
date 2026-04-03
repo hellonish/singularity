@@ -4,9 +4,9 @@ CLI entry point — run from project root:
     # Legacy DAG mode (--depth):
     python -m agents.orchestrator.cli "your question" --depth shallow
 
-    # Phase 5 product mode (--strength):
-    python -m agents.orchestrator.cli "your question" --strength 5
-    python -m agents.orchestrator.cli "your question" --strength 10 --audience expert
+    # Phase 5 product mode (--strength 1|2|3 = low|medium|high):
+    python -m agents.orchestrator.cli "your question" --strength 2
+    python -m agents.orchestrator.cli "your question" --strength 3 --audience expert
 """
 import asyncio
 import logging
@@ -15,6 +15,8 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
+
+from agents.chat.models import DEFAULT_MODEL_ID
 
 from .runner import run_orchestrator
 from .pipeline import run_pipeline
@@ -32,12 +34,22 @@ def _save_report(report_md: str, query: str, metadata: dict) -> None:
     logger.info("Saved  →  final_report.html")
 
 
-def _legacy_run(problem: str, depth: str, audience: str, lang: str) -> None:
+def _legacy_run(
+    problem: str,
+    depth: str,
+    audience: str,
+    lang: str,
+    llm_api_key: str,
+) -> None:
     """Original DAG-based pipeline (--depth flag)."""
 
     async def main_run():
         ctx = await run_orchestrator(
-            problem, audience=audience, output_language=lang, depth=depth
+            problem,
+            audience=audience,
+            output_language=lang,
+            depth=depth,
+            grok_api_key=llm_api_key,
         )
 
         output_data = None
@@ -95,7 +107,9 @@ def _strength_run(
     strength: int,
     audience: str,
     lang: str,
-    trace: bool = False,
+    trace: bool,
+    model_id: str,
+    llm_api_key: str,
 ) -> None:
     """Phase 5 strength-based product pipeline."""
 
@@ -106,6 +120,8 @@ def _strength_run(
             audience=audience or "practitioner",
             output_language=lang,
             trace=trace,
+            model_id=model_id,
+            llm_api_key=llm_api_key,
         )
         _save_report(
             report_md,
@@ -128,8 +144,9 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  python -m agents.orchestrator.cli \"AI safety\" --strength 5\n"
-            "  python -m agents.orchestrator.cli \"AI safety\" --depth shallow\n"
+            "  python -m agents.orchestrator.cli \"AI safety\" --strength 2 --api-key YOUR_KEY\n"
+            "  python -m agents.orchestrator.cli \"AI safety\" --strength 3 --model-id grok-3-mini --api-key KEY\n"
+            "  python -m agents.orchestrator.cli \"AI safety\" --depth shallow --api-key YOUR_KEY\n"
         ),
     )
     parser.add_argument("problem", nargs="*", help="Research question")
@@ -139,9 +156,9 @@ if __name__ == "__main__":
     mode.add_argument(
         "--strength",
         type=int,
-        choices=range(1, 11),
-        metavar="1-10",
-        help="[Phase 5] Report strength 1–10. Controls breadth and depth.",
+        choices=[1, 2, 3],
+        metavar="1|2|3",
+        help="[Phase 5] Intensity: 1=low, 2=medium, 3=high.",
     )
     mode.add_argument(
         "--depth",
@@ -166,6 +183,16 @@ if __name__ == "__main__":
             "selection plan, and parsed output for all pipeline phases."
         ),
     )
+    parser.add_argument(
+        "--api-key",
+        required=True,
+        help="Provider API key for the selected model (BYOK; not read from .env).",
+    )
+    parser.add_argument(
+        "--model-id",
+        default=DEFAULT_MODEL_ID,
+        help=f"Registered chat model id for --strength runs (default: {DEFAULT_MODEL_ID}).",
+    )
     args = parser.parse_args()
 
     problem = " ".join(args.problem) if args.problem else (
@@ -176,9 +203,17 @@ if __name__ == "__main__":
     if args.strength is not None:
         logger.info("Executing : %s", problem)
         logger.info("Strength  : %d", args.strength)
-        _strength_run(problem, args.strength, args.audience, args.lang, trace=args.trace)
+        _strength_run(
+            problem,
+            args.strength,
+            args.audience,
+            args.lang,
+            trace=args.trace,
+            model_id=args.model_id,
+            llm_api_key=args.api_key,
+        )
     else:
         depth = args.depth or "standard"
         logger.info("Executing : %s", problem)
         logger.info("Depth     : %s", depth)
-        _legacy_run(problem, depth, args.audience, args.lang)
+        _legacy_run(problem, depth, args.audience, args.lang, args.api_key)

@@ -18,24 +18,19 @@ Phase D — Polish:      Programmatic fixes + LLM creative beautification
 
 Retrieval runs AFTER planning so every query targets a real planned section.
 
-Entry point: run_pipeline(query, strength, audience, output_language) → str (Markdown)
+Entry point: ``run_pipeline(..., *, model_id, llm_api_key)`` → str (Markdown)
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from functools import partial
 from pathlib import Path
+from typing import Any, Awaitable, Callable
 
-logger = logging.getLogger(__name__)
-
-from .config import (
-    PLANNER_MODEL, MANAGER_MODEL, LEAD_MODEL,
-    WORKER_ANALYSIS_MODEL, WORKER_WRITE_MODEL, POLISHER_MODEL,
-    DOMAIN_CLASSIFIER_MODEL, MAX_TOKENS_DOMAIN_CLASSIFIER, REGISTRY_PATH,
-    SOURCE_GATE_MODEL,
-)
+from .config import MAX_TOKENS_DOMAIN_CLASSIFIER, REGISTRY_PATH
 from .strength import StrengthConfig
 from models import ExecutionContext, PlanNode
 from skills import SKILL_REGISTRY, TIER1_SKILLS, SKILL_DOCS
@@ -52,15 +47,38 @@ import sys
 _ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
-from llm.grok import GrokClient  # noqa: E402
+
+from agents.chat.models import make_client  # noqa: E402
+from llm.base import BaseLLMClient  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+OnPhaseFn = Callable[[str, str], Awaitable[None]] | None
+OnActivityFn = Callable[[dict[str, Any]], Awaitable[None]] | None
+
+
+async def _maybe_phase(on_phase: OnPhaseFn, phase: str, description: str) -> None:
+    if on_phase is not None:
+        await on_phase(phase, description)
+
+
+async def _maybe_activity(on_activity: OnActivityFn, payload: dict[str, Any]) -> None:
+    if on_activity is not None:
+        await on_activity(payload)
+
+
+def _polish_section_count(markdown: str) -> int:
+    parts = re.split(r"(?=^## )", markdown, flags=re.MULTILINE)
+    return len([p for p in parts if p.strip()])
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_client(model: str) -> GrokClient:
-    return GrokClient(model_name=model)
+def _pipeline_llm_client(model_id: str, llm_api_key: str) -> BaseLLMClient:
+    """Single BYOK client for every pipeline LLM call (planning, retrieval, writing, polish)."""
+    return make_client(model_id, llm_api_key)
 
 
 # Domains that should never appear in a published reference list.
@@ -191,6 +209,8 @@ async def _phase_b(
     available_skills: list[str],
     audience: str,
     trace_logger: TraceLogger | None = None,
+    on_activity: OnActivityFn = None,
+    llm: BaseLLMClient | None = None,
 ) -> ReportTree:
     """
     Run 3 Managers in parallel → Lead finalises.
@@ -210,14 +230,43 @@ async def _phase_b(
 
     skill_context = SKILL_DOCS.planner_context(available_skills)
 
-    manager_client = _make_client(MANAGER_MODEL)
+    from agents.report_manager.agent import _PERSPECTIVES
+
+    if llm is None:
+        raise ValueError("Phase B requires llm client")
     managers = [
-        ReportManagerAgent(manager_id=i + 1, client=manager_client)
+        ReportManagerAgent(manager_id=i + 1, client=llm)
         for i in range(3)
     ]
 
-    proposals = await asyncio.gather(*[
-        m.propose(
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "managers_spawn",
+            "phase": "planning",
+            "meta": {
+                "perspectives": [_PERSPECTIVES[i]["name"] for i in (1, 2, 3)],
+                "target_section_count": target_n,
+            },
+        },
+    )
+
+    async def _run_one_manager(m: ReportManagerAgent) -> ReportTree:
+        mid = m.manager_id
+        perspective = _PERSPECTIVES.get(mid, _PERSPECTIVES[1])["name"]
+        await _maybe_activity(
+            on_activity,
+            {
+                "kind": "manager_started",
+                "phase": "planning",
+                "meta": {
+                    "manager_id": mid,
+                    "perspective": perspective,
+                    "target_section_count": target_n,
+                },
+            },
+        )
+        tree = await m.propose(
             query=query,
             target_n=target_n,
             available_skills=available_skills,
@@ -225,20 +274,47 @@ async def _phase_b(
             skill_context=skill_context,
             logger=trace_logger,
         )
-        for m in managers
-    ])
+        await _maybe_activity(
+            on_activity,
+            {
+                "kind": "manager_finished",
+                "phase": "planning",
+                "meta": {
+                    "manager_id": mid,
+                    "perspective": perspective,
+                    "node_count": len(tree.nodes),
+                    "proposal_id": tree.proposal_id,
+                    "rationale": (tree.rationale or "")[:500],
+                },
+            },
+        )
+        return tree
+
+    proposals = await asyncio.gather(*[_run_one_manager(m) for m in managers])
 
     for i, p in enumerate(proposals):
         logger.info("  Manager %d: %d nodes — %s", i + 1, len(p.nodes), p.rationale[:60])
 
-    logger.info("  Lead model     : %s", LEAD_MODEL)
-    lead = ReportLeadAgent(client=_make_client(LEAD_MODEL))
+    await _maybe_activity(on_activity, {"kind": "lead_started", "phase": "planning", "meta": {}})
+    lead = ReportLeadAgent(client=llm)
     final_tree = await lead.finalise(
         proposals=list(proposals),
         query=query,
         section_count_range=(lo, hi),
         audience=audience,
         logger=trace_logger,
+    )
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "lead_finished",
+            "phase": "planning",
+            "meta": {
+                "total_nodes": len(final_tree.nodes),
+                "max_depth": final_tree.max_depth,
+                "proposal_id": final_tree.proposal_id,
+            },
+        },
     )
 
     logger.info("  Lead finalised: %d nodes, depth=%d", len(final_tree.nodes), final_tree.max_depth)
@@ -258,6 +334,7 @@ async def _layer1_coverage_audit(
     query: str,
     ctx,
     gate_client=None,
+    on_activity: OnActivityFn = None,
 ) -> None:
     """
     Issue 1 Layer 1: Post-Phase-A coverage audit.
@@ -277,6 +354,20 @@ async def _layer1_coverage_audit(
         count = vs.count_chunks(run_id=run_id, query_text=section_q, k=min_chunks + 10)
         if count < min_chunks:
             starved.append(leaf)
+
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "coverage_audit",
+            "phase": "retrieval",
+            "meta": {
+                "leaf_count": len(leaves),
+                "starved_count": len(starved),
+                "min_chunks": min_chunks,
+                "threshold_met": len(starved) == 0,
+            },
+        },
+    )
 
     if not starved:
         logger.info(
@@ -336,17 +427,16 @@ async def _phase_c(
     ctx,
     trace_logger: TraceLogger | None = None,
     gate_client=None,
+    on_phase: OnPhaseFn = None,
+    on_activity: OnActivityFn = None,
+    llm: BaseLLMClient | None = None,
 ) -> dict[str, dict]:
     """
     Spawn one ReportWorkerAgent per node.
     Execute bottom-up: deepest level first, root last.
     Workers at the same depth level run in parallel.
 
-    Two separate LLM clients are used per worker:
-      analysis_client (WORKER_ANALYSIS_MODEL) — Call 1: structured JSON analysis,
-        high-volume, cost-sensitive; mini model is sufficient.
-      write_client    (WORKER_WRITE_MODEL)     — Call 2: the actual published prose;
-        best available non-reasoning model for maximum quality.
+    Both worker calls use the same BYOK ``llm`` client (user-selected research model).
 
     Issue 3 (Phase C+): leaf workers receive strength/vs/collection_name so they
     can run the evidence augmentation loop between Call 1 and Call 2.
@@ -362,9 +452,9 @@ async def _phase_c(
     from agents.retriever.retriever import sanitize_query
     from skills import SKILL_REGISTRY
 
+    if llm is None:
+        raise ValueError("Phase C requires llm client")
     logger.info("\n[Phase C] Writing — %d sections, %d leaves", len(tree.nodes), len(tree.leaves()))
-    logger.info("  Analysis model : %s", WORKER_ANALYSIS_MODEL)
-    logger.info("  Write model    : %s", WORKER_WRITE_MODEL)
     aug_enabled = strength.max_augmentation_iters > 0
     logger.info(
         "  Phase C+ augmentation: %s (max_iters=%d, max_web_esc=%d)",
@@ -373,8 +463,8 @@ async def _phase_c(
         strength.max_web_escalations,
     )
 
-    analysis_client = _make_client(WORKER_ANALYSIS_MODEL)
-    write_client    = _make_client(WORKER_WRITE_MODEL)
+    analysis_client = llm
+    write_client = llm
     web_skill = SKILL_REGISTRY.get("web_search")
 
     levels = tree.topological_levels()   # deepest → root (already reversed)
@@ -384,12 +474,34 @@ async def _phase_c(
         is_leaf_level = (depth == tree.max_depth)
         logger.info("  Writing depth=%d (%d nodes) in parallel…", depth, len(level_nodes))
 
+        await _maybe_phase(
+            on_phase,
+            "writing",
+            f"Writing depth-{depth} ({len(level_nodes)} section{'s' if len(level_nodes) != 1 else ''})…",
+        )
+        await _maybe_activity(
+            on_activity,
+            {
+                "kind": "writers_depth",
+                "phase": "writing",
+                "meta": {"depth": depth, "node_count": len(level_nodes)},
+            },
+        )
+
         async def _write_node(node) -> None:
             k = strength.qdrant_k(node.level, tree.max_depth)
             is_leaf = len(tree.children_of(node.node_id)) == 0
 
             # Issue 5: JIT fresh search for time-sensitive sections
             if getattr(node, "requires_fresh", False) and web_skill is not None:
+                await _maybe_activity(
+                    on_activity,
+                    {
+                        "kind": "writer_jit_search",
+                        "phase": "writing",
+                        "meta": {"section_title": (node.title or "")[:120]},
+                    },
+                )
                 fresh_q = sanitize_query(f"{query} {node.title} {node.description[:60]}")
                 fresh_node = PlanNode(
                     node_id=f"jit_{node.node_id}",
@@ -468,26 +580,44 @@ async def _phase_c(
 
 async def run_pipeline(
     query: str,
-    strength: int = 5,
+    strength: int = 2,
     audience: str = "practitioner",
     output_language: str = "en",
     trace: bool = False,
     trace_root: str = "traces",
+    on_phase: OnPhaseFn = None,
+    on_activity: OnActivityFn = None,
+    *,
+    model_id: str,
+    llm_api_key: str,
 ) -> str:
     """
     Full Phase 5 pipeline. Returns the final Markdown report as a string.
 
+    All LLM stages use the same ``model_id`` and ``llm_api_key`` (user BYOK).
+
     Args:
         query:           Research question.
-        strength:        1–10 run strength (controls depth, section count, retrieval).
+        strength:        1–3 intensity (1=low, 2=medium, 3=high); depth and retrieval scale with tier.
         audience:        Target reader type (practitioner / expert / layperson …).
         output_language: ISO 639-1 language code for the report.
         trace:           When True, write a structured trace directory to `trace_root`
                          containing every LLM prompt, raw response, and parsed output
                          for all phases (B planning, A retrieval, C writing, D polish).
         trace_root:      Directory under which per-run trace folders are created.
-                         Each run gets its own sub-folder named by run_id.
+        Each run gets its own sub-folder named by run_id.
+        on_phase:        Optional async callback ``(phase, description)`` for coarse
+                         job progress (planning / retrieval / writing / polish).
+        on_activity:     Optional async callback receiving structured activity dicts
+                         (``kind``, ``phase``, optional ``meta``) for UI storyboards.
+        model_id:        Registered chat model id (same catalog as chat UI).
+        llm_api_key:     User's API key for that model's provider (BYOK).
     """
+    if not (llm_api_key or "").strip():
+        raise ValueError(
+            "llm_api_key is required for run_pipeline (BYOK; environment keys are not used)."
+        )
+    llm = _pipeline_llm_client(model_id, llm_api_key)
     sc = StrengthConfig(value=strength)
     run_id = uuid.uuid4().hex[:12]
 
@@ -498,6 +628,16 @@ async def run_pipeline(
     logger.info("Strength : %s", sc)
     logger.info("Audience : %s", audience)
     logger.info("Run ID   : %s", run_id)
+    logger.info("LLM model: %s (single model for all pipeline stages)", model_id)
+
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "pipeline_start",
+            "phase": "planning",
+            "meta": {"strength": strength, "run_id": run_id},
+        },
+    )
 
     trace_logger: TraceLogger | None = None
     if trace:
@@ -506,21 +646,17 @@ async def run_pipeline(
             "strength":             strength,
             "audience":             audience,
             "output_language":      output_language,
-            "manager_model":        MANAGER_MODEL,
-            "lead_model":           LEAD_MODEL,
-            "worker_analysis_model": WORKER_ANALYSIS_MODEL,
-            "worker_write_model":   WORKER_WRITE_MODEL,
-            "polisher_model":       POLISHER_MODEL,
+            "pipeline_model_id":    model_id,
         })
         logger.info("  Trace    : enabled → %s/%s/", trace_root, run_id)
 
     ctx = ExecutionContext(language=output_language, depth="strength")
 
     vs = VectorStoreClient()
-    gate_client = _make_client(SOURCE_GATE_MODEL)
+    gate_client = llm
 
     domain_registry = DomainRegistry(REGISTRY_PATH)
-    domain_client = _make_client(DOMAIN_CLASSIFIER_MODEL)
+    domain_client = llm
     classified_domain, domain_conf = await asyncio.to_thread(
         partial(
             domain_registry.detect_domain_llm,
@@ -533,6 +669,21 @@ async def run_pipeline(
     domain_label = dinfo.get("label", classified_domain)
     logger.info("  Domain     : %s — %s (%s)", classified_domain, domain_label, domain_conf)
 
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "domain_classified",
+            "phase": "planning",
+            "meta": {
+                "domain_key": classified_domain,
+                "label": domain_label,
+                "confidence": domain_conf,
+            },
+        },
+    )
+
+    await _maybe_phase(on_phase, "planning", "Designing report structure…")
+
     # ── Phase B — Planning (first: defines structure before retrieval) ─
     tree = await _phase_b(
         query=query,
@@ -540,6 +691,14 @@ async def run_pipeline(
         available_skills=list(TIER1_SKILLS),   # full tier-1 set — retrieval picks later
         audience=audience,
         trace_logger=trace_logger,
+        on_activity=on_activity,
+        llm=llm,
+    )
+
+    await _maybe_phase(
+        on_phase,
+        "planning",
+        f"Structure finalised — {len(tree.nodes)} sections, depth {tree.max_depth}",
     )
 
     # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
@@ -547,14 +706,26 @@ async def run_pipeline(
 
     if cached_run_id:
         logger.info("\n[Cache HIT] Reusing collection from run %s", cached_run_id)
+        await _maybe_activity(on_activity, {"kind": "cache_hit", "phase": "retrieval", "meta": {}})
+        await _maybe_phase(
+            on_phase,
+            "retrieval",
+            "Reusing indexed sources from a prior run…",
+        )
         active_run_id = cached_run_id
         active_collection = f"run_{cached_run_id}"
     else:
+        await _maybe_activity(on_activity, {"kind": "cache_miss", "phase": "retrieval", "meta": {}})
+        await _maybe_phase(
+            on_phase,
+            "retrieval",
+            "Searching the web and gathering sources…",
+        )
         # ── Phase A — Retrieval (tree-informed: queries target real sections) ─
         active_collection = vs.create_collection(run_id)
         active_run_id = run_id
 
-        retriever = Retriever(_make_client(PLANNER_MODEL), vs)
+        retriever = Retriever(llm, vs)
         await retriever.run(
             query,
             sc,
@@ -562,13 +733,19 @@ async def run_pipeline(
             active_collection,
             ctx,
             tree=tree,
-            logger=trace_logger,
+            trace_logger=trace_logger,
             domain_key=classified_domain,
             domain_label=domain_label,
             domain_confidence=domain_conf,
             gate_client=gate_client,
+            on_activity=on_activity,
         )
 
+        await _maybe_phase(
+            on_phase,
+            "retrieval",
+            "Auditing source coverage and filling gaps…",
+        )
         # ── Issue 1 Layer 1: Coverage audit — re-fetch starved sections ──
         await _layer1_coverage_audit(
             tree=tree,
@@ -579,7 +756,14 @@ async def run_pipeline(
             query=query,
             ctx=ctx,
             gate_client=gate_client,
+            on_activity=on_activity,
         )
+
+    await _maybe_phase(
+        on_phase,
+        "writing",
+        f"Writing {len(tree.nodes)} sections bottom-up…",
+    )
 
     # ── Phase C ───────────────────────────────────────────────────────
     source_map = await _phase_c(
@@ -593,6 +777,9 @@ async def run_pipeline(
         ctx=ctx,
         trace_logger=trace_logger,
         gate_client=gate_client,
+        on_phase=on_phase,
+        on_activity=on_activity,
+        llm=llm,
     )
 
     # ── Assemble report ───────────────────────────────────────────────
@@ -606,7 +793,15 @@ async def run_pipeline(
 
     # ── Phase D — Polish ──────────────────────────────────────────────
     logger.info("\n[Phase D] Polish — programmatic fixes + creative formatting")
-    report_md = await _phase_d(report_md, query, audience, trace_logger=trace_logger)
+    await _maybe_phase(on_phase, "polish", "Polishing and formatting…")
+    report_md = await _phase_d(
+        report_md,
+        query,
+        audience,
+        llm,
+        trace_logger=trace_logger,
+        on_activity=on_activity,
+    )
 
     logger.info("\n%s", "=" * 65)
     logger.info("RESEARCH COMPLETE")
@@ -631,11 +826,31 @@ async def _phase_d(
     report_md: str,
     query: str,
     audience: str,
+    llm: BaseLLMClient,
     trace_logger: TraceLogger | None = None,
+    on_activity: OnActivityFn = None,
 ) -> str:
     """Phase D — Polish the assembled report for visual excellence."""
     from agents.polish import PolishAgent
-    polisher = PolishAgent(POLISHER_MODEL, logger=trace_logger)
+
+    section_count = _polish_section_count(report_md)
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "polish_started",
+            "phase": "polish",
+            "meta": {"section_count": section_count},
+        },
+    )
+    polisher = PolishAgent(llm, logger=trace_logger)
     polished = await polisher.polish(report_md, query, audience)
+    await _maybe_activity(
+        on_activity,
+        {
+            "kind": "polish_finished",
+            "phase": "polish",
+            "meta": {"char_count": len(polished)},
+        },
+    )
     logger.info("  Polish complete  : %s chars", f"{len(polished):,}")
     return polished

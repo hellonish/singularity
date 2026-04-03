@@ -5,11 +5,14 @@ Runs a ThinkPlan in Chat Mode (1-5 steps) by executing each step
 sequentially and accumulating context. Yields text chunks for streaming.
 
 Step types handled:
-  direct_answer  — LLM streaming from knowledge (auto-falls back to web if uncertain)
-  web_search     — Lightweight DuckDuckGo + scrape (no Qdrant)
-  skill_call     — Invoke skill from SKILL_REGISTRY via a summarise-only path
-  analyze        — LLM reasoning over accumulated context
-  summarize      — Final condensing LLM call
+  direct_answer      — LLM streaming from knowledge (auto-falls back to web if uncertain)
+  web_search         — Lightweight DuckDuckGo + scrape (no Qdrant)
+  skill_call         — Invoke skill from SKILL_REGISTRY via a summarise-only path
+  analyze            — LLM reasoning over accumulated context
+  claim_verification — Fact-check style pass over gathered context
+  summarize          — Final condensing LLM call
+  synthesis          — Same execution path as summarize (final woven answer)
+  (other types)      — Generic reasoning step with a human-readable label
 """
 from __future__ import annotations
 
@@ -22,6 +25,23 @@ from typing import AsyncGenerator
 logger = logging.getLogger(__name__)
 
 from agents.chat.thinker import ThinkPlan, ThinkStep
+
+_HUMAN_STEP_LABELS: dict[str, str] = {
+    "direct_answer": "Answer",
+    "web_search": "Web search",
+    "skill_call": "Skill",
+    "analyze": "Analysis",
+    "summarize": "Summary",
+    "synthesis": "Synthesis",
+    "claim_verification": "Claim verification",
+}
+
+
+def _human_step_label(step_type: str) -> str:
+    """Title for user-visible step lines; avoids raw snake_case in chat."""
+    if step_type in _HUMAN_STEP_LABELS:
+        return _HUMAN_STEP_LABELS[step_type]
+    return step_type.replace("_", " ").strip().title()
 
 _CHAT_DIR = Path(__file__).parent
 SINGULARITY_IDENTITY = (_CHAT_DIR / "identity.md").read_text(encoding="utf-8")
@@ -228,7 +248,7 @@ class ChatModeExecutor:
             elif step.type == "web_search":
                 result = await _web_search_lightweight(step.description, n=5)
                 context_chunks.append(f"[Web Search: {step.description}]\n{result}")
-                yield f"\n*🌐 Retrieved {len(result.split())} words from web search.*\n"
+                yield "\n*🌐 Web search complete.*\n"
 
             # ── skill_call ─────────────────────────────────────────────
             elif step.type == "skill_call":
@@ -237,12 +257,13 @@ class ChatModeExecutor:
                     _skill_summary, skill_name, step.description, self._client
                 )
                 context_chunks.append(f"[{skill_name}: {step.description}]\n{result}")
-                yield f"\n*🔧 Skill `{skill_name}` returned {len(result.split())} words.*\n"
+                yield f"\n*🔧 Used `{skill_name}`.*\n"
 
             # ── analyze ────────────────────────────────────────────────
             elif step.type == "analyze":
                 context_joined = "\n\n---\n\n".join(context_chunks)
                 prompt = (
+                    f"{history_block}"
                     f"User question: {user_message}\n\n"
                     f"Information gathered:\n{context_joined}\n\n"
                     f"Task: {step.description}\n\n"
@@ -251,16 +272,42 @@ class ChatModeExecutor:
                 analysis = await asyncio.to_thread(
                     self._client.generate_text,
                     prompt,
-                    "You are an expert analyst. Be precise, cite evidence, avoid stating audience type.",
+                    "You are an expert analyst. Prior turns may bind scope or meaning for the latest "
+                    "message; integrate them when relevant. Be precise, cite evidence, avoid stating audience type.",
                     0.4,
                 )
                 context_chunks.append(f"[Analysis]\n{analysis}")
-                yield f"\n*🔍 Analysis complete ({len(analysis.split())} words).*\n"
+                yield "\n*🔍 Analysis complete.*\n"
 
-            # ── summarize ──────────────────────────────────────────────
-            elif step.type == "summarize":
+            # ── claim_verification ─────────────────────────────────────
+            elif step.type == "claim_verification":
                 context_joined = "\n\n---\n\n".join(context_chunks)
                 prompt = (
+                    f"{history_block}"
+                    f"User question: {user_message}\n\n"
+                    f"Information gathered:\n{context_joined}\n\n"
+                    f"Verification task: {step.description}\n\n"
+                    "Assess which claims are well supported by the gathered information, "
+                    "which need caveats or uncertainty language, and which lack evidence. "
+                    "Be precise; do not invent sources."
+                )
+                verified = await asyncio.to_thread(
+                    self._client.generate_text,
+                    prompt,
+                    "You are a careful fact-checker. Earlier user turns may define which claims to "
+                    "verify; do not ignore them. Cite what the context does or does not support.",
+                    0.3,
+                )
+                context_chunks.append(f"[Claim verification]\n{verified}")
+                yield "\n*Claim verification complete.*\n"
+
+            # ── summarize / synthesis ────────────────────────────────────
+            elif step.type in ("summarize", "synthesis"):
+                if step.type == "synthesis":
+                    yield "\n*Synthesis*\n"
+                context_joined = "\n\n---\n\n".join(context_chunks)
+                prompt = (
+                    f"{history_block}"
                     f"User question: {user_message}\n\n"
                     f"All gathered information:\n{context_joined}\n\n"
                     f"Task: {step.description}\n\n"
@@ -274,4 +321,22 @@ class ChatModeExecutor:
                     yield chunk
 
             else:
-                yield f"\n[Unknown step type: {step.type}]\n"
+                label = _human_step_label(step.type)
+                context_joined = "\n\n---\n\n".join(context_chunks)
+                prompt = (
+                    f"{history_block}"
+                    f"User question: {user_message}\n\n"
+                    f"Information gathered:\n{context_joined}\n\n"
+                    f"{label}: {step.description}\n\n"
+                    "Address the task using only the gathered information; "
+                    "flag gaps or uncertainty where appropriate."
+                )
+                fallback = await asyncio.to_thread(
+                    self._client.generate_text,
+                    prompt,
+                    "You are a precise research assistant. Use prior turns when they constrain "
+                    "or clarify the latest message. Avoid audience calibration phrases.",
+                    0.4,
+                )
+                context_chunks.append(f"[{label}]\n{fallback}")
+                yield f"\n*{label} complete.*\n"

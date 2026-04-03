@@ -49,6 +49,13 @@ like: "current", "latest", "recent", "2024", "2025", "ongoing", "live", "this ye
 Default is `false` (omit the field or set explicitly). Do not mark theoretical or
 historical sections — only time-sensitive factual content needs this.
 
+## Title Rules
+
+- Final node titles must describe **subject matter**, not the imagined reader.
+- Do **not** use audience-indicating titles or subtitles such as “A Practitioner’s Guide…”, “For Beginners”, “Expert Notes”, “Layperson’s Introduction”, or similar reader-label framing.
+- Do **not** use meta titles that announce the document type (“Complete Overview of…”, “Everything You Need to Know…”) unless the query explicitly asks for that format.
+- Prefer concrete, scoped titles aligned with merged content.
+
 ## Output — respond ONLY with this JSON, no prose
 
 ```json
