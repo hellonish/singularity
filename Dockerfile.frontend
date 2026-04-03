@@ -16,6 +16,11 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ .
 
+# NEXT_PUBLIC_* vars are baked into the client bundle at build time.
+# Pass via --build-arg or docker compose build args.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
