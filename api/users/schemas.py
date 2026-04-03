@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class UserProfile(BaseModel):
@@ -76,3 +76,27 @@ class DeviceBreakdownResponse(BaseModel):
     devices: list[DeviceBreakdownItem]
     os: list[OSBreakdownItem]
     browsers: list[BrowserBreakdownItem]
+
+
+class LlmCredentialPublic(BaseModel):
+    id: UUID
+    provider: str
+    label: Optional[str]
+    last_four: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LlmCredentialListResponse(BaseModel):
+    credentials: list[LlmCredentialPublic]
+
+
+class LlmCredentialPutBody(BaseModel):
+    secret: str = Field(..., min_length=8)
+    label: Optional[str] = Field(None, max_length=128)
+
+
+class LlmCredentialDeleteResponse(BaseModel):
+    """Returned after removing a stored provider key (BYOK)."""
+
+    status: str = Field("deleted", description="Always 'deleted' on success.")

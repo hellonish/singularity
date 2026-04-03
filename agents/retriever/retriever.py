@@ -16,7 +16,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from models import ExecutionContext, PlanNode
 from skills import SKILL_REGISTRY, TIER1_SKILLS
@@ -31,6 +31,8 @@ JACCARD_DEDUP_THRESHOLD = 0.75  # queries with Jaccard similarity above this are
 
 if TYPE_CHECKING:
     from trace import TraceLogger
+
+OnActivityFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +98,7 @@ class Retriever:
         domain_label: str | None = None,
         domain_confidence: str | None = None,
         gate_client=None,   # GrokClient | None — enables 2-pass source gate
+        on_activity: OnActivityFn = None,
     ) -> list[str]:
         """
         Run retrieval phase. Returns list of active skill names.
@@ -195,7 +198,7 @@ class Retriever:
             skill_queries["web_search"] = web_fallback_queries[:effective_qps]
 
         # ── Step 4 (strength ≥ 7): adversarial query in web_search ─────────
-        if strength.value >= 7 and "web_search" in skill_queries:
+        if strength.legacy_scale >= 7 and "web_search" in skill_queries:
             adv_q = sanitize_query(_make_adversarial_query(query))
             if adv_q:
                 skill_queries["web_search"].append(adv_q)
@@ -207,6 +210,19 @@ class Retriever:
             section_hint, len(active_skills), effective_qps,
         )
         logger.info("  Active skills: %s", active_skills)
+
+        queries_per_skill_meta = {name: len(qs) for name, qs in skill_queries.items()}
+        if on_activity is not None:
+            await on_activity(
+                {
+                    "kind": "retrieval_plan_ready",
+                    "phase": "retrieval",
+                    "meta": {
+                        "skills": active_skills,
+                        "queries_per_skill": queries_per_skill_meta,
+                    },
+                }
+            )
 
         if trace_logger is not None:
             trace_logger.log_retriever_plan(
@@ -222,6 +238,17 @@ class Retriever:
             if skill is None:
                 logger.warning("  skill '%s' not in retrieval registry — skipping", skill_name)
                 return
+            if on_activity is not None:
+                await on_activity(
+                    {
+                        "kind": "retrieval_skill_started",
+                        "phase": "retrieval",
+                        "meta": {
+                            "skill": skill_name,
+                            "query_count": len(queries),
+                        },
+                    }
+                )
             node = PlanNode(
                 node_id=f"retrieval_{skill_name}",
                 description=query,
@@ -250,6 +277,18 @@ class Retriever:
                 "  [%s] %d sources → %d chunks%s",
                 skill_name, summary["sources_found"], summary["chunks_stored"], gate_str,
             )
+            if on_activity is not None:
+                await on_activity(
+                    {
+                        "kind": "retrieval_skill_finished",
+                        "phase": "retrieval",
+                        "meta": {
+                            "skill": skill_name,
+                            "sources_found": summary.get("sources_found", 0),
+                            "chunks_stored": summary.get("chunks_stored", 0),
+                        },
+                    }
+                )
             if trace_logger is not None:
                 trace_logger.log_skill_result(
                     skill_name=skill_name,

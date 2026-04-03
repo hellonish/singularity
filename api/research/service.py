@@ -9,8 +9,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
+from api.debug_research_mock_policy import use_debug_mock_research_job
 from api.research.schemas import CreateJobRequest
-from db.models import Report, ResearchJob, UsageEvent
+from db.models import Report, ResearchJob, UsageEvent, User
 
 
 def _now() -> datetime:
@@ -76,7 +77,7 @@ async def _find_idempotent_job(
 async def create_job(
     db: AsyncSession,
     redis: ArqRedis,
-    user_id: uuid.UUID,
+    user: User,
     daily_token_budget: int,
     request: CreateJobRequest,
 ) -> tuple[ResearchJob, bool]:
@@ -86,6 +87,8 @@ async def create_job(
     Returns (job, is_new) where is_new=False means the idempotency key matched
     an existing job within the last 24 h.
     """
+    user_id = user.id
+
     # Idempotency check first — skip quota/concurrency check for duplicates
     if request.idempotency_key:
         existing = await _find_idempotent_job(db, user_id, request.idempotency_key)
@@ -94,6 +97,23 @@ async def create_job(
 
     await _check_daily_quota(db, user_id, daily_token_budget)
     await _check_concurrent_limit(db, user_id)
+
+    from api.llm_credentials_service import (
+        get_decrypted_provider_key,
+        model_provider,
+        validate_model_id,
+    )
+
+    job_model_id = validate_model_id(request.model_id)
+
+    if not use_debug_mock_research_job(user, request.debug_mock):
+        prov = model_provider(job_model_id)
+        pk = await get_decrypted_provider_key(db, user_id, prov)
+        if not pk:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Add your {prov} API key in Profile → LLM keys to run research with this model.",
+            )
 
     # Create report row
     report = Report(
@@ -111,6 +131,7 @@ async def create_job(
         idempotency_key=request.idempotency_key,
         status="pending",
         strength=request.strength,
+        llm_model_id=job_model_id,
         attempts=0,
         max_attempts=3,
         created_at=_now(),
@@ -120,8 +141,10 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
-    # Enqueue to ARQ
-    await redis.enqueue_job("run_research_job", str(job.id))
+    if use_debug_mock_research_job(user, request.debug_mock):
+        await redis.enqueue_job("run_debug_mock_research_job", str(job.id))
+    else:
+        await redis.enqueue_job("run_research_job", str(job.id))
 
     return job, True
 

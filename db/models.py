@@ -75,6 +75,9 @@ class User(Base):
     usage_events: Mapped[list[UsageEvent]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    llm_credentials: Mapped[list["UserLlmCredential"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_users_google_sub", "google_sub"),)
 
@@ -103,6 +106,38 @@ class RefreshToken(Base):
 
 
 # ---------------------------------------------------------------------------
+# User LLM credentials (BYOK)
+# ---------------------------------------------------------------------------
+
+
+class UserLlmCredential(Base):
+    """
+    One encrypted API secret per (user, provider): grok | gemini | deepseek.
+    """
+
+    __tablename__ = "user_llm_credentials"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    encrypted_secret: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_TZDateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        _TZDateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="llm_credentials")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_user_llm_provider"),
+        Index("idx_user_llm_credentials_user", "user_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 
@@ -116,7 +151,7 @@ class Report(Base):
     )
     title: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     query: Mapped[str] = mapped_column(Text, nullable=False)
-    strength: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=5)
+    strength: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
     created_at: Mapped[datetime] = mapped_column(_TZDateTime, nullable=False, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="reports")
@@ -176,7 +211,9 @@ class ResearchJob(Base):
     )
     idempotency_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
-    strength: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=5)
+    strength: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
+    # Chat-catalog model_id; full pipeline runs on this model with the user's BYOK key for that provider.
+    llm_model_id: Mapped[str] = mapped_column(String(128), nullable=False, default="grok-3-mini")
     attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     current_phase: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -217,6 +254,9 @@ class Thread(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     pinned_version_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    canonical_report_qa: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     summary_through_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True

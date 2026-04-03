@@ -105,6 +105,6 @@ def get_model_info(model_id: str) -> ModelInfo | None:
     return MODEL_MAP.get(model_id)
 
 
-def make_client(model_id: str) -> BaseLLMClient:
-    """Instantiate the right LLM client for a model_id."""
-    return get_llm_client(model_id)
+def make_client(model_id: str, api_key: str) -> BaseLLMClient:
+    """Instantiate the right LLM client for a model_id with the user's provider API key."""
+    return get_llm_client(model_id, api_key)

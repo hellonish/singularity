@@ -48,7 +48,7 @@ async def create_research_job(
     job, is_new = await create_job(
         db=db,
         redis=redis,
-        user_id=current_user.id,
+        user=current_user,
         daily_token_budget=current_user.daily_token_budget,
         request=body,
     )
@@ -86,6 +86,10 @@ async def stream_job_events(
     as the `token` query parameter, since EventSource cannot set headers.
 
     Supports `Last-Event-ID` header for resuming after reconnect.
+
+    Events include coarse ``job_status`` (phase rail) and append-only ``job_activity``
+    (storyboard). Redis pub/sub is not durable: clients that connect after a job
+    finishes receive a terminal snapshot from the DB but not historical ``job_activity``.
     """
     # Authenticate via short-lived SSE token or fall back to regular bearer
     auth_header = request.headers.get("Authorization")
@@ -127,13 +131,17 @@ async def stream_job_events(
                 "failed": "job_error",
                 "cancelled": "job_cancelled",
             }.get(current_job.status, "job_status")
-            data = json.dumps(
-                {
-                    "status": current_job.status,
-                    "current_phase": current_job.current_phase,
-                    "error_detail": current_job.error_detail,
-                }
-            )
+            term_payload: dict = {
+                "status": current_job.status,
+                "current_phase": current_job.current_phase,
+                "error_detail": current_job.error_detail,
+            }
+            if current_job.started_at and current_job.finished_at:
+                term_payload["elapsed_ms"] = int(
+                    (current_job.finished_at - current_job.started_at).total_seconds()
+                    * 1000
+                )
+            data = json.dumps(term_payload)
             yield f"event: {event_type}\ndata: {data}\n\n".encode()
             await pubsub.unsubscribe(channel)
             return

@@ -17,6 +17,8 @@ import time
 from typing import Optional
 
 from arq import ArqRedis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -38,6 +40,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     source IP as a fallback.  The middleware maintains a sorted set
     of timestamps in Redis and trims entries older than the window
     before checking the count against the limit.
+
+    If Redis is unreachable (timeout/connection errors), requests pass through
+    without limiting so the API remains available; a warning is logged.
     """
 
     def __init__(self, app, redis_getter=None):
@@ -77,7 +82,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         pipe.zadd(key, {str(now): now})
         # Set TTL on the key to auto-clean
         pipe.expire(key, _WINDOW_SECONDS + 1)
-        results = await pipe.execute()
+        try:
+            results = await pipe.execute()
+        except (RedisTimeoutError, RedisConnectionError) as exc:
+            # Redis down/slow would otherwise 500 every /api/v1 request; fail-open until Redis is healthy.
+            logger.warning(
+                "Rate limit skipped (Redis unreachable): %s client_key=%s",
+                exc,
+                client_key,
+            )
+            return await call_next(request)
 
         current_count: int = results[1]
 

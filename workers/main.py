@@ -6,7 +6,7 @@ from arq.connections import RedisSettings
 
 from api.config import settings
 from workers.patch_job import run_patch_job
-from workers.research_job import run_research_job
+from workers.research_job import run_debug_mock_research_job, run_research_job
 from workers.summary_job import run_summary_job
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class WorkerSettings:
     """ARQ worker configuration."""
 
-    functions = [run_research_job, run_patch_job, run_summary_job]
+    functions = [run_research_job, run_debug_mock_research_job, run_patch_job, run_summary_job]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
 
     # Concurrency / timeout

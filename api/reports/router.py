@@ -28,6 +28,8 @@ from api.reports.service import (
     list_versions,
     load_content,
 )
+from api.threads.schemas import ThreadResponse
+from api.threads.service import get_or_create_default_report_thread
 from db.models import User
 
 router = APIRouter(prefix="/reports", tags=["reports"])
@@ -60,6 +62,23 @@ async def list_user_reports(
         latest = await get_latest_version(db, r.id)
         items.append(_report_to_meta(r, latest))
     return ReportListResponse(items=items, next_cursor=next_cursor)
+
+
+@router.get("/{report_id}/threads/default", response_model=ThreadResponse)
+async def get_or_create_default_report_thread_route(
+    report_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ThreadResponse:
+    """Canonical Q&A thread for this report (creates on first use)."""
+    thread = await get_or_create_default_report_thread(db, current_user.id, report_id)
+    return ThreadResponse(
+        id=thread.id,
+        report_id=thread.report_id,
+        pinned_version_num=thread.pinned_version_num,
+        canonical_report_qa=bool(thread.canonical_report_qa),
+        created_at=thread.created_at,
+    )
 
 
 @router.get("/{report_id}", response_model=ReportMeta)

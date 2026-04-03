@@ -4,6 +4,71 @@ import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 
+/**
+ * When Google does not provide a picture, show the first letter of the first name
+ * (first word of the display name), then the email local part, else "?".
+ */
+function avatarInitialFromFirstName(
+  name: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  const trimmed = name?.trim();
+  if (trimmed) {
+    const firstWord = (trimmed.split(/\s+/)[0] ?? "").trim();
+    if (firstWord) {
+      const chars = [...firstWord];
+      const letter = chars.find((ch) => /\p{L}/u.test(ch));
+      if (letter) return letter.toLocaleUpperCase();
+      if (chars[0]) return chars[0].toLocaleUpperCase();
+    }
+  }
+  const local = email?.trim().split("@")[0]?.trim() ?? "";
+  if (local) {
+    const chars = [...local];
+    const letter = chars.find((ch) => /\p{L}|\d/u.test(ch));
+    if (letter) return letter.toLocaleUpperCase();
+  }
+  return "?";
+}
+
+function UserAvatarChip({
+  imageUrl,
+  name,
+  email,
+}: {
+  imageUrl: string | null | undefined;
+  name: string | null | undefined;
+  email: string | null | undefined;
+}) {
+  const [loadFailed, setLoadFailed] = useState(false);
+  const trimmed = imageUrl?.trim();
+  const hasUrl = Boolean(trimmed);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [trimmed]);
+
+  if (hasUrl && !loadFailed) {
+    return (
+      <img
+        src={trimmed}
+        alt={name || "Avatar"}
+        onError={() => setLoadFailed(true)}
+        className="h-8 w-8 rounded-full object-cover"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700"
+      aria-hidden
+    >
+      {avatarInitialFromFirstName(name, email)}
+    </div>
+  );
+}
+
 export function UserMenu() {
   const { data: session } = useSession();
   const router = useRouter();
@@ -28,20 +93,14 @@ export function UserMenu() {
   return (
     <div className="relative" ref={menuRef}>
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 rounded-full p-1 pr-2 transition-colors hover:bg-black/5"
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-label={`Account menu for ${user.name || user.email || "user"}`}
       >
-        {user.image ? (
-          <img
-            src={user.image}
-            alt={user.name || "Avatar"}
-            className="h-8 w-8 rounded-full"
-          />
-        ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-medium text-indigo-600">
-            {(user.name || user.email || "?")[0].toUpperCase()}
-          </div>
-        )}
+        <UserAvatarChip imageUrl={user.image} name={user.name} email={user.email} />
         <svg
           className={`h-4 w-4 text-[#6b7280] transition-transform ${open ? "rotate-180" : ""}`}
           fill="none"
@@ -76,10 +135,16 @@ export function UserMenu() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={1.5}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                 />
               </svg>
-              Usage & Stats
+              Settings
             </button>
           </div>
 

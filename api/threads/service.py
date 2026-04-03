@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.reports.service import get_report, get_version_content, load_content
@@ -38,6 +39,7 @@ async def create_thread(
         user_id=user_id,
         report_id=report_id,
         pinned_version_num=pinned_version,
+        canonical_report_qa=False,
         created_at=_now(),
     )
     db.add(thread)
@@ -66,7 +68,7 @@ async def list_threads(
     user_id: uuid.UUID,
     limit: int = 20,
 ) -> list[Thread]:
-    """List user's threads, newest first."""
+    """List user's threads, newest first (created_at only — prefer list_threads_with_meta for UI)."""
     result = await db.execute(
         select(Thread)
         .where(Thread.user_id == user_id)
@@ -74,6 +76,186 @@ async def list_threads(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def get_or_create_default_report_thread(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    report_id: uuid.UUID,
+) -> Thread:
+    """
+    Return the single canonical Q&A thread for this report, creating it if absent.
+
+    Concurrent creates resolve via unique index + IntegrityError retry.
+    """
+    await get_report(db, report_id, user_id)
+    result = await db.execute(
+        select(Thread).where(
+            Thread.user_id == user_id,
+            Thread.report_id == report_id,
+            Thread.canonical_report_qa.is_(True),
+        )
+    )
+    existing: Thread | None = result.scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    thread = Thread(
+        user_id=user_id,
+        report_id=report_id,
+        pinned_version_num=None,
+        canonical_report_qa=True,
+        created_at=_now(),
+    )
+    db.add(thread)
+    try:
+        await db.commit()
+        await db.refresh(thread)
+        return thread
+    except IntegrityError:
+        await db.rollback()
+        result = await db.execute(
+            select(Thread).where(
+                Thread.user_id == user_id,
+                Thread.report_id == report_id,
+                Thread.canonical_report_qa.is_(True),
+            )
+        )
+        retry = result.scalar_one_or_none()
+        if retry is None:
+            raise
+        return retry
+
+
+async def list_threads_with_meta(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    limit: int = 50,
+) -> list[
+    tuple[
+        Thread,
+        Optional[str],
+        Optional[str],
+        Optional[datetime],
+        Optional[str],
+        Optional[str],
+    ]
+]:
+    """
+    List threads with report title/query and message previews, ordered by last activity.
+
+    At most one row per report: prefers ``canonical_report_qa`` then latest activity
+    (avoids duplicate sidebar rows from legacy extra threads per report).
+
+    Returns tuples:
+    (thread, report_title, last_message_preview, last_message_at, report_query,
+    first_user_message_preview).
+    """
+    last_at_sub = (
+        select(
+            Message.thread_id.label("tid"),
+            func.max(Message.created_at).label("last_at"),
+        )
+        .group_by(Message.thread_id)
+        .subquery()
+    )
+
+    sort_key_expr = func.coalesce(last_at_sub.c.last_at, Thread.created_at)
+    ranked_sq = (
+        select(
+            Thread.id.label("picked_thread_id"),
+            sort_key_expr.label("sort_key"),
+            func.row_number()
+            .over(
+                partition_by=func.coalesce(Thread.report_id, Thread.id),
+                order_by=(
+                    Thread.canonical_report_qa.desc(),
+                    sort_key_expr.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .select_from(Thread)
+        .outerjoin(last_at_sub, Thread.id == last_at_sub.c.tid)
+        .where(Thread.user_id == user_id)
+    ).subquery()
+
+    stmt = (
+        select(Thread, Report.title, last_at_sub.c.last_at, Report.query)
+        .join(ranked_sq, Thread.id == ranked_sq.c.picked_thread_id)
+        .outerjoin(Report, Thread.report_id == Report.id)
+        .outerjoin(last_at_sub, Thread.id == last_at_sub.c.tid)
+        .where(ranked_sq.c.rn == 1)
+        .order_by(ranked_sq.c.sort_key.desc())
+        .limit(limit)
+    )
+    rows = list((await db.execute(stmt)).all())
+    thread_ids = [row[0].id for row in rows]
+    preview_by_tid: dict[uuid.UUID, str] = {}
+    first_user_by_tid: dict[uuid.UUID, str] = {}
+    if thread_ids:
+        rn = func.row_number().over(
+            partition_by=Message.thread_id,
+            order_by=Message.created_at.desc(),
+        ).label("rn")
+        ranked = (
+            select(Message.thread_id, Message.content, rn)
+            .where(Message.thread_id.in_(thread_ids))
+            .subquery()
+        )
+        prev_stmt = select(ranked.c.thread_id, ranked.c.content).where(ranked.c.rn == 1)
+        for tid, content in (await db.execute(prev_stmt)).all():
+            text = (content or "").strip().replace("\n", " ")
+            preview_by_tid[tid] = text[:120] + ("…" if len(text) > 120 else "")
+
+        rn_first = func.row_number().over(
+            partition_by=Message.thread_id,
+            order_by=Message.created_at.asc(),
+        ).label("rn_asc")
+        ranked_first = (
+            select(Message.thread_id, Message.content, rn_first)
+            .where(
+                Message.thread_id.in_(thread_ids),
+                Message.role == "user",
+            )
+            .subquery()
+        )
+        first_stmt = select(ranked_first.c.thread_id, ranked_first.c.content).where(
+            ranked_first.c.rn_asc == 1
+        )
+        for tid, content in (await db.execute(first_stmt)).all():
+            text = (content or "").strip().replace("\n", " ")
+            first_user_by_tid[tid] = text[:120] + ("…" if len(text) > 120 else "")
+
+    out: list[
+        tuple[
+            Thread,
+            Optional[str],
+            Optional[str],
+            Optional[datetime],
+            Optional[str],
+            Optional[str],
+        ]
+    ] = []
+    for thread, title, last_at, report_query in rows:
+        preview = preview_by_tid.get(thread.id)
+        first_user = first_user_by_tid.get(thread.id)
+        out.append((thread, title, preview, last_at, report_query, first_user))
+    return out
+
+
+async def update_thread_pin(
+    db: AsyncSession,
+    thread_id: uuid.UUID,
+    user_id: uuid.UUID,
+    pinned_version_num: Optional[int],
+) -> Thread:
+    """Set pinned report version for a thread (None = follow latest)."""
+    thread = await get_thread(db, thread_id, user_id)
+    thread.pinned_version_num = pinned_version_num
+    await db.commit()
+    await db.refresh(thread)
+    return thread
 
 
 async def save_message(

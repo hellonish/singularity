@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth.router import router as auth_router
+from api.llm.router import router as llm_router
 from api.config import settings
 from api.deps import get_db, get_redis, set_redis_pool
 from api.middleware.auth import AuthMiddleware
@@ -93,15 +94,20 @@ app.add_middleware(AuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
-# CORS — must wrap everything
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Request-ID"],
-)
+# CORS — must wrap everything.
+# In development, allow any localhost / 127.0.0.1 port so PUT (e.g. BYOK keys) works when the
+# Next app runs on a non-3000 port or the user opens 127.0.0.1 vs localhost.
+_cors_kw: dict = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+    "expose_headers": ["X-Request-ID"],
+}
+if settings.environment == "development":
+    _cors_kw["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+else:
+    _cors_kw["allow_origins"] = settings.cors_origins
+app.add_middleware(CORSMiddleware, **_cors_kw)
 
 # Sentry request monitoring is registered via sentry_sdk.init() during lifespan
 # and attaches automatically as ASGI middleware.
@@ -115,6 +121,7 @@ app.include_router(research_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(threads_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
+app.include_router(llm_router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------

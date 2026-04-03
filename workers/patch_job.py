@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.llm_credentials_service import get_decrypted_provider_key
 from db.models import Report, ReportVersion
 from db.session import AsyncSessionLocal
 from workers.research_job import _publish_event, create_report_version
@@ -72,6 +73,12 @@ async def run_patch_job(
         from api.reports.service import load_content
         content = await load_content(version)
 
+        grok_key = await get_decrypted_provider_key(db, uuid.UUID(user_id), "grok")
+        if not grok_key:
+            raise ValueError(
+                "Add your xAI (Grok) API key in Profile → LLM keys to apply patches."
+            )
+
         # Apply the patch
         try:
             from patch.service import apply_patch
@@ -79,6 +86,7 @@ async def run_patch_job(
                 full_content=content,
                 selected_text=selected_text,
                 instruction=instruction,
+                api_key=grok_key,
             )
         except Exception as exc:
             logger.error("Patch failed for report %s v%d: %s", report_id, version_num, exc)

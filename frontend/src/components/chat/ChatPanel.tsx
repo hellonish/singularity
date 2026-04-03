@@ -1,16 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { X, Send, Loader2 } from "lucide-react";
-import { getSession } from "next-auth/react";
-import { threadsApi, type MessageResponse } from "@/lib/api";
+import { getSession, useSession } from "next-auth/react";
+import {
+  threadsApi,
+  llmApi,
+  DEFAULT_CHAT_MODEL_ID,
+  type MessageResponse,
+} from "@/lib/api";
+import { showDebugMockResearchControls } from "@/lib/debug_research_mock";
 import { cn } from "@/lib/cn";
+import { llmModelGroupsFromCatalog } from "@/lib/llm_model_groups";
+import {
+  truncateDisplayLabel,
+  researchIntensityLabel,
+  RESEARCH_INTENSITY_OPTIONS,
+  clampResearchIntensityTier,
+} from "@/lib/utils";
+import { ChatModelPicker } from "./ChatModelPicker";
 import { MessageBubble } from "./MessageBubble";
 import { StreamingMessage } from "./StreamingMessage";
 
 /** Dedupes bootstrap sends across React Strict Mode double effect runs. */
 const launchedBootstrapKeys = new Set<string>();
+
+/** Matches split-pane surface (`bg-white`) for a soft radial scrim behind floating chrome. */
+const SPLIT_PANE_SCRIM_RGB = "255,255,255";
 
 type ExecutionMode = "chat" | "research";
 
@@ -20,6 +38,8 @@ export type ChatPanelLaunchPayload = {
   execution_mode: ExecutionMode;
   chat_variant: "standard" | "extended";
   research_strength: number;
+  /** When set (e.g. from dashboard bar), used for the bootstrap send model_id. */
+  model_id?: string;
 };
 
 type SendOverrides = {
@@ -27,6 +47,8 @@ type SendOverrides = {
   execution_mode: ExecutionMode;
   chat_variant: "standard" | "extended";
   research_strength: number;
+  model_id?: string;
+  debug_mock?: boolean;
   onComplete?: () => void;
 };
 
@@ -35,11 +57,15 @@ interface ChatPanelProps {
   reportContent?: string;
   /** When true, show report-scoped labels even if report markdown is not loaded (e.g. dashboard research dock). */
   reportScope?: boolean;
+  /** Report title (or primary heading) for pane labels when this thread is tied to a report. */
+  reportHeading?: string | null;
   onClose: () => void;
-  /** overlay = report page right rail; dock = legacy narrow column; main = dashboard primary column */
-  placement?: "overlay" | "dock" | "main";
+  /** overlay = report page slide-over; dock = dashboard right rail; main = dashboard primary; split = report page two-column */
+  placement?: "overlay" | "dock" | "main" | "split";
   launchWith?: ChatPanelLaunchPayload | null;
   onLaunchConsumed?: () => void;
+  /** Seeds the response model when the panel mounts (e.g. dashboard bar selection). */
+  initialModelId?: string | null;
 }
 
 /**
@@ -50,10 +76,12 @@ export function ChatPanel({
   threadId,
   reportContent,
   reportScope = false,
+  reportHeading = null,
   onClose,
   placement = "overlay",
   launchWith,
   onLaunchConsumed,
+  initialModelId = null,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<MessageResponse[]>([]);
   const [input, setInput] = useState("");
@@ -62,41 +90,142 @@ export function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("chat");
   const [extendedOn, setExtendedOn] = useState(false);
-  const [researchStrength, setResearchStrength] = useState(5);
+  const [researchStrength, setResearchStrength] = useState<1 | 2 | 3>(2);
+  const [debugMockResearch, setDebugMockResearch] = useState(false);
+  const [selectedModelId, setSelectedModelId] = useState(
+    () => initialModelId?.trim() || DEFAULT_CHAT_MODEL_ID,
+  );
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const chatVariant = extendedOn ? "extended" : "standard";
   const standalone = !reportContent && !reportScope;
+  /** Report Q&A follow-ups: chat agent only (no research runs from this thread). */
+  const followUpChatOnly = !standalone;
+
+  const firstUserPaneLabel = useMemo(() => {
+    const m = messages.find((x) => x.role === "user");
+    return m ? truncateDisplayLabel(m.content, 40) : "";
+  }, [messages]);
+
+  const reportPaneLabel = useMemo(() => {
+    if (standalone) return "";
+    const h = reportHeading?.trim();
+    return h ? truncateDisplayLabel(h, 40) : "";
+  }, [standalone, reportHeading]);
+
+  const headerTitle = standalone
+    ? firstUserPaneLabel || "Chat"
+    : reportPaneLabel || firstUserPaneLabel || "Report";
+
+  const chatToggleLabel = firstUserPaneLabel || "Chat";
+  const researchToggleLabel = standalone
+    ? "Research"
+    : reportPaneLabel || "Research";
+
+  const { data: session, status: sessionStatus } = useSession();
+  const accessReady =
+    sessionStatus === "authenticated" && Boolean(session?.accessToken);
+
+  const { data: llmCatalog, isLoading: llmCatalogLoading } = useQuery({
+    queryKey: ["llm-catalog"],
+    queryFn: () => llmApi.models(),
+    enabled: accessReady,
+    staleTime: 120_000,
+  });
+
+  const showModelPicker =
+    accessReady &&
+    !llmCatalogLoading &&
+    (llmCatalog?.models?.length ?? 0) > 0;
+
+  const hasSelectableModel = useMemo(() => {
+    if (!showModelPicker) return false;
+    const list = llmCatalog?.models ?? [];
+    return list.some((m) => m.model_id === selectedModelId);
+  }, [showModelPicker, llmCatalog?.models, selectedModelId]);
+
+  const modelSelectGroups = useMemo(
+    () => llmModelGroupsFromCatalog(llmCatalog?.models),
+    [llmCatalog?.models],
+  );
 
   useEffect(() => {
+    const list = llmCatalog?.models ?? [];
+    const ids = new Set(list.map((m) => m.model_id));
+    if (ids.size === 0) return;
+    if (!ids.has(selectedModelId)) {
+      setSelectedModelId(list[0]!.model_id);
+    }
+  }, [llmCatalog, selectedModelId]);
+
+  useEffect(() => {
+    const pref = initialModelId?.trim();
+    if (!pref) return;
+    const list = llmCatalog?.models ?? [];
+    if (list.some((m) => m.model_id === pref)) {
+      setSelectedModelId(pref);
+    }
+  }, [initialModelId, llmCatalog?.models]);
+
+  useEffect(() => {
+    if (!threadId || !accessReady) return;
+    let cancelled = false;
     threadsApi
       .get(threadId)
       .then((data) => {
+        if (cancelled) return;
         setMessages(data.messages);
       })
       .catch((e) => {
-        console.error("Failed to load thread messages", e);
+        if (!cancelled) console.error("Failed to load thread messages", e);
       });
-  }, [threadId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId, accessReady]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingTokens]);
 
+  useEffect(() => {
+    if (followUpChatOnly) setExecutionMode("chat");
+  }, [followUpChatOnly, threadId]);
+
   const runSend = useCallback(
     async (overrides?: SendOverrides) => {
       const content = (overrides?.content ?? input).trim();
+      const catalogIds = new Set((llmCatalog?.models ?? []).map((m) => m.model_id));
       if (!content || streaming) return;
-      const execMode = overrides?.execution_mode ?? executionMode;
+      if (
+        !accessReady ||
+        llmCatalogLoading ||
+        catalogIds.size === 0 ||
+        !catalogIds.has(selectedModelId)
+      ) {
+        return;
+      }
+      const execMode = followUpChatOnly
+        ? "chat"
+        : overrides?.execution_mode ?? executionMode;
       const variant = overrides?.chat_variant ?? chatVariant;
-      const strength = overrides?.research_strength ?? researchStrength;
+      const strength = clampResearchIntensityTier(
+        overrides?.research_strength ?? researchStrength,
+      );
+      const modelId = overrides?.model_id ?? selectedModelId;
+      const useDebugMock =
+        execMode === "research" &&
+        !followUpChatOnly &&
+        (overrides?.debug_mock ?? debugMockResearch);
       if (!overrides) setInput("");
       setStreaming(true);
       setStreamingTokens("");
       setError(null);
       setStatusLine(
-        execMode === "research" ? `Running research (intensity ${strength}/10)…` : null,
+        execMode === "research"
+          ? `Running research (${researchIntensityLabel(strength)} intensity)…`
+          : null,
       );
 
       const userMsg: MessageResponse = {
@@ -125,11 +254,21 @@ export function ChatPanel({
             execution_mode: execMode,
             chat_variant: variant,
             research_strength: strength,
+            model_id: modelId,
+            ...(useDebugMock ? { debug_mock: true } : {}),
           }),
         });
 
         if (!res.ok || !res.body) {
-          throw new Error(`Request failed: ${res.status}`);
+          const errText = await res.text();
+          let msg = `Request failed: ${res.status}`;
+          try {
+            const j = JSON.parse(errText) as { detail?: unknown };
+            if (typeof j.detail === "string") msg = j.detail;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg);
         }
 
         const reader = res.body.getReader();
@@ -163,10 +302,23 @@ export function ChatPanel({
                 } else if (currentEvent === "plan") {
                   const p = parsed as { mode?: string; strength?: number };
                   if (p.mode === "research" && typeof p.strength === "number") {
-                    setStatusLine(`Research · intensity ${p.strength}/10`);
+                    setStatusLine(
+                      `Research · ${researchIntensityLabel(p.strength)} intensity`,
+                    );
                   } else if (p.mode === "chat") {
                     setStatusLine("Chat mode");
                   }
+                } else if (currentEvent === "step") {
+                  const s = parsed as {
+                    step_id?: number;
+                    step_type?: string;
+                    description?: string;
+                  };
+                  const label =
+                    s.description != null && String(s.description).trim()
+                      ? `Step ${s.step_id ?? "?"}: ${s.description}`
+                      : `Step ${s.step_id ?? "?"} (${s.step_type ?? "?"})`;
+                  setStatusLine(label);
                 } else if (currentEvent === "done") {
                   const d = parsed as { message_id?: string; token_count?: number | null };
                   const doneMsg: MessageResponse = {
@@ -205,25 +357,59 @@ export function ChatPanel({
       executionMode,
       chatVariant,
       researchStrength,
+      debugMockResearch,
+      followUpChatOnly,
+      selectedModelId,
+      llmCatalog?.models,
+      accessReady,
+      llmCatalogLoading,
     ],
   );
 
   useEffect(() => {
-    if (!launchWith) return;
-    const key = `${threadId}:${launchWith.nonce}`;
-    if (launchedBootstrapKeys.has(key)) return;
-    launchedBootstrapKeys.add(key);
-    setExecutionMode(launchWith.execution_mode);
+    if (!launchWith || !accessReady) return;
+    if (llmCatalogLoading) return;
+    const list = llmCatalog?.models ?? [];
+    const bootKey = `${threadId}:${launchWith.nonce}`;
+    if (list.length === 0) {
+      if (!launchedBootstrapKeys.has(bootKey)) {
+        launchedBootstrapKeys.add(bootKey);
+        onLaunchConsumed?.();
+      }
+      return;
+    }
+    if (launchedBootstrapKeys.has(bootKey)) return;
+    launchedBootstrapKeys.add(bootKey);
+    const bootMode = followUpChatOnly ? "chat" : launchWith.execution_mode;
+    setExecutionMode(bootMode);
     setExtendedOn(launchWith.chat_variant === "extended");
-    setResearchStrength(launchWith.research_strength);
+    setResearchStrength(clampResearchIntensityTier(launchWith.research_strength));
+    const fromLaunch = launchWith.model_id?.trim();
+    const mid =
+      fromLaunch && list.some((m) => m.model_id === fromLaunch)
+        ? fromLaunch
+        : list.some((m) => m.model_id === selectedModelId)
+          ? selectedModelId
+          : list[0]!.model_id;
     void runSend({
       content: launchWith.message,
-      execution_mode: launchWith.execution_mode,
+      execution_mode: bootMode,
       chat_variant: launchWith.chat_variant,
       research_strength: launchWith.research_strength,
+      model_id: mid,
       onComplete: () => onLaunchConsumed?.(),
     });
-  }, [launchWith, threadId, runSend, onLaunchConsumed]);
+  }, [
+    launchWith,
+    threadId,
+    runSend,
+    onLaunchConsumed,
+    accessReady,
+    followUpChatOnly,
+    selectedModelId,
+    llmCatalogLoading,
+    llmCatalog?.models,
+  ]);
 
   const sendMessage = useCallback(() => {
     void runSend();
@@ -233,8 +419,10 @@ export function ChatPanel({
     placement === "overlay"
       ? "fixed right-0 top-14 z-[60] flex min-h-0 w-[min(100vw,380px)] flex-col overflow-hidden border-l border-neutral-200/80 bg-white"
       : placement === "main"
-        ? "flex min-h-0 h-full max-h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-[#f8fafc]"
-        : "flex h-full min-h-0 w-[min(100vw,380px)] shrink-0 flex-col overflow-hidden border-l border-neutral-200/80 bg-white";
+        ? "flex min-h-0 h-full max-h-full w-full min-w-0 flex-1 flex-col overflow-hidden bg-[var(--rpt-bg)]"
+        : placement === "split"
+          ? "relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-white"
+          : "flex h-full min-h-0 w-[min(100vw,380px)] shrink-0 flex-col overflow-hidden border-l border-neutral-200/80 bg-white";
 
   const shellStyle =
     placement === "overlay"
@@ -253,27 +441,36 @@ export function ChatPanel({
       className={shellClass}
       style={shellStyle}
     >
-      <div className="flex flex-shrink-0 items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-2.5 backdrop-blur-sm">
-        <div>
-          <p className="text-sm font-medium text-neutral-800">
-            {standalone ? "Chat" : "Report chat"}
-          </p>
-          {!standalone ? (
+      {placement === "split" ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-[6.75rem] justify-start">
+          <div
+            className="absolute left-0 top-0 h-full w-[min(100%,17rem)]"
+            aria-hidden
+            style={{
+              background: `radial-gradient(ellipse 100% 115% at 0% 0%, rgb(${SPLIT_PANE_SCRIM_RGB}) 0%, rgb(${SPLIT_PANE_SCRIM_RGB}) 32%, rgba(${SPLIT_PANE_SCRIM_RGB},0.97) 48%, rgba(${SPLIT_PANE_SCRIM_RGB},0.82) 62%, rgba(${SPLIT_PANE_SCRIM_RGB},0.38) 80%, rgba(${SPLIT_PANE_SCRIM_RGB},0.08) 92%, rgba(${SPLIT_PANE_SCRIM_RGB},0) 100%)`,
+            }}
+          />
+          <div className="pointer-events-auto relative z-10 px-4 pt-3">
+            <p className="text-sm font-medium text-neutral-800">Report chat</p>
             <p className="text-xs text-neutral-500">Includes this report</p>
-          ) : null}
-          {statusLine ? (
-            <p className="mt-0.5 text-xs text-neutral-500">{statusLine}</p>
-          ) : null}
+            {statusLine ? (
+              <p className="mt-1 text-xs text-neutral-500">{statusLine}</p>
+            ) : null}
+          </div>
         </div>
-        {placement === "main" ? (
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-          >
-            ← Projects
-          </button>
-        ) : (
+      ) : placement === "overlay" || placement === "dock" ? (
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-2.5 backdrop-blur-sm">
+          <div>
+            <p className="text-sm font-medium text-neutral-800">
+              {standalone ? "Chat" : "Report chat"}
+            </p>
+            {!standalone ? (
+              <p className="text-xs text-neutral-500">Includes this report</p>
+            ) : null}
+            {statusLine ? (
+              <p className="mt-0.5 text-xs text-neutral-500">{statusLine}</p>
+            ) : null}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -282,17 +479,34 @@ export function ChatPanel({
           >
             <X size={16} strokeWidth={1.5} />
           </button>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <div
         className={cn(
-          "min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain py-4",
-          placement === "main" ? "w-full px-4 md:px-8" : "px-4",
+          "min-h-0 min-w-0 flex-1 space-y-4 overflow-x-auto overflow-y-auto overscroll-contain",
+          placement === "main"
+            ? "w-full px-4 pb-4 pt-28 md:px-8"
+            : placement === "split"
+              ? "w-full px-4 pb-4 pt-[5.75rem] md:px-8"
+              : "px-4 py-4",
         )}
         style={{ scrollbarWidth: "thin" }}
       >
-        {messages.length === 0 && !streaming ? (
+        {placement === "main" && statusLine ? (
+          <div
+            className="sticky top-0 z-[1] -mt-2 mb-1 border-b border-[#e5e2db] bg-[var(--rpt-bg)]/95 py-2 text-xs text-[var(--rpt-text-dim)] backdrop-blur-sm"
+            role="status"
+          >
+            {statusLine}
+          </div>
+        ) : null}
+        {!accessReady && threadId ? (
+          <div className="flex h-28 flex-col items-center justify-center gap-2 px-4">
+            <Loader2 size={18} className="animate-spin text-neutral-400" />
+            <p className="text-center text-sm text-neutral-500">Loading conversation…</p>
+          </div>
+        ) : messages.length === 0 && !streaming ? (
           <div className="flex h-28 items-center justify-center px-4">
             <p className="text-center text-sm leading-relaxed text-neutral-400">
               {standalone
@@ -331,37 +545,59 @@ export function ChatPanel({
       <div
         className={cn(
           "flex-shrink-0 border-t border-neutral-200/80 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2",
-          placement === "main" ? "w-full px-4 md:px-8" : "px-3",
+          placement === "main" || placement === "split"
+            ? "w-full px-4 md:px-8"
+            : "px-3",
         )}
       >
         <div className="rounded-2xl border border-neutral-200/90 bg-neutral-50/50 p-2.5">
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <div className="inline-flex shrink-0 gap-0.5 rounded-lg bg-neutral-100/80 p-0.5">
-              <button
-                type="button"
-                disabled={streaming}
-                onClick={() => setExecutionMode("chat")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors disabled:opacity-40",
-                  executionMode === "chat" && "bg-white text-neutral-900 shadow-sm",
-                )}
-              >
-                Chat
-              </button>
-              <button
-                type="button"
-                disabled={streaming}
-                onClick={() => setExecutionMode("research")}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors disabled:opacity-40",
-                  executionMode === "research" && "bg-white text-neutral-900 shadow-sm",
-                )}
-              >
-                Research
-              </button>
-            </div>
+            {!followUpChatOnly ? (
+              <div className="inline-flex shrink-0 gap-0.5 rounded-lg bg-neutral-100/80 p-0.5">
+                <button
+                  type="button"
+                  disabled={streaming}
+                  onClick={() => setExecutionMode("chat")}
+                  title={firstUserPaneLabel || "Chat"}
+                  className={cn(
+                    "max-w-[min(12rem,42vw)] truncate rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors disabled:opacity-40",
+                    executionMode === "chat" && "bg-white text-neutral-900 shadow-sm",
+                  )}
+                >
+                  {chatToggleLabel}
+                </button>
+                <button
+                  type="button"
+                  disabled={streaming}
+                  onClick={() => setExecutionMode("research")}
+                  title={
+                    standalone
+                      ? "Research"
+                      : reportHeading?.trim() || "Research"
+                  }
+                  className={cn(
+                    "max-w-[min(12rem,42vw)] truncate rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors disabled:opacity-40",
+                    executionMode === "research" && "bg-white text-neutral-900 shadow-sm",
+                  )}
+                >
+                  {researchToggleLabel}
+                </button>
+              </div>
+            ) : null}
 
-            {executionMode === "chat" ? (
+            {showModelPicker ? (
+              <div className="flex min-w-0 max-w-full flex-[1_1_14rem] items-start gap-2 sm:items-center">
+                <span className="shrink-0 pt-1.5 text-xs text-neutral-500 sm:pt-0">Model</span>
+                <ChatModelPicker
+                  groups={modelSelectGroups}
+                  value={selectedModelId}
+                  disabled={streaming}
+                  onChange={setSelectedModelId}
+                />
+              </div>
+            ) : null}
+
+            {followUpChatOnly || executionMode === "chat" ? (
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-xs text-neutral-500">Extended</span>
                 <button
@@ -386,20 +622,38 @@ export function ChatPanel({
                 </button>
               </div>
             ) : (
-              <div className="flex min-w-0 flex-1 basis-[min(100%,11rem)] items-center gap-2">
+              <div className="flex min-w-0 flex-1 basis-[min(100%,11rem)] flex-wrap items-center gap-2">
                 <span className="shrink-0 text-xs text-neutral-500">Intensity</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  value={researchStrength}
-                  disabled={streaming}
-                  onChange={(e) => setResearchStrength(Number(e.target.value))}
-                  className="min-w-0 flex-1 accent-neutral-700"
-                />
-                <span className="w-4 shrink-0 text-right text-xs tabular-nums text-neutral-600">
-                  {researchStrength}
-                </span>
+                <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-neutral-100/90 p-0.5">
+                  {RESEARCH_INTENSITY_OPTIONS.map(({ tier, label }) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      disabled={streaming}
+                      onClick={() => setResearchStrength(tier)}
+                      className={cn(
+                        "rounded-md px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40",
+                        researchStrength === tier
+                          ? "bg-neutral-800 text-white shadow-sm"
+                          : "text-neutral-600 hover:bg-white/80",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {showDebugMockResearchControls(session?.user?.email) ? (
+                  <label className="ml-1 flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-amber-900/90">
+                    <input
+                      type="checkbox"
+                      checked={debugMockResearch}
+                      disabled={streaming}
+                      onChange={(e) => setDebugMockResearch(e.target.checked)}
+                      className="rounded border-amber-500 text-amber-700 disabled:opacity-40"
+                    />
+                    Mock (no LLM)
+                  </label>
+                ) : null}
               </div>
             )}
           </div>
@@ -430,7 +684,7 @@ export function ChatPanel({
             <button
               type="button"
               onClick={sendMessage}
-              disabled={!input.trim() || streaming}
+              disabled={!input.trim() || streaming || !hasSelectableModel}
               className={cn(
                 "mb-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white transition-opacity",
                 input.trim() && !streaming

@@ -78,7 +78,7 @@ async def compute_stats(db: AsyncSession, user_id: uuid.UUID) -> dict:
     avg_strength_result = await db.execute(
         select(func.avg(Report.strength)).where(Report.user_id == user_id)
     )
-    avg_strength: float = float(avg_strength_result.scalar() or 5.0)
+    avg_strength: float = float(avg_strength_result.scalar() or 2.0)
 
     # Favorite model (most tokens used)
     fav_model_result = await db.execute(

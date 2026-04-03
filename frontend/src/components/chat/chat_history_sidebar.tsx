@@ -1,26 +1,34 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, MessageSquare, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  MessageSquare,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { cn } from "@/lib/cn";
-import type { ThreadResponse } from "@/lib/api";
+import type { ThreadSummaryResponse } from "@/lib/api";
+import { truncateDisplayLabel } from "@/lib/utils";
 
 export interface ChatHistorySidebarProps {
   /** When true, only the narrow rail with expand control is shown. */
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** Standalone dashboard threads (no linked report). */
-  threads: ThreadResponse[];
+  /** All threads (standalone and report Q&A), last activity first. */
+  threads: ThreadSummaryResponse[];
   selectedThreadId: string | null;
-  onSelectThread: (threadId: string) => void;
+  onSelectThread: (thread: ThreadSummaryResponse) => void;
   /** Clear selection and return main area to the reports list. */
   onNewChat: () => void;
   /** Opens delete confirmation (same pattern as report cards). */
-  onRequestDelete: (thread: ThreadResponse) => void;
+  onRequestDelete: (thread: ThreadSummaryResponse) => void;
   isLoading: boolean;
 }
 
 /**
- * Purpose: Collapsible left rail listing standalone chat threads (dashboard).
+ * Purpose: Collapsible left rail listing chat threads (standalone + report Q&A).
  * Inputs: thread list, selection, collapse state, callbacks.
  * Outputs: Renders sidebar UI; selection drives main-area ChatPanel via parent.
  */
@@ -37,12 +45,12 @@ export function ChatHistorySidebar({
   return (
     <aside
       className={cn(
-        "flex min-h-0 shrink-0 flex-col self-stretch border-r border-neutral-200/80 bg-white transition-[width] duration-200 ease-out",
+        "flex min-h-0 shrink-0 flex-col self-stretch border-r border-[#e5e2db] bg-white transition-[width] duration-200 ease-out",
         collapsed ? "w-[52px]" : "w-[min(100vw,260px)]",
       )}
       aria-label="Chat history"
     >
-      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-neutral-200/80 px-2">
+      <div className="flex h-12 shrink-0 items-center gap-1 border-b border-[#e5e2db] px-2">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -64,14 +72,14 @@ export function ChatHistorySidebar({
       </div>
 
       {!collapsed ? (
-        <div className="border-b border-neutral-200/80 p-2">
+        <div className="border-b border-[#e5e2db] p-2">
           <button
             type="button"
             onClick={onNewChat}
-            className="flex w-full items-center gap-2 rounded-lg border border-neutral-200/90 bg-neutral-50 px-3 py-2 text-left text-sm font-medium text-neutral-800 transition-colors hover:bg-neutral-100"
+            className="flex w-full items-center gap-2 rounded-lg border border-dashed border-neutral-300 bg-white px-3 py-2 text-left text-sm font-medium text-neutral-600 transition-colors hover:border-neutral-400 hover:bg-neutral-50 hover:text-neutral-900"
           >
-            <Plus className="h-4 w-4 shrink-0 text-neutral-600" strokeWidth={2} />
-            New chat
+            <Plus className="h-4 w-4 shrink-0 text-neutral-500" strokeWidth={2} />
+            Start a new chat
           </button>
         </div>
       ) : (
@@ -80,8 +88,8 @@ export function ChatHistorySidebar({
             type="button"
             onClick={onNewChat}
             className="flex h-9 w-9 items-center justify-center rounded-lg text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-            title="New chat"
-            aria-label="New chat"
+            title="Start a new chat"
+            aria-label="Start a new chat"
           >
             <Plus className="h-5 w-5" strokeWidth={2} />
           </button>
@@ -112,13 +120,18 @@ export function ChatHistorySidebar({
           <ul className="space-y-0.5">
             {threads.map((t) => {
               const active = t.id === selectedThreadId;
-              const label = formatThreadLabel(t.created_at);
+              const label = formatThreadLabel(t);
+              const isReportThread = Boolean(t.report_id);
+              const RowIcon = isReportThread ? FileText : MessageSquare;
               return (
                 <li key={t.id} className="group flex items-stretch gap-0.5">
                   <button
                     type="button"
-                    onClick={() => onSelectThread(t.id)}
+                    onClick={() => onSelectThread(t)}
                     title={label}
+                    aria-label={
+                      isReportThread ? `Open report thread: ${label}` : `Open chat: ${label}`
+                    }
                     className={cn(
                       "flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors",
                       active
@@ -127,7 +140,7 @@ export function ChatHistorySidebar({
                       collapsed && "justify-center px-0",
                     )}
                   >
-                    <MessageSquare
+                    <RowIcon
                       className={cn(
                         "h-4 w-4 shrink-0",
                         active ? "text-neutral-800" : "text-neutral-400",
@@ -135,7 +148,9 @@ export function ChatHistorySidebar({
                       strokeWidth={1.75}
                     />
                     {!collapsed ? (
-                      <span className="min-w-0 flex-1 truncate">{label}</span>
+                      <span className="min-w-0 flex-1 truncate" title={label}>
+                        {label}
+                      </span>
                     ) : null}
                   </button>
                   {!collapsed ? (
@@ -162,8 +177,35 @@ export function ChatHistorySidebar({
   );
 }
 
-function formatThreadLabel(createdAt: string): string {
-  const d = new Date(createdAt);
+function formatThreadLabel(t: ThreadSummaryResponse): string {
+  const firstUserRaw = t.first_user_message_preview?.trim() ?? "";
+  const firstUserLine =
+    firstUserRaw.length > 0 ? truncateDisplayLabel(firstUserRaw, 44) : "";
+
+  const hasMessageActivity = Boolean(
+    t.last_message_at ||
+      (t.last_message_preview && t.last_message_preview.trim()) ||
+      firstUserRaw,
+  );
+
+  if (t.report_id) {
+    const q = t.report_query?.trim() ?? "";
+    const title = t.report_title?.trim() ?? "";
+    const head =
+      q.length > 0
+        ? truncateDisplayLabel(q, 52)
+        : title.length > 0
+          ? truncateDisplayLabel(title, 52)
+          : "Report";
+
+    return head;
+  }
+
+  if (firstUserLine) return firstUserLine;
+  const lastPrev = t.last_message_preview?.trim();
+  if (lastPrev) return truncateDisplayLabel(lastPrev, 44);
+
+  const d = new Date(t.last_message_at || t.created_at);
   const now = new Date();
   const sameDay =
     d.getFullYear() === now.getFullYear() &&
@@ -173,9 +215,12 @@ function formatThreadLabel(createdAt: string): string {
     hour: "numeric",
     minute: "2-digit",
   });
-  if (sameDay) return `Chat · ${time}`;
-  return `Chat · ${d.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })}`;
+  const datePart = sameDay
+    ? time
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+  if (!hasMessageActivity) {
+    return `Empty chat · ${datePart}`;
+  }
+  return `Chat · ${datePart}`;
 }

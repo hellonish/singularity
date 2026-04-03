@@ -1,5 +1,4 @@
 import json
-import os
 from typing import Generator
 
 from deepseek import DeepSeekAPI
@@ -15,9 +14,13 @@ class DeepSeekClient(BaseLLMClient):
 
         Args:
             model_name: Model ID (e.g. deepseek-chat, deepseek-reasoner).
-            api_key: Optional API key; falls back to DEEPSEEK_API_KEY env var.
+            api_key: User API key (required; no environment fallback).
         """
-        key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+        key = (api_key or "").strip()
+        if not key:
+            raise ValueError(
+                "DeepSeek API key is required (BYOK). Add it in Profile or pass api_key explicitly."
+            )
         self.client = DeepSeekAPI(api_key=key)
         self.model_name = model_name
 

@@ -1,12 +1,23 @@
 """Users / Stats API router — profile, usage, analytics."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user, get_db
+from api.llm_credentials_service import (
+    credential_row_to_public,
+    delete_credential,
+    list_credentials_public,
+    normalize_provider,
+    upsert_credential,
+)
 from api.users.schemas import (
     DeviceBreakdownResponse,
+    LlmCredentialDeleteResponse,
+    LlmCredentialListResponse,
+    LlmCredentialPublic,
+    LlmCredentialPutBody,
     ModelBreakdownResponse,
     UsageSeriesResponse,
     UsageStats,
@@ -84,3 +95,53 @@ async def get_devices(
     """Device, OS, and browser breakdown from usage events."""
     data = await get_device_breakdown(db, current_user.id)
     return DeviceBreakdownResponse(**data)
+
+
+@router.get("/me/llm-credentials", response_model=LlmCredentialListResponse)
+async def list_llm_credentials(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LlmCredentialListResponse:
+    rows = await list_credentials_public(db, current_user.id)
+    return LlmCredentialListResponse(
+        credentials=[LlmCredentialPublic(**r) for r in rows]
+    )
+
+
+@router.put("/me/llm-credentials/{provider}", response_model=LlmCredentialPublic)
+async def put_llm_credential(
+    provider: str,
+    body: LlmCredentialPutBody,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LlmCredentialPublic:
+    prov = normalize_provider(provider)
+    row = await upsert_credential(
+        db, current_user.id, prov, body.secret, body.label
+    )
+    return LlmCredentialPublic(**credential_row_to_public(row))
+
+
+@router.delete(
+    "/me/llm-credentials/{provider}",
+    response_model=LlmCredentialDeleteResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def remove_llm_credential(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LlmCredentialDeleteResponse:
+    """
+    Remove the current user's encrypted API key for ``provider`` (grok | gemini | deepseek).
+
+    Returns 404 if no credential exists for that provider.
+    """
+    prov = normalize_provider(provider)
+    ok = await delete_credential(db, current_user.id, prov)
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No API key saved for this provider.",
+        )
+    return LlmCredentialDeleteResponse()

@@ -33,13 +33,23 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     environment: str = "development"
 
-    # CORS / Frontend
+    # CORS / Frontend (browser PUT/DELETE preflight must match the page origin)
     frontend_url: str = "http://localhost:3000"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+
+    # BYOK: Fernet key (url-safe base64, 32 bytes); empty in dev falls back to JWT-derived key
+    llm_credentials_encryption_key: str = ""
 
     # Quotas
     default_daily_token_budget: int = 1_000_000
     max_concurrent_jobs_per_user: int = 2
+
+    # Integration testing: mock research (no LLM). Requires allowlisted email + client flag.
+    debug_mock_research: bool = False
+    debug_mock_research_allow_email: str = "nish2002.sharma@gmail.com"
 
 
 settings = Settings()

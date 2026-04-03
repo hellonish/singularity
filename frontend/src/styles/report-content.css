@@ -241,6 +241,16 @@
 }
 .cite-link:hover { color: var(--rpt-accent); border-bottom-color: var(--rpt-accent); }
 
+/* Inline citation opens source in a new tab; label matches Reference List tag + title. */
+.cite-link--external {
+  border-bottom-style: solid;
+  border-bottom-color: color-mix(in srgb, var(--rpt-accent2) 55%, transparent);
+  word-break: break-word;
+}
+.cite-link--external:hover {
+  border-bottom-color: var(--rpt-accent);
+}
+
 /* ── TOC sidebar ── */
 .toc-root {
   display: none;

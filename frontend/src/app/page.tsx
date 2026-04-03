@@ -1,22 +1,31 @@
 "use client";
 
-import { signIn, useSession } from "next-auth/react";
+import { signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { motion } from "framer-motion";
+import { AppLogoMark } from "@/components/app-logo";
+import { publicApiBaseUrl } from "@/lib/public_api_base_url";
 
 export default function LandingPage() {
-  const { status } = useSession();
+  const { status, data: session } = useSession();
   const router = useRouter();
 
   useEffect(() => {
-    if (status === "authenticated") {
-      router.push("/dashboard");
-    }
-  }, [status, router]);
+    if (status !== "authenticated") return;
+    if (!session?.accessToken || session?.error) return;
+    router.push("/dashboard");
+  }, [status, session?.accessToken, session?.error, router]);
+
+  const backendBlocked =
+    status === "authenticated" &&
+    (!session?.accessToken || Boolean(session?.error));
 
   return (
-    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#f8fafc] px-6">
+    <div
+      className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6"
+      style={{ background: "var(--rpt-bg)" }}
+    >
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-200/20 blur-[120px]" />
       </div>
@@ -34,9 +43,7 @@ export default function LandingPage() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className="flex items-center gap-3"
         >
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-lg font-semibold text-white">
-            S
-          </div>
+          <AppLogoMark className="h-11 w-11 sm:h-12 sm:w-12" priority />
           <h1 className="text-4xl font-semibold tracking-tight text-[#111827] sm:text-5xl">
             Singularity
           </h1>
@@ -49,10 +56,80 @@ export default function LandingPage() {
           transition={{ delay: 0.3 }}
           className="max-w-lg text-base leading-7 text-[#374151] sm:text-lg"
         >
-          Deep research, at the speed of thought.
-          <br />
-          AI-powered reports with live web access and interactive editing.
+          Intelligence Emerges At This Point
         </motion.p>
+
+        {/* Philosophical quote — editorial pull-quote treatment */}
+        <motion.blockquote
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.38, duration: 0.55 }}
+          className="relative mx-auto w-full max-w-lg px-2 text-center sm:px-4"
+        >
+          <span
+            className="pointer-events-none absolute -left-1 top-0 select-none font-serif text-[4.5rem] leading-none text-indigo-400/25 sm:-left-2 sm:text-[5.5rem]"
+            aria-hidden
+          >
+            “
+          </span>
+          <p
+            className="relative z-[1] font-serif text-[1.35rem] font-light italic leading-snug tracking-tight text-[#141210] sm:text-2xl md:text-[1.65rem] md:leading-[1.35]"
+            style={{ fontFamily: "var(--serif)" }}
+          >
+            I Think. Therefore, I Am.
+          </p>
+          <footer className="relative z-[1] mt-5 border-t border-indigo-200/40 pt-4">
+            <cite
+              className="block font-mono text-[10px] font-medium uppercase not-italic tracking-[0.22em] text-[#64748b] sm:text-[11px]"
+              style={{ fontFamily: "var(--mono)" }}
+            >
+              René Descartes
+            </cite>
+          </footer>
+        </motion.blockquote>
+
+        {backendBlocked && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-lg rounded-xl border border-amber-200/80 bg-amber-50/90 px-4 py-4 text-left text-sm text-amber-950"
+          >
+            <p className="font-medium text-amber-900">Signed in with Google — API link missing</p>
+            <p className="mt-2 leading-relaxed text-amber-900/85">
+              The Next.js server could not exchange your Google session for app tokens. Start the API,
+              set{" "}
+              <code className="rounded bg-amber-100/90 px-1 py-0.5 font-mono text-[11px]">
+                NEXT_PUBLIC_API_URL
+              </code>{" "}
+              to where the browser should call FastAPI, and if the web app runs in Docker set{" "}
+              <code className="rounded bg-amber-100/90 px-1 py-0.5 font-mono text-[11px]">
+                INTERNAL_API_URL
+              </code>{" "}
+              (e.g. <code className="font-mono text-[11px]">http://host.docker.internal:8000</code>)
+              so the Next.js server can reach the API. Ensure API{" "}
+              <code className="rounded bg-amber-100/90 px-1 py-0.5 font-mono text-[11px]">
+                GOOGLE_CLIENT_ID
+              </code>{" "}
+              matches this app.
+            </p>
+            <p className="mt-2 font-mono text-[11px] text-amber-800/80">
+              Browser API base: {publicApiBaseUrl()}
+            </p>
+            <p className="mt-3 text-xs text-amber-900/75">
+              After the API is running with matching Google client config, sign out and use &quot;Sign in with
+              Google&quot; again so the app can exchange your session.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => void signOut({ callbackUrl: "/" })}
+                className="rounded-lg bg-amber-900 px-4 py-2 text-xs font-medium text-white hover:bg-amber-950"
+              >
+                Sign out
+              </button>
+            </div>
+          </motion.div>
+        )}
 
         {/* Sign in button */}
         <motion.button
@@ -61,8 +138,10 @@ export default function LandingPage() {
           transition={{ delay: 0.5 }}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
-          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
-          disabled={status === "loading"}
+          onClick={() => {
+            void signIn("google", { callbackUrl: "/dashboard" });
+          }}
+          disabled={status === "loading" || backendBlocked}
           className="mt-2 flex h-12 items-center gap-3 rounded-full bg-[#111827] px-7 text-base font-medium text-white shadow-sm transition-colors hover:bg-[#1f2937] disabled:opacity-50"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">
@@ -94,10 +173,10 @@ export default function LandingPage() {
           className="mt-4 flex flex-wrap justify-center gap-5 text-sm text-[#4b5563]"
         >
           {[
-            "AI Research Reports",
-            "Live Q&A Chat",
-            "Version History",
-            "Patch Editing",
+            "Research Reports",
+            "Chat",
+            "Explore",
+            "Learn",
           ].map((feature) => (
             <span key={feature} className="flex items-center gap-1.5">
               <span className="h-1 w-1 rounded-full bg-indigo-500" />

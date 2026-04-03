@@ -8,7 +8,9 @@
  */
 import { getSession } from "next-auth/react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import { publicApiBaseUrl } from "./public_api_base_url";
+
+const API_BASE = publicApiBaseUrl();
 
 async function getAuthHeaders(): Promise<HeadersInit> {
   const session = await getSession();
@@ -34,14 +36,20 @@ async function request<T>(
   authRetryAttempt = 0,
 ): Promise<T> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-      ...(options.headers || {}),
-    },
-  });
+  const fullUrl = `${API_BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(fullUrl, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+        ...(options.headers || {}),
+      },
+    });
+  } catch (err) {
+    throw err;
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -138,6 +146,9 @@ export const reportsApi = {
     ),
   getVersionContent: (id: string, version: number) =>
     request<VersionContent>(`/api/v1/reports/${id}/versions/${version}`),
+  /** Canonical Q&A thread for this report (server creates if needed). */
+  defaultThread: (reportId: string) =>
+    request<ThreadResponse>(`/api/v1/reports/${reportId}/threads/default`),
   patch: (id: string, version: number, data: {
     selected_text: string;
     instruction: string;
@@ -167,10 +178,22 @@ export interface JobResponse {
 }
 
 export const jobsApi = {
-  create: (query: string, strength = 5, idempotencyKey?: string) =>
+  create: (
+    query: string,
+    strength = 2,
+    idempotencyKey?: string,
+    debugMock = false,
+    modelId: string = DEFAULT_CHAT_MODEL_ID,
+  ) =>
     request<JobResponse>("/api/v1/research/jobs", {
       method: "POST",
-      body: JSON.stringify({ query, strength, idempotency_key: idempotencyKey }),
+      body: JSON.stringify({
+        query,
+        strength,
+        model_id: modelId,
+        idempotency_key: idempotencyKey,
+        ...(debugMock ? { debug_mock: true } : {}),
+      }),
     }),
   get: (id: string) =>
     request<JobResponse>(`/api/v1/research/jobs/${id}`),
@@ -193,7 +216,17 @@ export interface ThreadResponse {
   id: string;
   report_id: string | null;
   pinned_version_num: number | null;
+  canonical_report_qa: boolean;
   created_at: string;
+}
+
+export interface ThreadSummaryResponse extends ThreadResponse {
+  report_title: string | null;
+  report_query: string | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  /** First user turn in the thread (for sidebar labels). */
+  first_user_message_preview?: string | null;
 }
 
 export interface MessageResponse {
@@ -213,8 +246,13 @@ export const threadsApi = {
         pinned_version: pinnedVersion || null,
       }),
     }),
-  list: (limit = 20) =>
-    request<ThreadResponse[]>(`/api/v1/threads?limit=${limit}`),
+  list: (limit = 50) =>
+    request<ThreadSummaryResponse[]>(`/api/v1/threads?limit=${limit}`),
+  patch: (id: string, pinnedVersionNum: number | null) =>
+    request<ThreadResponse>(`/api/v1/threads/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned_version_num: pinnedVersionNum }),
+    }),
   get: (id: string) =>
     request<{ thread: ThreadResponse; messages: MessageResponse[] }>(
       `/api/v1/threads/${id}`,
@@ -273,4 +311,52 @@ export const usersApi = {
       os: { os: string; count: number }[];
       browsers: { browser: string; count: number }[];
     }>("/api/v1/users/me/usage/devices"),
+  llmCredentials: () =>
+    request<{
+      credentials: {
+        id: string;
+        provider: string;
+        label: string | null;
+        last_four: string;
+        created_at: string;
+        updated_at: string;
+      }[];
+    }>("/api/v1/users/me/llm-credentials"),
+  putLlmCredential: (provider: string, secret: string, label?: string | null) =>
+    request<{
+      id: string;
+      provider: string;
+      label: string | null;
+      last_four: string;
+      created_at: string;
+      updated_at: string;
+    }>(`/api/v1/users/me/llm-credentials/${encodeURIComponent(provider)}`, {
+      method: "PUT",
+      body: JSON.stringify({ secret, label: label ?? null }),
+    }),
+  deleteLlmCredential: (provider: string) =>
+    request<{ status: string }>(
+      `/api/v1/users/me/llm-credentials/${encodeURIComponent(provider)}`,
+      { method: "DELETE" },
+    ),
 };
+
+// ---------------------------------------------------------------------------
+// LLM catalog (BYOK)
+// ---------------------------------------------------------------------------
+
+export interface LlmCatalogModel {
+  model_id: string;
+  display_name: string;
+  provider: string;
+  tags: string[];
+  description: string;
+}
+
+export const llmApi = {
+  models: () =>
+    request<{ models: LlmCatalogModel[] }>("/api/v1/llm/models"),
+};
+
+/** Default chat response model; must match backend `DEFAULT_MODEL_ID`. */
+export const DEFAULT_CHAT_MODEL_ID = "grok-3-mini";

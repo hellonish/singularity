@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from skills import SKILL_DOCS
 
@@ -26,7 +26,7 @@ from skills import SKILL_DOCS
 
 class ThinkStep(BaseModel):
     step_id: int
-    type: str            # "direct_answer" | "web_search" | "skill_call" | "analyze" | "summarize"
+    type: str            # direct_answer | web_search | skill_call | analyze | claim_verification | summarize | synthesis | ...
     description: str
     skill_name: str | None = None   # must be a key in SKILL_REGISTRY, or None
 
@@ -36,8 +36,29 @@ class ThinkPlan(BaseModel):
     reasoning: str                   # Brief explanation of why this mode/plan
     selected_skills: list[str]       # Subset of skills the agent will touch
     steps: list[ThinkStep]
-    strength: int = 5                # 1-10; only meaningful for research mode
+    strength: int = Field(
+        default=2,
+        ge=1,
+        le=3,
+        description="Research intensity: 1=low, 2=medium, 3=high (ignored for chat mode).",
+    )
     audience: str = "practitioner"   # layperson / student / practitioner / expert / executive
+
+    @field_validator("strength", mode="before")
+    @classmethod
+    def _normalize_strength_tier(cls, v: Any) -> int:
+        """Accept legacy 1–10 from models; normalize to tier 1–3 before ge/le checks."""
+        if v is None:
+            return 2
+        x = int(v)
+        if x in (1, 2, 3):
+            return x
+        x = max(1, min(10, x))
+        if x <= 3:
+            return 1
+        if x <= 7:
+            return 2
+        return 3
 
 
 # ---------------------------------------------------------------------------

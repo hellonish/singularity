@@ -19,7 +19,9 @@ async def apply_patch(
     full_content: str,
     selected_text: str,
     instruction: str,
-    model: str = "grok",
+    *,
+    api_key: str,
+    model_id: str = "grok-3-mini",
 ) -> str:
     """
     Apply a natural-language edit instruction to a section of the report.
@@ -28,7 +30,8 @@ async def apply_patch(
         full_content: The complete markdown report content.
         selected_text: The exact text the user selected for editing.
         instruction: The user's edit instruction (e.g., "Make this more concise").
-        model: Which LLM to use for the patch.
+        api_key: User's provider API key (BYOK).
+        model_id: Which LLM to use for the patch.
 
     Returns:
         The full content with the selected section replaced by the LLM output.
@@ -65,7 +68,7 @@ async def apply_patch(
     )
 
     # Call the LLM
-    client = get_llm_client(model)
+    client = get_llm_client(model_id, api_key)
     response = await client.chat(
         messages=[
             {"role": "system", "content": system_prompt},

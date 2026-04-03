@@ -13,9 +13,14 @@ class GeminiClient(BaseLLMClient):
 
         Args:
             model_name: The Gemini model to use.
-            api_key: Optional API key. If None, falls back to GOOGLE_API_KEY env var.
+            api_key: User API key (required; no environment fallback).
         """
-        self.client = genai.Client(api_key=api_key) if api_key else genai.Client()
+        k = (api_key or "").strip()
+        if not k:
+            raise ValueError(
+                "Google Gemini API key is required (BYOK). Add it in Profile or pass api_key explicitly."
+            )
+        self.client = genai.Client(api_key=k)
         self.model_name = model_name
 
     def generate_structured(

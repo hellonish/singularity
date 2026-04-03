@@ -1,24 +1,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: #ffffff;
-  --color-card: #f7f5f0;
+  /* App shell matches research / report editorial paper palette */
+  --color-bg: #f7f5f0;
+  --color-card: #ffffff;
   --color-border: #e5e2db;
   --color-accent: #6366f1;
   --color-text: #2a2824;
-  --color-muted: #6b7280;
+  --color-muted: #5c5952;
   --font-sans: var(--font-newsreader), 'Newsreader', Georgia, serif;
   --font-serif: var(--font-newsreader), 'Newsreader', Georgia, serif;
   --font-mono: var(--font-jetbrains-mono), 'JetBrains Mono', monospace;
 }
 
 :root {
-  --shell-bg:       #ffffff;
-  --shell-card:     #f7f5f0;
+  --shell-bg:       #f7f5f0;
+  --shell-card:     #ffffff;
   --shell-border:   #e5e2db;
   --shell-accent:   #6366f1;
   --shell-text:     #2a2824;
-  --shell-muted:    #6b7280;
+  --shell-muted:    #5c5952;
   /* Editorial paper palette — mirrors render/html_report.py */
   --rpt-bg:         #f7f5f0;
   --rpt-bg2:        #ffffff;
@@ -72,5 +73,65 @@
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   padding: 4px 0;
+  max-width: 100%;
 }
 .report-content .katex { color: var(--rpt-text-hi); }
+
+.chat-message-content .katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+.chat-message-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  margin: 0.65em 0;
+  padding: 4px 0;
+}
+
+/* GFM tables (remark-gfm) — @layer base zeros padding on all elements */
+.chat-message-content .chat-table-wrap {
+  overflow-x: auto;
+  margin: 12px 0;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+  border: 0.5px solid var(--rpt-border-hi);
+}
+
+.chat-message-content .chat-table-wrap table {
+  width: 100%;
+  min-width: min(100%, 320px);
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 15px;
+}
+
+.chat-message-content .chat-table-wrap th,
+.chat-message-content .chat-table-wrap td {
+  border: 0.5px solid var(--rpt-border);
+  padding: 10px 14px;
+  vertical-align: top;
+  text-align: left;
+  line-height: 1.55;
+  color: var(--rpt-text-hi);
+}
+
+.chat-message-content .chat-table-wrap th {
+  background: var(--rpt-bg3);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rpt-text-dim);
+}
+
+.chat-message-content .chat-table-wrap tbody tr:nth-child(even) td {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.chat-message-content .chat-table-wrap tbody tr:hover td {
+  background: rgba(0, 0, 0, 0.035);
+}

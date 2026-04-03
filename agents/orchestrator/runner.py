@@ -151,10 +151,14 @@ async def run_orchestrator(
     audience: str = "",
     output_language: str = "en",
     depth: str = "standard",
+    *,
+    grok_api_key: str,
 ) -> ExecutionContext:
     limits   = _DEPTH_LIMITS.get(depth, _DEPTH_LIMITS["standard"])
-    classifier_client = GrokClient(model_name=DOMAIN_CLASSIFIER_MODEL)
-    client = GrokClient(model_name=PLANNER_MODEL)
+    classifier_client = GrokClient(
+        model_name=DOMAIN_CLASSIFIER_MODEL, api_key=grok_api_key
+    )
+    client = GrokClient(model_name=PLANNER_MODEL, api_key=grok_api_key)
     registry = DomainRegistry(REGISTRY_PATH)
     planner = Planner(SKILL_PATH, client)
     router = FallbackRouter(registry, SKILL_REGISTRY)

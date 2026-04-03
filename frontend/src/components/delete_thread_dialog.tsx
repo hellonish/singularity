@@ -2,10 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import type { ThreadResponse } from "@/lib/api";
+import type { ThreadSummaryResponse } from "@/lib/api";
 
 interface DeleteThreadDialogProps {
-  thread: ThreadResponse | null;
+  thread: ThreadSummaryResponse | null;
   open: boolean;
   loading: boolean;
   errorMessage?: string | null;

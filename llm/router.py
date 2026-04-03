@@ -7,13 +7,13 @@ from llm.deepseek import DeepSeekClient
 from llm.grok import GrokClient
 
 
-def get_llm_client(model_id: str, api_key: str | None = None) -> BaseLLMClient:
+def get_llm_client(model_id: str, api_key: str) -> BaseLLMClient:
     """
     Factory: returns GeminiClient, DeepSeekClient, or GrokClient based on model_id.
 
     Args:
         model_id: Model identifier (e.g. "gemini-2.5-flash", "deepseek-chat", "grok-beta").
-        api_key: The user's API key for that provider. If None, client may use env default.
+        api_key: The user's API key for that provider (required; no environment fallback).
 
     Returns:
         Configured LLM client for the model's provider.

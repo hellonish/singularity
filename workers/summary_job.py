@@ -7,6 +7,7 @@ so the thread context stays manageable while retaining key information.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -97,34 +98,42 @@ async def run_summary_job(ctx: dict, thread_id: str) -> dict:
             content_preview = m.content[:500]
             conversation_text += f"{role}: {content_preview}\n\n"
 
-        # Call LLM for summarization
+        # Call LLM for summarization (BYOK: thread owner's xAI key only)
         try:
+            from api.llm_credentials_service import get_decrypted_provider_key
             from llm.router import get_llm_client
-            client = get_llm_client("grok")  # Use fast model for summaries
-            response = await client.chat(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are summarizing a conversation thread. "
-                            "Produce a concise summary that captures:\n"
-                            "1. The main topics discussed\n"
-                            "2. Key findings or conclusions\n"
-                            "3. Any action items or follow-ups mentioned\n"
-                            "Keep the summary under 500 words. "
-                            "Write in third person, past tense."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Summarize this conversation:\n\n{conversation_text}",
-                    },
-                ],
-                temperature=0.2,
-                max_tokens=1000,
+
+            grok_key = await get_decrypted_provider_key(db, thread.user_id, "grok")
+            if not grok_key:
+                logger.info(
+                    "Thread %s: skip summary — user has no xAI API key (BYOK)",
+                    thread_id,
+                )
+                return {
+                    "status": "skipped_no_byok",
+                    "thread_id": thread_id,
+                }
+
+            client = get_llm_client("grok-3-mini", grok_key)
+            system_prompt = (
+                "You are summarizing a conversation thread. "
+                "Produce a concise summary that captures:\n"
+                "1. The main topics discussed\n"
+                "2. Key findings or conclusions\n"
+                "3. Any action items or follow-ups mentioned\n"
+                "Keep the summary under 500 words. "
+                "Write in third person, past tense."
             )
 
-            new_summary = response.strip()
+            def _summarize_sync() -> str:
+                return client.generate_text(
+                    prompt=f"Summarize this conversation:\n\n{conversation_text}",
+                    system_prompt=system_prompt,
+                    temperature=0.2,
+                    max_tokens=1000,
+                )
+
+            new_summary = (await asyncio.to_thread(_summarize_sync)).strip()
 
             # Find the last message we summarized
             last_summarized = to_summarize[-1]

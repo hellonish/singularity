@@ -2,20 +2,29 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { LayoutGrid, Trash2 } from "lucide-react";
 import {
   reportsApi,
   jobsApi,
   threadsApi,
+  llmApi,
+  DEFAULT_CHAT_MODEL_ID,
   type ReportMeta,
-  type JobResponse,
-  type ThreadResponse,
+  type ThreadSummaryResponse,
 } from "@/lib/api";
-import { consumeSSE } from "@/lib/sse";
+import { llmModelGroupsFromCatalog } from "@/lib/llm_model_groups";
+import { ChatModelPicker } from "@/components/chat/ChatModelPicker";
+import { showDebugMockResearchControls } from "@/lib/debug_research_mock";
 import { cn } from "@/lib/cn";
+import {
+  formatRelative,
+  truncateDisplayLabel,
+  researchIntensityLabel,
+  RESEARCH_INTENSITY_OPTIONS,
+} from "@/lib/utils";
 import { UserMenu } from "@/components/user-menu";
 import { DeleteReportDialog } from "@/components/delete-report-dialog";
 import { DeleteThreadDialog } from "@/components/delete_thread_dialog";
@@ -24,6 +33,68 @@ import {
   type ChatPanelLaunchPayload,
 } from "@/components/chat/ChatPanel";
 import { ChatHistorySidebar } from "@/components/chat/chat_history_sidebar";
+import { AppLogoMark } from "@/components/app-logo";
+import { AccountReconnectPrompt } from "@/components/account_reconnect_prompt";
+
+/** Matches `var(--rpt-bg)` — editorial paper, same family as the research report page */
+const DASH_MAIN_BG_RGB = "247,245,240";
+
+const chromePillStyle = {
+  background: `radial-gradient(ellipse 145% 195% at 50% 22%, rgba(${DASH_MAIN_BG_RGB},0.99) 0%, rgba(${DASH_MAIN_BG_RGB},0.95) 38%, rgba(${DASH_MAIN_BG_RGB},0.82) 58%, rgba(${DASH_MAIN_BG_RGB},0.42) 80%, rgba(${DASH_MAIN_BG_RGB},0.08) 94%, rgba(${DASH_MAIN_BG_RGB},0) 100%)`,
+} as const;
+
+/**
+ * Purpose: Replace the full-width header with centered brand + top-right controls.
+ * Inputs: `onBackToProjects` when a thread is open (returns to the projects grid).
+ * Outputs: Absolutely positioned layers; pointer-events pass through except interactive chips.
+ * ConciseExplanation: Full-width short linear scrim matches main paper background with a dense opaque
+ * top band; Projects sits beside the account menu as a matching minimal icon button.
+ */
+function DashboardMainFloatingChrome({
+  onBackToProjects,
+}: {
+  onBackToProjects?: () => void;
+}) {
+  return (
+    <>
+      <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 flex h-[5.5rem] justify-center pt-1.5">
+        <div
+          className="absolute left-0 right-0 top-0 h-full w-full"
+          aria-hidden
+          style={{
+            background: `linear-gradient(180deg, rgb(${DASH_MAIN_BG_RGB}) 0%, rgb(${DASH_MAIN_BG_RGB}) 32%, rgba(${DASH_MAIN_BG_RGB},0.99) 48%, rgba(${DASH_MAIN_BG_RGB},0.94) 62%, rgba(${DASH_MAIN_BG_RGB},0.72) 76%, rgba(${DASH_MAIN_BG_RGB},0.32) 88%, rgba(${DASH_MAIN_BG_RGB},0.06) 96%, rgba(${DASH_MAIN_BG_RGB},0) 100%)`,
+          }}
+        />
+        <div className="pointer-events-auto relative z-10 px-3">
+          <div className="flex items-center gap-2.5 py-2 pl-1 pr-2">
+            <AppLogoMark className="h-10 w-10 shrink-0 object-contain" priority />
+            <span className="text-lg font-semibold tracking-tight text-[#111827]">
+              Singularity
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="pointer-events-none absolute right-3 top-2 z-30 flex items-center gap-1.5 sm:right-5 sm:top-3">
+        {onBackToProjects ? (
+          <div className="pointer-events-auto rounded-full p-1" style={chromePillStyle}>
+            <button
+              type="button"
+              onClick={onBackToProjects}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-600 transition-colors hover:bg-black/5"
+              title="Projects"
+              aria-label="Back to projects"
+            >
+              <LayoutGrid className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+          </div>
+        ) : null}
+        <div className="pointer-events-auto rounded-full p-1" style={chromePillStyle}>
+          <UserMenu />
+        </div>
+      </div>
+    </>
+  );
+}
 
 function ReportCard({
   report,
@@ -33,7 +104,7 @@ function ReportCard({
   onRequestDelete: (r: ReportMeta) => void;
 }) {
   const router = useRouter();
-  const timeAgo = getTimeAgo(report.created_at);
+  const timeAgo = formatRelative(report.created_at);
 
   return (
     <motion.div
@@ -121,213 +192,127 @@ function ReportCard({
         <span
           style={{
             marginLeft: "auto",
-            background: report.strength >= 7 ? "rgba(13,138,91,0.1)" : "rgba(196,92,0,0.1)",
-            color: report.strength >= 7 ? "#0d8a5b" : "#c45c00",
+            background:
+              report.strength === 3
+                ? "rgba(13,138,91,0.1)"
+                : report.strength === 1
+                  ? "rgba(196,92,0,0.1)"
+                  : "rgba(180,130,0,0.12)",
+            color:
+              report.strength === 3
+                ? "#0d8a5b"
+                : report.strength === 1
+                  ? "#c45c00"
+                  : "#92400e",
             borderRadius: 4,
             padding: "1px 6px",
             fontSize: 10,
           }}
         >
-          s{report.strength}
+          {researchIntensityLabel(report.strength)}
         </span>
       </div>
     </motion.div>
   );
 }
 
-function JobProgressOverlay({
-  job,
-  onClose,
-}: {
-  job: JobResponse;
-  onClose: () => void;
-}) {
-  const [phase, setPhase] = useState(job.current_phase);
-  const [status, setStatus] = useState(job.status);
-  const [errorDetail, setErrorDetail] = useState<string | null>(job.error_detail);
-  const router = useRouter();
-
-  useEffect(() => {
-    if (status === "done") {
-      const timer = setTimeout(() => {
-        router.push(`/reports/${job.report_id}`);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [status, job.report_id, router]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function listen() {
-      const session = await import("next-auth/react").then((m) => m.getSession());
-      const token = session?.accessToken;
-      const url = jobsApi.eventsUrl(job.job_id, token);
-      try {
-        for await (const event of consumeSSE(url, token as string | undefined)) {
-          if (cancelled) break;
-          const data = JSON.parse(event.data);
-          if (data.phase) setPhase(data.phase);
-          if (data.status) setStatus(data.status);
-          if (data.error_detail) setErrorDetail(data.error_detail);
-          if (event.event === "job_done") {
-            setStatus("done");
-            break;
-          }
-          if (event.event === "job_error") {
-            setStatus("failed");
-            if (data.error) setErrorDetail(data.error);
-            break;
-          }
-          if (event.event === "job_cancelled") {
-            setStatus("cancelled");
-            break;
-          }
-        }
-      } catch {
-        // SSE failed; polling effect below still updates UI
-      }
-    }
-    listen();
-    return () => { cancelled = true; };
-  }, [job.job_id]);
-
-  useEffect(() => {
-    let stop = false;
-    let intervalId: ReturnType<typeof setInterval> | undefined;
-    async function pollOnce() {
-      if (stop) return;
-      try {
-        const j = await jobsApi.get(job.job_id);
-        if (stop) return;
-        if (j.current_phase) setPhase(j.current_phase);
-        if (j.error_detail) setErrorDetail(j.error_detail);
-        if (j.status === "done" || j.status === "failed" || j.status === "cancelled") {
-          setStatus(j.status);
-          if (intervalId != null) clearInterval(intervalId);
-          return;
-        }
-        if (j.status === "running" || j.status === "pending") {
-          setStatus(j.status);
-        }
-      } catch {
-        // ignore transient errors
-      }
-    }
-    void pollOnce();
-    intervalId = setInterval(() => {
-      void pollOnce();
-    }, 3000);
-    return () => {
-      stop = true;
-      if (intervalId != null) clearInterval(intervalId);
-    };
-  }, [job.job_id]);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-    >
-      <motion.div
-        initial={{ scale: 0.95 }}
-        animate={{ scale: 1 }}
-        className="flex w-full max-w-md flex-col items-center gap-6 rounded-2xl border border-[#e5e2db] bg-white p-8"
-      >
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50">
-          {status === "done" ? (
-            <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          ) : status === "failed" || status === "cancelled" ? (
-            <svg className="h-8 w-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          ) : (
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-          )}
-        </div>
-
-        <div className="text-center">
-          <h3 className="text-lg font-medium text-[#1a1a1a]">
-            {status === "done"
-              ? "Report Complete"
-              : status === "failed"
-                ? "Report Failed"
-                : status === "cancelled"
-                  ? "Report Cancelled"
-                  : "Generating Report..."}
-          </h3>
-          {phase && (status === "running" || status === "pending") && (
-            <p className="mt-1 text-sm text-[#6b7280]">Phase: {phase}</p>
-          )}
-          {status === "failed" && errorDetail ? (
-            <p className="mt-3 max-h-24 overflow-y-auto text-left text-xs leading-relaxed text-red-700" style={{ fontFamily: "var(--mono, monospace)" }}>
-              {errorDetail.length > 400 ? `${errorDetail.slice(0, 400)}…` : errorDetail}
-            </p>
-          ) : null}
-        </div>
-
-        {(status === "failed" || status === "cancelled") && (
-          <button
-            onClick={onClose}
-            className="rounded-full bg-[#f3f4f6] px-6 py-2 text-sm text-[#1a1a1a] hover:bg-[#e5e7eb]"
-          >
-            Dismiss
-          </button>
-        )}
-      </motion.div>
-    </motion.div>
-  );
-}
 
 export default function DashboardPage() {
-  const { status: authStatus } = useSession();
+  const { status: authStatus, data: session } = useSession();
+  const apiReady =
+    authStatus === "authenticated" && Boolean(session?.accessToken);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const [barMode, setBarMode] = useState<"chat" | "research">("research");
   const [barExtended, setBarExtended] = useState(false);
-  const [barJobStrength, setBarJobStrength] = useState(5);
-  const [activeJob, setActiveJob] = useState<JobResponse | null>(null);
+  const [barJobStrength, setBarJobStrength] = useState<1 | 2 | 3>(2);
+  const [barDebugMockResearch, setBarDebugMockResearch] = useState(false);
+  const [barModelId, setBarModelId] = useState(DEFAULT_CHAT_MODEL_ID);
   const [deleteTarget, setDeleteTarget] = useState<ReportMeta | null>(null);
   const [dashThreadId, setDashThreadId] = useState<string | null>(null);
   const [dashLaunch, setDashLaunch] = useState<ChatPanelLaunchPayload | null>(null);
   const [dashChatBusy, setDashChatBusy] = useState(false);
   const [chatSidebarCollapsed, setChatSidebarCollapsed] = useState(false);
   const [researchDockThreadId, setResearchDockThreadId] = useState<string | null>(null);
-  const [deleteThreadTarget, setDeleteThreadTarget] = useState<ThreadResponse | null>(null);
+  const [researchDockReportId, setResearchDockReportId] = useState<string | null>(null);
+  const [deleteThreadTarget, setDeleteThreadTarget] = useState<ThreadSummaryResponse | null>(null);
 
-  const { data: reportsData, isLoading } = useQuery({
+  const { data: reportsData, isLoading: reportsQueryLoading } = useQuery({
     queryKey: ["reports"],
     queryFn: () => reportsApi.list(),
-    enabled: authStatus === "authenticated",
+    enabled: apiReady,
   });
 
-  const { data: threadsRaw, isLoading: threadsLoading } = useQuery({
+  const { data: threadsRaw, isLoading: threadsQueryLoading } = useQuery({
     queryKey: ["dashboard-threads"],
     queryFn: () => threadsApi.list(50),
-    enabled: authStatus === "authenticated",
+    enabled: apiReady,
   });
 
-  const standaloneThreads = (threadsRaw ?? []).filter((t) => t.report_id == null);
+  const { data: llmCatalog, isLoading: llmCatalogLoading } = useQuery({
+    queryKey: ["llm-catalog"],
+    queryFn: () => llmApi.models(),
+    enabled: apiReady,
+    staleTime: 120_000,
+  });
+
+  const barModelSelectGroups = useMemo(
+    () => llmModelGroupsFromCatalog(llmCatalog?.models),
+    [llmCatalog?.models],
+  );
+
+  const showBarModelPicker =
+    apiReady &&
+    !llmCatalogLoading &&
+    (llmCatalog?.models?.length ?? 0) > 0;
+
+  useEffect(() => {
+    const list = llmCatalog?.models ?? [];
+    const ids = new Set(list.map((m) => m.model_id));
+    if (ids.size === 0) return;
+    if (!ids.has(barModelId)) {
+      setBarModelId(list[0]!.model_id);
+    }
+  }, [llmCatalog, barModelId]);
+
+  const barChatModelReady = useMemo(() => {
+    if (!showBarModelPicker) return false;
+    return (llmCatalog?.models ?? []).some((m) => m.model_id === barModelId);
+  }, [showBarModelPicker, llmCatalog?.models, barModelId]);
+
+  const reportsLoading = !apiReady || reportsQueryLoading;
+  const threadsLoading = !apiReady || threadsQueryLoading;
+
+  const researchDockHeading = useMemo(() => {
+    if (!researchDockReportId || !reportsData?.items?.length) return null;
+    const r = reportsData.items.find((x) => x.id === researchDockReportId);
+    return r?.title?.trim() || r?.query?.trim() || null;
+  }, [researchDockReportId, reportsData?.items]);
+
+  const barChatToggleLabel =
+    barMode === "chat" && query.trim()
+      ? truncateDisplayLabel(query.trim(), 28)
+      : "Chat";
+  const barResearchToggleLabel =
+    barMode === "research" && query.trim()
+      ? truncateDisplayLabel(query.trim(), 28)
+      : "Research";
 
   const createJobMutation = useMutation({
-    mutationFn: () => jobsApi.create(query, barJobStrength),
-    onSuccess: async (job) => {
+    mutationFn: () =>
+      jobsApi.create(
+        query,
+        barJobStrength,
+        undefined,
+        barDebugMockResearch,
+        barModelId,
+      ),
+    onSuccess: (job) => {
       setDashThreadId(null);
       setDashLaunch(null);
-      setActiveJob(job);
       setQuery("");
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      try {
-        const thread = await threadsApi.create(job.report_id);
-        setResearchDockThreadId(thread.id);
-      } catch (e) {
-        console.error("Could not open follow-up chat for this report", e);
-        setResearchDockThreadId(null);
-      }
+      router.push(`/reports/${job.report_id}?job=${job.job_id}`);
     },
   });
 
@@ -343,6 +328,7 @@ export default function DashboardPage() {
     mutationFn: (id: string) => threadsApi.delete(id),
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-threads"] });
+      queryClient.invalidateQueries({ queryKey: ["report-default-thread"] });
       setDeleteThreadTarget(null);
       if (dashThreadId === deletedId) {
         setDashThreadId(null);
@@ -371,6 +357,7 @@ export default function DashboardPage() {
           execution_mode: "chat",
           chat_variant: barExtended ? "extended" : "standard",
           research_strength: 5,
+          model_id: barModelId,
         });
         setQuery("");
         queryClient.invalidateQueries({ queryKey: ["dashboard-threads"] });
@@ -380,12 +367,13 @@ export default function DashboardPage() {
         setDashChatBusy(false);
       }
     },
-    [query, barMode, barExtended, createJobMutation, queryClient],
+    [query, barMode, barExtended, barModelId, barJobStrength, createJobMutation, queryClient],
   );
 
-  const handleDismissJobOverlay = useCallback(() => {
-    setActiveJob(null);
+
+  const handleCloseResearchDock = useCallback(() => {
     setResearchDockThreadId(null);
+    setResearchDockReportId(null);
   }, []);
 
   const onLaunchConsumed = useCallback(() => {
@@ -398,10 +386,17 @@ export default function DashboardPage() {
     queryClient.invalidateQueries({ queryKey: ["dashboard-threads"] });
   }, [queryClient]);
 
-  const handleSelectSidebarThread = useCallback((id: string) => {
-    setDashThreadId(id);
-    setDashLaunch(null);
-  }, []);
+  const handleSelectSidebarThread = useCallback(
+    (t: ThreadSummaryResponse) => {
+      setDashLaunch(null);
+      if (t.report_id) {
+        router.push(`/reports/${t.report_id}?thread=${t.id}`);
+        return;
+      }
+      setDashThreadId(t.id);
+    },
+    [router],
+  );
 
   const handleSidebarNewChat = useCallback(() => {
     setDashThreadId(null);
@@ -421,30 +416,22 @@ export default function DashboardPage() {
     return null;
   }
 
+  if (
+    authStatus === "authenticated" &&
+    (!session?.accessToken || session?.error)
+  ) {
+    return <AccountReconnectPrompt />;
+  }
+
   const reports = reportsData?.items || [];
 
   return (
     <div className="flex h-dvh max-h-dvh flex-col overflow-hidden">
-      {/* Header */}
-      <header className="shrink-0 border-b border-[#e5e2db] bg-white">
-        <div className="flex w-full items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-sm font-semibold text-white">
-            S
-          </div>
-          <span className="text-lg font-semibold text-[#111827]">Singularity</span>
-        </div>
-        <div className="flex items-center gap-3">
-          <UserMenu />
-        </div>
-        </div>
-      </header>
-
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
         <ChatHistorySidebar
           collapsed={chatSidebarCollapsed}
           onToggleCollapsed={() => setChatSidebarCollapsed((c) => !c)}
-          threads={standaloneThreads}
+          threads={threadsRaw ?? []}
           selectedThreadId={dashThreadId}
           onSelectThread={handleSelectSidebarThread}
           onNewChat={handleSidebarNewChat}
@@ -452,7 +439,7 @@ export default function DashboardPage() {
           isLoading={threadsLoading}
         />
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#f8fafc]">
+        <main className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible bg-[var(--rpt-bg)]">
           {dashThreadId ? (
             <ChatPanel
               key={dashThreadId}
@@ -461,9 +448,11 @@ export default function DashboardPage() {
               launchWith={dashLaunch}
               onLaunchConsumed={onLaunchConsumed}
               onClose={handleCloseDashChat}
+              initialModelId={barModelId}
             />
           ) : (
-            <div className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto overscroll-contain px-6 py-8">
+            <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-6 pb-6 pt-28">
               <div className="mb-6 flex items-center justify-between">
                 <h2
                   style={{
@@ -479,7 +468,7 @@ export default function DashboardPage() {
                 <span className="text-sm text-[#6b7280]">{reports.length} reports</span>
               </div>
 
-              {isLoading ? (
+              {reportsLoading ? (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {[1, 2, 3].map((i) => (
                     <div
@@ -538,52 +527,53 @@ export default function DashboardPage() {
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </main>
-
-        <AnimatePresence>
-          {researchDockThreadId ? (
-            <ChatPanel
-              key={researchDockThreadId}
-              threadId={researchDockThreadId}
-              placement="dock"
-              reportScope
-              onClose={() => setResearchDockThreadId(null)}
-            />
-          ) : null}
-        </AnimatePresence>
-      </div>
-
-      {!dashThreadId ? (
-      <div className="sticky bottom-0 z-20 border-t border-neutral-200/80 bg-white/90 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-sm sm:px-6">
+              </div>
+              <div className="shrink-0 border-t border-[#e5e2db] bg-[rgba(255,255,255,0.92)] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-sm sm:px-6">
         <form
           onSubmit={handleBarSubmit}
-          className="w-full rounded-2xl border border-neutral-200/90 bg-neutral-50/50 p-2.5"
+          className="w-full rounded-2xl border border-[#e5e2db] bg-[rgba(255,255,255,0.85)] p-2.5"
         >
           <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
             <div className="inline-flex shrink-0 gap-0.5 rounded-lg bg-neutral-100/80 p-0.5">
               <button
                 type="button"
                 onClick={() => setBarMode("chat")}
+                title={barMode === "chat" && query.trim() ? query.trim() : "Chat"}
                 className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors",
+                  "max-w-[min(11rem,40vw)] truncate rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors",
                   barMode === "chat" && "bg-white text-neutral-900 shadow-sm",
                 )}
               >
-                Chat
+                {barChatToggleLabel}
               </button>
               <button
                 type="button"
                 onClick={() => setBarMode("research")}
+                title={
+                  barMode === "research" && query.trim()
+                    ? query.trim()
+                    : "Research"
+                }
                 className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors",
+                  "max-w-[min(11rem,40vw)] truncate rounded-md px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors",
                   barMode === "research" && "bg-white text-neutral-900 shadow-sm",
                 )}
               >
-                Research
+                {barResearchToggleLabel}
               </button>
             </div>
+
+            {showBarModelPicker ? (
+              <div className="flex min-w-0 max-w-full flex-[1_1_12rem] items-start gap-2 sm:items-center">
+                <span className="shrink-0 pt-1.5 text-xs text-neutral-500 sm:pt-0">Model</span>
+                <ChatModelPicker
+                  groups={barModelSelectGroups}
+                  value={barModelId}
+                  disabled={dashChatBusy || createJobMutation.isPending}
+                  onChange={setBarModelId}
+                />
+              </div>
+            ) : null}
 
             {barMode === "chat" ? (
               <div className="flex shrink-0 items-center gap-2">
@@ -609,19 +599,37 @@ export default function DashboardPage() {
                 </button>
               </div>
             ) : (
-              <div className="flex min-w-0 flex-1 basis-[min(100%,14rem)] items-center gap-2 sm:basis-auto sm:max-w-md">
+              <div className="flex min-w-0 flex-1 basis-[min(100%,14rem)] flex-wrap items-center gap-2 sm:basis-auto sm:max-w-md">
                 <span className="shrink-0 text-xs text-neutral-500">Intensity</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={10}
-                  value={barJobStrength}
-                  onChange={(e) => setBarJobStrength(Number(e.target.value))}
-                  className="min-w-0 flex-1 accent-neutral-700"
-                />
-                <span className="w-4 shrink-0 text-right text-xs tabular-nums text-neutral-600">
-                  {barJobStrength}
-                </span>
+                <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-neutral-100/90 p-0.5">
+                  {RESEARCH_INTENSITY_OPTIONS.map(({ tier, label }) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      disabled={dashChatBusy || createJobMutation.isPending}
+                      onClick={() => setBarJobStrength(tier)}
+                      className={cn(
+                        "rounded-md px-2 py-1 text-xs font-medium transition-colors disabled:opacity-40",
+                        barJobStrength === tier
+                          ? "bg-neutral-800 text-white shadow-sm"
+                          : "text-neutral-600 hover:bg-white/80",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {showDebugMockResearchControls(session?.user?.email) ? (
+                  <label className="ml-1 flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-amber-900/90">
+                    <input
+                      type="checkbox"
+                      checked={barDebugMockResearch}
+                      onChange={(e) => setBarDebugMockResearch(e.target.checked)}
+                      className="rounded border-amber-500 text-amber-700"
+                    />
+                    Mock (no LLM)
+                  </label>
+                ) : null}
               </div>
             )}
           </div>
@@ -645,14 +653,22 @@ export default function DashboardPage() {
                 !query.trim() ||
                 createJobMutation.isPending ||
                 dashChatBusy ||
-                (barMode === "research" && query.trim().length < 10)
+                (barMode === "research" && query.trim().length < 10) ||
+                ((barMode === "chat" || barMode === "research") &&
+                  showBarModelPicker &&
+                  !barChatModelReady)
               }
               className={cn(
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white transition-opacity",
                 query.trim() &&
                   !createJobMutation.isPending &&
                   !dashChatBusy &&
-                  !(barMode === "research" && query.trim().length < 10)
+                  !(barMode === "research" && query.trim().length < 10) &&
+                  !(
+                    (barMode === "chat" || barMode === "research") &&
+                    showBarModelPicker &&
+                    !barChatModelReady
+                  )
                   ? "bg-neutral-900 hover:bg-neutral-800"
                   : "bg-neutral-200 text-neutral-400",
               )}
@@ -664,18 +680,29 @@ export default function DashboardPage() {
             </button>
           </div>
         </form>
-      </div>
-      ) : null}
-
-      {/* Job progress overlay */}
-      <AnimatePresence>
-        {activeJob && (
-          <JobProgressOverlay
-            job={activeJob}
-            onClose={handleDismissJobOverlay}
+              </div>
+            </div>
+          )}
+          <DashboardMainFloatingChrome
+            onBackToProjects={
+              dashThreadId ? handleCloseDashChat : undefined
+            }
           />
-        )}
-      </AnimatePresence>
+        </main>
+
+        <AnimatePresence>
+          {researchDockThreadId ? (
+            <ChatPanel
+              key={researchDockThreadId}
+              threadId={researchDockThreadId}
+              placement="dock"
+              reportScope
+              reportHeading={researchDockHeading}
+              onClose={handleCloseResearchDock}
+            />
+          ) : null}
+        </AnimatePresence>
+      </div>
 
       <DeleteReportDialog
         report={deleteTarget}
@@ -718,19 +745,4 @@ export default function DashboardPage() {
       />
     </div>
   );
-}
-
-function getTimeAgo(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  const diffWeeks = Math.floor(diffDays / 7);
-  if (diffWeeks < 4) return `${diffWeeks}w ago`;
-  return date.toLocaleDateString();
 }

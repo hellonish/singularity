@@ -960,7 +960,7 @@ class ReportHtmlRenderer:
 
         meta_parts: list[str] = []
         if "strength" in meta:
-            meta_parts.append(f"Strength {meta['strength']}/10")
+            meta_parts.append(f"Intensity {meta['strength']} (1=low … 3=high)")
         if "audience" in meta:
             meta_parts.append(str(meta["audience"]))
         if "sections" in meta:
