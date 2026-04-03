@@ -126,7 +126,7 @@ class VectorStoreClient:
 
     def create_collection(self, run_id: str) -> str:
         """Create a fresh collection for this run. Returns the collection name."""
-        from qdrant_client.models import VectorParams, Distance
+        from qdrant_client.models import VectorParams, Distance, PayloadIndexParams, PayloadSchemaType
         name = f"run_{run_id}"
         self.qdrant.recreate_collection(
             collection_name=name,
@@ -134,6 +134,11 @@ class VectorStoreClient:
                 size=COLLECTION_CONFIG["size"],
                 distance=Distance.COSINE,
             ),
+        )
+        # Qdrant Cloud requires explicit payload indexes for filtering.
+        self.qdrant.create_payload_index(
+            collection_name=name, field_name="credibility",
+            field_schema=PayloadSchemaType.FLOAT,
         )
         return name
 
