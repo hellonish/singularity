@@ -33,6 +33,7 @@ PyMuPDF==1.26.0            # PdfReaderTool fallback for scanned/broken PDFs
 # ── Vector store (research worker / pipeline) ────────────────────────────────
 # Keep in sync with the Qdrant server image in docker-compose.yml (major.minor).
 qdrant-client==1.14.2
+sentence-transformers==3.4.1  # local embeddings for Qdrant (all-MiniLM-L6-v2)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 pytest==8.4.0
