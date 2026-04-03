@@ -14,11 +14,11 @@
     }
 
     # Health check endpoints
-    handle /health {
+    handle /api/health {
         reverse_proxy api:8000
     }
 
-    handle /ready {
+    handle /api/ready {
         reverse_proxy api:8000
     }
 
