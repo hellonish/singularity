@@ -90,9 +90,7 @@ services:
 
   # ── API Server ─────────────────────────────────────────────────────────────
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
+    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
     restart: unless-stopped
     expose:
       - "8000"
@@ -117,9 +115,7 @@ services:
 
   # ── Background Worker ──────────────────────────────────────────────────────
   worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
+    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
     restart: unless-stopped
     depends_on:
       postgres:
@@ -143,9 +139,7 @@ services:
 
   # ── Frontend ───────────────────────────────────────────────────────────────
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
+    image: ${DOCKERHUB_USER:-singularity}/singularity-frontend:latest
     restart: unless-stopped
     expose:
       - "3000"
