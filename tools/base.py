@@ -47,16 +47,25 @@ class ToolBase:
         self,
         query: str,
         max_retries: int = 2,
+        timeout: float = 60.0,
         **kwargs,
     ) -> ToolResult:
         """
         Retries call() with exponential back-off (1s, 2s, ...).
         Never raises — returns ToolResult.failure() after exhausting retries.
+        Each attempt is bounded by `timeout` seconds (default 60s).
         """
         last_error = ""
         for attempt in range(max_retries + 1):
             try:
-                return await self.call(query, **kwargs)
+                return await asyncio.wait_for(
+                    self.call(query, **kwargs),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                last_error = f"timed out after {timeout}s"
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
             except Exception as exc:
                 last_error = str(exc)
                 if attempt < max_retries:
