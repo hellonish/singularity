@@ -21,7 +21,7 @@ biopython==1.86            # PubMedTool via NCBI Entrez (free, needs NCBI_EMAIL)
 
 # ── Tools — Code & data ───────────────────────────────────────────────────────
 PyGithub==2.9.0            # GitHubTool (GITHUB_TOKEN optional)
-huggingface-hub==1.3.5     # DatasetHubTool (free, no key)
+huggingface-hub>=0.20.0     # DatasetHubTool (free, no key)
 
 # ── Tools — Video ─────────────────────────────────────────────────────────────
 youtube-transcript-api==1.0.3   # YouTubeTranscriptTool (free, no key)
@@ -33,7 +33,7 @@ PyMuPDF==1.26.0            # PdfReaderTool fallback for scanned/broken PDFs
 # ── Vector store (research worker / pipeline) ────────────────────────────────
 # Keep in sync with the Qdrant server image in docker-compose.yml (major.minor).
 qdrant-client==1.14.2
-sentence-transformers==3.4.1  # local embeddings for Qdrant (all-MiniLM-L6-v2)
+fastembed==0.6.1  # local embeddings for Qdrant (all-MiniLM-L6-v2, ONNX — no PyTorch)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 pytest==8.4.0
