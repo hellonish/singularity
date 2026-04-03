@@ -120,6 +120,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-singularity}:${POSTGRES_PASSWORD}@postgres:5432/singularity
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=production
+      - QDRANT_FORCE_IN_MEMORY=1
     command: python -m workers.main
     healthcheck:
       test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379'); r.ping()"]
