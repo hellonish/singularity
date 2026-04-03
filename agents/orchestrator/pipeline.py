@@ -703,7 +703,10 @@ async def run_pipeline(
 
     # ── Topic cache check (triggers lazy Qdrant init + server probe) ──
     try:
-        cached_run_id = vs.find_cached_run(query)   # returns None if in-memory or no hit
+        cached_run_id = await asyncio.wait_for(
+            asyncio.to_thread(vs.find_cached_run, query),
+            timeout=30.0,
+        )
     except Exception:
         logger.warning("[Pipeline] Topic cache lookup failed — treating as cache miss", exc_info=True)
         cached_run_id = None

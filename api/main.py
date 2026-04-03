@@ -89,9 +89,11 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 # Innermost (runs closest to route handlers)
+# Execution order (reverse of add order): RequestID → Auth → RateLimit → UsageEmitter
+# Auth must run before RateLimit so rate limiting uses per-user keys, not shared IP.
 app.add_middleware(UsageEmitterMiddleware)
-app.add_middleware(AuthMiddleware)
 app.add_middleware(RateLimitMiddleware)
+app.add_middleware(AuthMiddleware)
 app.add_middleware(RequestIDMiddleware)
 
 # CORS — must wrap everything.

@@ -300,7 +300,13 @@ class Retriever:
         await asyncio.gather(*[
             _run_skill(name, queries) for name, queries in skill_queries.items()
         ])
-        self.vs.register_run_in_cache(run_id, query)
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(self.vs.register_run_in_cache, run_id, query),
+                timeout=30.0,
+            )
+        except Exception:
+            logger.warning("[Retriever] register_run_in_cache failed — skipping cache update", exc_info=True)
         return active_skills
 
     # ------------------------------------------------------------------
