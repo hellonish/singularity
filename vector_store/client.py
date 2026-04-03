@@ -126,7 +126,7 @@ class VectorStoreClient:
 
     def create_collection(self, run_id: str) -> str:
         """Create a fresh collection for this run. Returns the collection name."""
-        from qdrant_client.models import VectorParams, Distance, PayloadIndexParams, PayloadSchemaType
+        from qdrant_client.models import VectorParams, Distance, PayloadSchemaType
         name = f"run_{run_id}"
         self.qdrant.recreate_collection(
             collection_name=name,
