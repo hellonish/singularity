@@ -37,7 +37,7 @@ from .config import (
 )
 from .embedder import Embedder
 
-_QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+_QDRANT_URL = os.getenv("QDRANT_URL") or os.getenv("QDRANT_LOCATION") or "http://localhost:6333"
 
 _UPSERT_MAX_RETRIES = 3
 _UPSERT_RETRY_DELAY = 1.0   # seconds between retries
