@@ -117,7 +117,8 @@ class PdfReaderTool(ToolBase):
         if data is None:
             if not url:
                 raise ValueError("PdfReaderTool requires either `url` or `data`")
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx()), timeout=timeout) as session:
                 async with session.get(url) as resp:
                     resp.raise_for_status()
                     data = await resp.read()

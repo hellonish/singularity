@@ -1,43 +1,40 @@
 # ── Core ──────────────────────────────────────────────────────────────────────
-python-dotenv>=1.0.0
-pydantic>=2.7.0
+python-dotenv==1.0.0
+pydantic==2.10.6
 
 # ── LLM clients ───────────────────────────────────────────────────────────────
-openai>=1.0.0            # GrokClient (xAI via OpenAI-compatible SDK)
-google-genai>=1.0.0      # GeminiClient
-deepseek>=1.0.0          # DeepSeekClient
+openai==1.109.1            # GrokClient (xAI via OpenAI-compatible SDK)
+google-genai==1.63.0       # GeminiClient
+deepseek==1.0.0            # DeepSeekClient
 
 # ── Tools — HTTP ──────────────────────────────────────────────────────────────
-aiohttp>=3.9.0           # async HTTP for all REST-based tools
-requests>=2.31.0         # sync HTTP fallback
+aiohttp==3.12.0            # async HTTP for all REST-based tools
+requests==2.32.3           # sync HTTP fallback
 
 # ── Tools — Web search ────────────────────────────────────────────────────────
-ddgs>=6.0.0               # WebFetchTool + StandardsFetchTool (free, no key)
-tavily-python>=0.3.0      # WebFetchTool fallback (TAVILY_API_KEY)
-
-# ── Tools — Translation ────────────────────────────────────────────────────────
-# TranslationTool primary: MyMemory API (free, no key, uses aiohttp — already listed)
-# TranslationTool fallback: Google Translate (GOOGLE_TRANSLATE_API_KEY)
+ddgs==9.11.4               # WebFetchTool + StandardsFetchTool (free, no key)
+tavily-python==0.7.3       # WebFetchTool fallback (TAVILY_API_KEY)
 
 # ── Tools — Academic ──────────────────────────────────────────────────────────
-arxiv>=2.1.0              # ArxivTool (free, no key)
-biopython>=1.84           # PubMedTool via NCBI Entrez (free, needs NCBI_EMAIL)
+arxiv==2.2.0               # ArxivTool (free, no key)
+biopython==1.86            # PubMedTool via NCBI Entrez (free, needs NCBI_EMAIL)
 
 # ── Tools — Code & data ───────────────────────────────────────────────────────
-PyGithub>=2.3.0           # GitHubTool (GITHUB_TOKEN optional)
-huggingface-hub>=0.23.0   # DatasetHubTool (free, no key)
+PyGithub==2.9.0            # GitHubTool (GITHUB_TOKEN optional)
+huggingface-hub>=0.20.0     # DatasetHubTool (free, no key)
 
 # ── Tools — Video ─────────────────────────────────────────────────────────────
-youtube-transcript-api>=0.6.2  # YouTubeTranscriptTool (free, no key)
+youtube-transcript-api==1.0.3   # YouTubeTranscriptTool (free, no key)
 
 # ── Tools — PDF ───────────────────────────────────────────────────────────────
-pdfplumber>=0.11.0        # PdfReaderTool primary
-PyMuPDF>=1.24.0           # PdfReaderTool fallback for scanned/broken PDFs
+pdfplumber==0.11.9         # PdfReaderTool primary
+PyMuPDF==1.26.0            # PdfReaderTool fallback for scanned/broken PDFs
 
 # ── Vector store (research worker / pipeline) ────────────────────────────────
 # Keep in sync with the Qdrant server image in docker-compose.yml (major.minor).
-qdrant-client>=1.14.2,<1.15
+qdrant-client==1.14.2
+fastembed==0.6.1  # local embeddings for Qdrant (all-MiniLM-L6-v2, ONNX — no PyTorch)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
+pytest==8.4.0
+pytest-asyncio==0.26.0

@@ -1,6 +1,7 @@
 """
-Embedder — wraps sentence-transformers/all-MiniLM-L6-v2 (local, free, 384-dim).
+Embedder — wraps fastembed/all-MiniLM-L6-v2 (local, free, 384-dim).
 
+Uses ONNX runtime instead of PyTorch — ~10× smaller install footprint.
 Lazy-loads the model on first use so import doesn't pay the load cost.
 Thread-safe: model is loaded once and reused across all calls.
 
@@ -15,23 +16,23 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sentence_transformers import SentenceTransformer
+    from fastembed import TextEmbedding
 
 _CHUNK_SIZE_CHARS  = 2000   # ≈ 512 tokens
 _CHUNK_OVERLAP_CHARS = 256  # ≈ 64 tokens
 _MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 _lock:  threading.Lock = threading.Lock()
-_model: "SentenceTransformer | None" = None
+_model: "TextEmbedding | None" = None
 
 
-def _get_model() -> "SentenceTransformer":
+def _get_model() -> "TextEmbedding":
     global _model
     if _model is None:
         with _lock:
             if _model is None:
-                from sentence_transformers import SentenceTransformer
-                _model = SentenceTransformer(_MODEL_NAME)
+                from fastembed import TextEmbedding
+                _model = TextEmbedding(_MODEL_NAME)
     return _model
 
 
@@ -41,14 +42,12 @@ class Embedder:
     def embed(self, text: str) -> list[float]:
         """Embed a single string. Returns a 384-dim float list."""
         model = _get_model()
-        vec = model.encode(text, normalize_embeddings=True)
-        return vec.tolist()
+        return next(model.embed([text])).tolist()
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed multiple strings in one forward pass."""
         model = _get_model()
-        vecs = model.encode(texts, normalize_embeddings=True, batch_size=32)
-        return [v.tolist() for v in vecs]
+        return [vec.tolist() for vec in model.embed(texts, batch_size=32)]
 
     def chunk_text(self, text: str) -> list[str]:
         """

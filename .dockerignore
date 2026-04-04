@@ -1,0 +1,24 @@
+# ── Dockerignore — keep images lean ──────────────────────────────────────────
+.git
+.github
+.venv
+node_modules
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.env
+.env.*
+!.env.production
+blob_storage/
+*.md
+!README.md
+.next
+frontend/.next
+frontend/node_modules
+deploy/
+*.egg-info
+dist/
+build/
+.DS_Store
+*.log

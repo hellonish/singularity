@@ -19,6 +19,7 @@ import { llmModelGroupsFromCatalog } from "@/lib/llm_model_groups";
 import { ChatModelPicker } from "@/components/chat/ChatModelPicker";
 import { showDebugMockResearchControls } from "@/lib/debug_research_mock";
 import { cn } from "@/lib/cn";
+import { ApiError } from "@/lib/api";
 import {
   formatRelative,
   truncateDisplayLabel,
@@ -299,6 +300,8 @@ export default function DashboardPage() {
       ? truncateDisplayLabel(query.trim(), 28)
       : "Research";
 
+  const [createJobError, setCreateJobError] = useState<string | null>(null);
+
   const createJobMutation = useMutation({
     mutationFn: () =>
       jobsApi.create(
@@ -309,10 +312,20 @@ export default function DashboardPage() {
         barModelId,
       ),
     onSuccess: (job) => {
+      setCreateJobError(null);
       setDashThreadId(null);
       setDashLaunch(null);
       setQuery("");
       router.push(`/reports/${job.report_id}?job=${job.job_id}`);
+    },
+    onError: (err) => {
+      const message =
+        err instanceof ApiError && err.status === 429
+          ? "Too many requests — please wait a moment and try again."
+          : err instanceof ApiError
+            ? err.message || "Failed to start research job."
+            : "Failed to start research job.";
+      setCreateJobError(message);
     },
   });
 
@@ -680,6 +693,9 @@ export default function DashboardPage() {
             </button>
           </div>
         </form>
+        {createJobError && (
+          <p className="mt-2 text-center text-xs text-red-600">{createJobError}</p>
+        )}
               </div>
             </div>
           )}

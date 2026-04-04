@@ -578,6 +578,8 @@ function ReportJobProgress({
   }, [isRunning, startedAt]);
 
   const runningFor = isRunning ? formatRunningFor(startedAt) : null;
+  const elapsedMs = startedAt ? Date.now() - new Date(startedAt).getTime() : 0;
+  const isStuck = isRunning && elapsedMs > 10 * 60 * 1000;
   const liveLine = phaseStoryboardContext(phase);
 
   return (
@@ -750,6 +752,42 @@ function ReportJobProgress({
                   {error.length > 400 ? `${error.slice(0, 400)}…` : error}
                 </div>
               )}
+              <button
+                type="button"
+                onClick={onBack}
+                style={{
+                  marginTop: 10,
+                  fontFamily: "var(--mono)",
+                  fontSize: 11,
+                  color: "#374151",
+                  background: "white",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 6,
+                  padding: "5px 12px",
+                  cursor: "pointer",
+                }}
+              >
+                ← Back to Dashboard
+              </button>
+            </div>
+          )}
+
+          {isStuck && (
+            <div
+              style={{
+                marginTop: 24,
+                borderRadius: 8,
+                background: "rgba(234,179,8,0.06)",
+                border: "1px solid rgba(234,179,8,0.25)",
+                padding: "12px 14px",
+              }}
+            >
+              <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "#92400e", marginBottom: 4, fontWeight: 500 }}>
+                Taking longer than expected
+              </div>
+              <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "#b45309", lineHeight: 1.5 }}>
+                The job has been running for {runningFor} with no completion. It may be stuck. You can wait or go back and retry.
+              </div>
               <button
                 type="button"
                 onClick={onBack}

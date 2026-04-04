@@ -1,15 +1,57 @@
 from __future__ import annotations
 
+import json
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from arq.connections import RedisSettings
+from sqlalchemy import select
 
 from api.config import settings
+from db.models import ResearchJob
+from db.session import AsyncSessionLocal
 from workers.patch_job import run_patch_job
 from workers.research_job import run_debug_mock_research_job, run_research_job
 from workers.summary_job import run_summary_job
 
 logger = logging.getLogger(__name__)
+
+
+async def _recover_orphaned_jobs(redis) -> None:
+    """
+    On worker startup, any job still in 'running' or 'pending' state was
+    interrupted by a previous crash. Mark them failed and publish job_error
+    so the frontend SSE stream or polling fallback surfaces the error immediately.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(ResearchJob).where(ResearchJob.status.in_(["running", "pending"]))
+        )
+        orphans = result.scalars().all()
+
+        if not orphans:
+            return
+
+        for job in orphans:
+            job.status = "failed"
+            job.finished_at = datetime.now(timezone.utc)
+            job.error_detail = "Worker process restarted unexpectedly. Please retry."
+        await db.commit()
+
+        for job in orphans:
+            payload = json.dumps({
+                "event": "job_error",
+                "data": {
+                    "status": "failed",
+                    "error": "Worker process restarted unexpectedly. Please retry.",
+                    "attempts": job.attempts or 1,
+                    "elapsed_ms": 0,
+                },
+                "id": str(uuid.uuid4()),
+            })
+            await redis.publish(f"job:{job.id}:events", payload)
+            logger.warning("Recovered orphaned job %s → failed", job.id)
 
 
 class WorkerSettings:
@@ -41,6 +83,7 @@ class WorkerSettings:
         )
         ctx["redis"] = redis
         logger.info("ARQ worker started — redis: %s", settings.redis_url)
+        await _recover_orphaned_jobs(redis)
 
     @staticmethod
     async def on_shutdown(ctx: dict) -> None:
