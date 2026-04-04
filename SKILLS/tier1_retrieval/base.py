@@ -126,8 +126,9 @@ class BaseRetrievalSkill(SkillBase):
                 return []
 
             if original_query:
+                import asyncio as _asyncio
                 from agents.source_gate import pass1_filter
-                sources = pass1_filter(sources, original_query)
+                sources = await _asyncio.to_thread(pass1_filter, sources, original_query)
 
             return [(src, q) for src in sources]
 
@@ -160,25 +161,34 @@ class BaseRetrievalSkill(SkillBase):
         total_sources = 0
         all_sources: list[dict] = []
 
-        for src, q in final_pairs:
-            text = src.get("content", "") or src.get("snippet", "") or src.get("abstract", "")
-            if not text:
-                continue
-            base_cred    = src.get("credibility_base", 0.7)
-            adjusted_cred = _adjust_credibility(src.get("url", ""), base_cred)
-            chunks = vs.ingest_text(
-                collection_name=collection_name,
-                text=text,
-                run_id=run_id,
-                source_url=src.get("url", ""),
-                source_title=src.get("title", "Unknown"),
-                credibility=adjusted_cred,
-                skill=self.name,
-                query=q,
-            )
-            total_chunks  += len(chunks)
-            total_sources += 1
-            all_sources.append(src)
+        def _ingest_all_sync() -> list[tuple[int, dict]]:
+            """Run all ingestion sequentially in one thread to avoid blocking the event loop."""
+            results = []
+            for src, q in final_pairs:
+                text = src.get("content", "") or src.get("snippet", "") or src.get("abstract", "")
+                if not text:
+                    continue
+                base_cred     = src.get("credibility_base", 0.7)
+                adjusted_cred = _adjust_credibility(src.get("url", ""), base_cred)
+                chunks = vs.ingest_text(
+                    collection_name=collection_name,
+                    text=text,
+                    run_id=run_id,
+                    source_url=src.get("url", ""),
+                    source_title=src.get("title", "Unknown"),
+                    credibility=adjusted_cred,
+                    skill=self.name,
+                    query=q,
+                )
+                results.append((len(chunks), src))
+            return results
+
+        ingest_results = await asyncio.to_thread(_ingest_all_sync)
+        for chunk_count, src in ingest_results:
+            if chunk_count > 0:
+                total_chunks  += chunk_count
+                total_sources += 1
+                all_sources.append(src)
 
         # Register citations
         cit_reg = getattr(ctx, "citation_registry", None)
