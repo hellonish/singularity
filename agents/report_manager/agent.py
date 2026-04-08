@@ -22,7 +22,7 @@ from .section_node import SectionNode
 if TYPE_CHECKING:
     from trace import TraceLogger
 
-_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
 _PERSPECTIVES: dict[int, dict] = {
     1: {

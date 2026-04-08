@@ -24,7 +24,7 @@ from utils.json_parser import extract_object
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
 QUERY_MAX_CHARS         = 150   # hard cap on query string length
 JACCARD_DEDUP_THRESHOLD = 0.75  # queries with Jaccard similarity above this are duplicates

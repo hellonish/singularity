@@ -61,7 +61,7 @@ class ThinkPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 _THINKER_SYSTEM: str = (
-    (Path(__file__).parent / "thinker_system_prompt.md")
+    (Path(__file__).parent / "prompts" / "thinker_system_prompt.md")
     .read_text(encoding="utf-8")
     .format(skill_menu=SKILL_DOCS.thinker_menu())
 )

@@ -14,7 +14,7 @@ from agents.report_manager.report_tree import ReportTree, _enforce_node_count, _
 if TYPE_CHECKING:
     from trace import TraceLogger
 
-_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
 
 class ReportLeadAgent:

@@ -44,9 +44,10 @@ def _human_step_label(step_type: str) -> str:
     return step_type.replace("_", " ").strip().title()
 
 _CHAT_DIR = Path(__file__).parent
-SINGULARITY_IDENTITY = (_CHAT_DIR / "identity.md").read_text(encoding="utf-8")
-_RESPONSE_SYSTEM     = (_CHAT_DIR / "response_system_prompt.md").read_text(encoding="utf-8")
-_SUMMARIZE_SYSTEM    = (_CHAT_DIR / "summarize_system_prompt.md").read_text(encoding="utf-8")
+_PROMPTS_DIR = _CHAT_DIR / "prompts"
+SINGULARITY_IDENTITY = (_PROMPTS_DIR / "identity.md").read_text(encoding="utf-8")
+_RESPONSE_SYSTEM     = (_PROMPTS_DIR / "response_system_prompt.md").read_text(encoding="utf-8")
+_SUMMARIZE_SYSTEM    = (_PROMPTS_DIR / "summarize_system_prompt.md").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------

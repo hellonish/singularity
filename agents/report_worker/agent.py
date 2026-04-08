@@ -34,7 +34,7 @@ from .result import WorkerResult
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_DIR    = Path(__file__).parent
+_PROMPT_DIR    = Path(__file__).parent / "prompts"
 _PROMPT_LEAF   = (_PROMPT_DIR / "prompt_leaf.md").read_text(encoding="utf-8")
 _PROMPT_PARENT = (_PROMPT_DIR / "prompt_parent.md").read_text(encoding="utf-8")
 

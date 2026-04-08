@@ -28,7 +28,7 @@ from vector_store.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
-_GATE_SYSTEM_PROMPT = (Path(__file__).parent / "system_prompt.md").read_text(encoding="utf-8")
+_GATE_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
 PASS1_THRESHOLD  = 0.35   # cosine similarity floor; below = off-topic
 SNIPPET_MAX_CHARS = 300   # max characters from each source excerpt for embedding + gating
