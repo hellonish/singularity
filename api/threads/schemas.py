@@ -68,5 +68,3 @@ class SendMessageRequest(BaseModel):
     """When execution_mode is research: intensity tier (1=low, 2=medium, 3=high) for run_pipeline."""
     model_id: str = Field(default=DEFAULT_MODEL_ID, max_length=160)
     """Chat-catalog model id; thinker, chat execution, and research pipeline all use this model with BYOK."""
-    debug_mock: bool = False
-    """With server flag + allowlisted user: stream mock plan/steps/tokens (research only)."""

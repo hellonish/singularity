@@ -338,7 +338,7 @@ Execution order: `RequestID → Auth → RateLimit → UsageEmitter → CORS`
 | Job timeout | 30 minutes hard cap |
 | Max retries | 3 attempts |
 | Result retention | 1 hour in Redis |
-| Job functions | `run_research_job`, `run_debug_mock_research_job`, `run_patch_job`, `run_summary_job` |
+| Job functions | `run_research_job`, `run_patch_job`, `run_summary_job` |
 
 ### Job Lifecycle
 
@@ -456,7 +456,6 @@ Worker (Python) → Redis pub/sub → FastAPI SSE endpoint → Browser EventSour
 | `llm_model_groups.ts` | Model grouping for UI |
 | `byok_recommended_models.ts` | BYOK model recommendations |
 | `public_api_base_url.ts` | Public API URL resolution |
-| `debug_research_mock.ts` | Debug mock research mode |
 | `cn.ts` | Class name utility |
 | `utils.ts` | General utilities |
 

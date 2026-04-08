@@ -5,11 +5,10 @@ import json
 import uuid
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.debug_research_mock_policy import assert_debug_mock_request_allowed
 from api.deps import get_current_user, get_db
 from api.llm_credentials_service import (
     require_provider_key_for_model,
@@ -24,7 +23,6 @@ from api.threads.schemas import (
     ThreadSummaryResponse,
     ThreadWithMessages,
 )
-from api.threads.debug_mock_research_stream import iter_debug_mock_research_sse
 from api.threads.service import (
     assemble_context,
     create_thread,
@@ -154,14 +152,6 @@ async def send_message(
     """
     thread = await get_thread(db, thread_id, current_user.id)
 
-    if body.debug_mock and body.execution_mode != "research":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="debug_mock is only valid when execution_mode is research",
-        )
-    if body.debug_mock:
-        assert_debug_mock_request_allowed(current_user, True)
-
     # Save the user's message
     await save_message(db, thread_id, "user", body.content)
 
@@ -174,16 +164,6 @@ async def send_message(
     async def event_generator() -> AsyncGenerator[bytes, None]:
         assistant_content = ""
         try:
-            if body.execution_mode == "research" and body.debug_mock:
-                async for chunk in iter_debug_mock_research_sse(
-                    db,
-                    thread_id,
-                    body.research_strength,
-                    body.content,
-                ):
-                    yield chunk
-                return
-
             from agents.chat.agent import ChatAgent
 
             mid = validate_model_id(body.model_id)

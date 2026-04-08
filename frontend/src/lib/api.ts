@@ -182,7 +182,6 @@ export const jobsApi = {
     query: string,
     strength = 2,
     idempotencyKey?: string,
-    debugMock = false,
     modelId: string = DEFAULT_CHAT_MODEL_ID,
   ) =>
     request<JobResponse>("/api/v1/research/jobs", {
@@ -192,7 +191,6 @@ export const jobsApi = {
         strength,
         model_id: modelId,
         idempotency_key: idempotencyKey,
-        ...(debugMock ? { debug_mock: true } : {}),
       }),
     }),
   get: (id: string) =>

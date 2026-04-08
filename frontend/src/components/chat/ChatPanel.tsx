@@ -11,7 +11,6 @@ import {
   DEFAULT_CHAT_MODEL_ID,
   type MessageResponse,
 } from "@/lib/api";
-import { showDebugMockResearchControls } from "@/lib/debug_research_mock";
 import { cn } from "@/lib/cn";
 import { llmModelGroupsFromCatalog } from "@/lib/llm_model_groups";
 import {
@@ -48,7 +47,6 @@ type SendOverrides = {
   chat_variant: "standard" | "extended";
   research_strength: number;
   model_id?: string;
-  debug_mock?: boolean;
   onComplete?: () => void;
 };
 
@@ -91,7 +89,6 @@ export function ChatPanel({
   const [executionMode, setExecutionMode] = useState<ExecutionMode>("chat");
   const [extendedOn, setExtendedOn] = useState(false);
   const [researchStrength, setResearchStrength] = useState<1 | 2 | 3>(2);
-  const [debugMockResearch, setDebugMockResearch] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState(
     () => initialModelId?.trim() || DEFAULT_CHAT_MODEL_ID,
   );
@@ -214,10 +211,6 @@ export function ChatPanel({
         overrides?.research_strength ?? researchStrength,
       );
       const modelId = overrides?.model_id ?? selectedModelId;
-      const useDebugMock =
-        execMode === "research" &&
-        !followUpChatOnly &&
-        (overrides?.debug_mock ?? debugMockResearch);
       if (!overrides) setInput("");
       setStreaming(true);
       setStreamingTokens("");
@@ -255,7 +248,6 @@ export function ChatPanel({
             chat_variant: variant,
             research_strength: strength,
             model_id: modelId,
-            ...(useDebugMock ? { debug_mock: true } : {}),
           }),
         });
 
@@ -357,7 +349,6 @@ export function ChatPanel({
       executionMode,
       chatVariant,
       researchStrength,
-      debugMockResearch,
       followUpChatOnly,
       selectedModelId,
       llmCatalog?.models,
@@ -642,18 +633,6 @@ export function ChatPanel({
                     </button>
                   ))}
                 </div>
-                {showDebugMockResearchControls(session?.user?.email) ? (
-                  <label className="ml-1 flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-amber-900/90">
-                    <input
-                      type="checkbox"
-                      checked={debugMockResearch}
-                      disabled={streaming}
-                      onChange={(e) => setDebugMockResearch(e.target.checked)}
-                      className="rounded border-amber-500 text-amber-700 disabled:opacity-40"
-                    />
-                    Mock (no LLM)
-                  </label>
-                ) : null}
               </div>
             )}
           </div>

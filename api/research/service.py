@@ -9,7 +9,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
-from api.debug_research_mock_policy import use_debug_mock_research_job
 from api.research.schemas import CreateJobRequest
 from db.models import Report, ResearchJob, UsageEvent, User
 
@@ -106,14 +105,13 @@ async def create_job(
 
     job_model_id = validate_model_id(request.model_id)
 
-    if not use_debug_mock_research_job(user, request.debug_mock):
-        prov = model_provider(job_model_id)
-        pk = await get_decrypted_provider_key(db, user_id, prov)
-        if not pk:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Add your {prov} API key in Profile → LLM keys to run research with this model.",
-            )
+    prov = model_provider(job_model_id)
+    pk = await get_decrypted_provider_key(db, user_id, prov)
+    if not pk:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Add your {prov} API key in Profile → LLM keys to run research with this model.",
+        )
 
     # Create report row
     report = Report(
@@ -141,10 +139,7 @@ async def create_job(
     await db.commit()
     await db.refresh(job)
 
-    if use_debug_mock_research_job(user, request.debug_mock):
-        await redis.enqueue_job("run_debug_mock_research_job", str(job.id))
-    else:
-        await redis.enqueue_job("run_research_job", str(job.id))
+    await redis.enqueue_job("run_research_job", str(job.id))
 
     return job, True
 

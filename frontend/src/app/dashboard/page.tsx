@@ -17,7 +17,6 @@ import {
 } from "@/lib/api";
 import { llmModelGroupsFromCatalog } from "@/lib/llm_model_groups";
 import { ChatModelPicker } from "@/components/chat/ChatModelPicker";
-import { showDebugMockResearchControls } from "@/lib/debug_research_mock";
 import { cn } from "@/lib/cn";
 import { ApiError } from "@/lib/api";
 import {
@@ -228,7 +227,6 @@ export default function DashboardPage() {
   const [barMode, setBarMode] = useState<"chat" | "research">("research");
   const [barExtended, setBarExtended] = useState(false);
   const [barJobStrength, setBarJobStrength] = useState<1 | 2 | 3>(2);
-  const [barDebugMockResearch, setBarDebugMockResearch] = useState(false);
   const [barModelId, setBarModelId] = useState(DEFAULT_CHAT_MODEL_ID);
   const [deleteTarget, setDeleteTarget] = useState<ReportMeta | null>(null);
   const [dashThreadId, setDashThreadId] = useState<string | null>(null);
@@ -304,13 +302,7 @@ export default function DashboardPage() {
 
   const createJobMutation = useMutation({
     mutationFn: () =>
-      jobsApi.create(
-        query,
-        barJobStrength,
-        undefined,
-        barDebugMockResearch,
-        barModelId,
-      ),
+      jobsApi.create(query, barJobStrength, undefined, barModelId),
     onSuccess: (job) => {
       setCreateJobError(null);
       setDashThreadId(null);
@@ -632,17 +624,6 @@ export default function DashboardPage() {
                     </button>
                   ))}
                 </div>
-                {showDebugMockResearchControls(session?.user?.email) ? (
-                  <label className="ml-1 flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-amber-900/90">
-                    <input
-                      type="checkbox"
-                      checked={barDebugMockResearch}
-                      onChange={(e) => setBarDebugMockResearch(e.target.checked)}
-                      className="rounded border-amber-500 text-amber-700"
-                    />
-                    Mock (no LLM)
-                  </label>
-                ) : null}
               </div>
             )}
           </div>

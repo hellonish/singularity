@@ -47,9 +47,5 @@ class Settings(BaseSettings):
     default_daily_token_budget: int = 1_000_000
     max_concurrent_jobs_per_user: int = 2
 
-    # Integration testing: mock research (no LLM). Requires allowlisted email + client flag.
-    debug_mock_research: bool = False
-    debug_mock_research_allow_email: str = "nish2002.sharma@gmail.com"
-
 
 settings = Settings()

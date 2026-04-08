@@ -17,10 +17,6 @@ class CreateJobRequest(BaseModel):
         description="Chat-catalog model id; full pipeline uses it with the user's BYOK key for that provider.",
     )
     idempotency_key: Optional[str] = None
-    debug_mock: bool = Field(
-        default=False,
-        description="When true with server flag + allowlisted user, run mock worker (no LLM).",
-    )
 
 
 class JobResponse(BaseModel):
