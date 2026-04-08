@@ -1,10 +1,6 @@
 """
 CLI entry point — run from project root:
 
-    # Legacy DAG mode (--depth):
-    python -m agents.orchestrator.cli "your question" --depth shallow
-
-    # Phase 5 product mode (--strength 1|2|3 = low|medium|high):
     python -m agents.orchestrator.cli "your question" --strength 2
     python -m agents.orchestrator.cli "your question" --strength 3 --audience expert
 """
@@ -18,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 from agents.chat.models import DEFAULT_MODEL_ID
 
-from .runner import run_orchestrator
 from .pipeline import run_pipeline
 from render import ReportHtmlRenderer
 
@@ -32,74 +27,6 @@ def _save_report(report_md: str, query: str, metadata: dict) -> None:
     html = ReportHtmlRenderer().render(report_md, query=query, metadata=metadata)
     Path("final_report.html").write_text(html, encoding="utf-8")
     logger.info("Saved  →  final_report.html")
-
-
-def _legacy_run(
-    problem: str,
-    depth: str,
-    audience: str,
-    lang: str,
-    llm_api_key: str,
-) -> None:
-    """Original DAG-based pipeline (--depth flag)."""
-
-    async def main_run():
-        ctx = await run_orchestrator(
-            problem,
-            audience=audience,
-            output_language=lang,
-            depth=depth,
-            grok_api_key=llm_api_key,
-        )
-
-        output_data = None
-        if ctx.final_output_slot and ctx.final_output_slot in ctx.results:
-            output_data = ctx.results[ctx.final_output_slot]
-        else:
-            _PRIMARY = {
-                "report_generator", "exec_summary", "explainer",
-                "decision_matrix", "knowledge_delta",
-            }
-            for slot, data in ctx.results.items():
-                if isinstance(data, dict) and data.get("skill_name") in _PRIMARY:
-                    output_data = data
-
-        if output_data:
-            content = output_data.get("content", "").strip()
-            gaps = output_data.get("coverage_gaps_disclosed", [])
-            gaps_md = (
-                "\n\n---\n\n## Coverage Gaps\n\n" + "\n".join(f"- {g}" for g in gaps)
-                if gaps else ""
-            )
-            bib_md = ""
-            if ctx.citation_registry:
-                bib_text = ctx.citation_registry.format_bibliography()
-                if bib_text.strip():
-                    bib_md = f"\n\n---\n\n## References\n\n{bib_text}"
-            cred_md = ""
-            if ctx.credibility_scores:
-                avg = sum(ctx.credibility_scores.values()) / len(ctx.credibility_scores)
-                cred_md = f"\n\n---\n\n*Mean source credibility: {avg:.2f} / 1.00*"
-            report_md = (
-                f"# Research Report\n\n**Query:** {problem}\n\n---\n\n"
-                f"{content}{gaps_md}{bib_md}{cred_md}\n"
-            )
-        else:
-            report_md = (
-                f"# Research Report\n\n**Query:** {problem}\n\n"
-                "> No output document was generated — the pipeline may have failed.\n"
-            )
-
-        _save_report(
-            report_md,
-            query=problem,
-            metadata={
-                "audience": audience or "practitioner",
-                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            },
-        )
-
-    asyncio.run(main_run())
 
 
 def _strength_run(
@@ -146,27 +73,18 @@ if __name__ == "__main__":
             "Examples:\n"
             "  python -m agents.orchestrator.cli \"AI safety\" --strength 2 --api-key YOUR_KEY\n"
             "  python -m agents.orchestrator.cli \"AI safety\" --strength 3 --model-id grok-3-mini --api-key KEY\n"
-            "  python -m agents.orchestrator.cli \"AI safety\" --depth shallow --api-key YOUR_KEY\n"
         ),
     )
     parser.add_argument("problem", nargs="*", help="Research question")
 
-    # ── Mode: strength (Phase 5) OR depth (legacy) ───────────────────
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
+    parser.add_argument(
         "--strength",
         type=int,
         choices=[1, 2, 3],
         metavar="1|2|3",
-        help="[Phase 5] Intensity: 1=low, 2=medium, 3=high.",
+        default=2,
+        help="Intensity: 1=low, 2=medium, 3=high (default: 2).",
     )
-    mode.add_argument(
-        "--depth",
-        choices=["shallow", "standard", "deep"],
-        default=None,
-        help="[Legacy] shallow / standard / deep DAG run.",
-    )
-
     parser.add_argument(
         "--audience",
         default="",
@@ -191,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-id",
         default=DEFAULT_MODEL_ID,
-        help=f"Registered chat model id for --strength runs (default: {DEFAULT_MODEL_ID}).",
+        help=f"Registered chat model id (default: {DEFAULT_MODEL_ID}).",
     )
     args = parser.parse_args()
 
@@ -200,20 +118,14 @@ if __name__ == "__main__":
         "as an AI Engineer?"
     )
 
-    if args.strength is not None:
-        logger.info("Executing : %s", problem)
-        logger.info("Strength  : %d", args.strength)
-        _strength_run(
-            problem,
-            args.strength,
-            args.audience,
-            args.lang,
-            trace=args.trace,
-            model_id=args.model_id,
-            llm_api_key=args.api_key,
-        )
-    else:
-        depth = args.depth or "standard"
-        logger.info("Executing : %s", problem)
-        logger.info("Depth     : %s", depth)
-        _legacy_run(problem, depth, args.audience, args.lang, args.api_key)
+    logger.info("Executing : %s", problem)
+    logger.info("Strength  : %d", args.strength)
+    _strength_run(
+        problem,
+        args.strength,
+        args.audience,
+        args.lang,
+        trace=args.trace,
+        model_id=args.model_id,
+        llm_api_key=args.api_key,
+    )

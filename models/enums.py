@@ -1,15 +1,7 @@
-"""Shared enumerations used across all tiers and the orchestrator."""
+"""Shared enumerations used across all tiers and the pipeline."""
 from __future__ import annotations
 
 from enum import Enum
-
-
-class IssueType(str, Enum):
-    """Classification of an unresolved plan node (used by gap analysis)."""
-    UNSATISFIED   = "unsatisfied"
-    PARTIAL       = "partial"
-    CONTRADICTORY = "contradictory"
-    BLOCKED       = "blocked"
 
 
 class NodeStatus(str, Enum):

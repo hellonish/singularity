@@ -46,19 +46,11 @@ class ThinkPlan(BaseModel):
 
     @field_validator("strength", mode="before")
     @classmethod
-    def _normalize_strength_tier(cls, v: Any) -> int:
-        """Accept legacy 1–10 from models; normalize to tier 1–3 before ge/le checks."""
+    def _validate_strength_tier(cls, v: Any) -> int:
+        """Enforce tier 1–3; default to 2 when absent."""
         if v is None:
             return 2
-        x = int(v)
-        if x in (1, 2, 3):
-            return x
-        x = max(1, min(10, x))
-        if x <= 3:
-            return 1
-        if x <= 7:
-            return 2
-        return 3
+        return max(1, min(3, int(v)))
 
 
 # ---------------------------------------------------------------------------

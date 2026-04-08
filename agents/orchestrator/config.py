@@ -10,19 +10,15 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-PROJECT_ROOT   = Path(__file__).resolve().parent.parent.parent
-SKILL_PATH     = Path(__file__).resolve().parent.parent / "planner" / "system_prompt.md"
-REGISTRY_PATH  = Path(__file__).resolve().parent.parent / "planner" / "domain_registry.json"
-PLANNER_OUTPUT = PROJECT_ROOT / "planner_output.md"
+PROJECT_ROOT  = Path(__file__).resolve().parent.parent.parent
+REGISTRY_PATH = Path(__file__).resolve().parent.parent / "planner" / "domain_registry.json"
 
 # ---------------------------------------------------------------------------
 # LLM
 # ---------------------------------------------------------------------------
-PLANNER_MODEL      = "grok-3-mini"
-MAX_TOKENS_PLANNER = 6000
 
-# Single cheap classifier call for domain routing (legacy planner + Phase A retrieval)
-DOMAIN_CLASSIFIER_MODEL = "grok-3-mini"
+# Single cheap classifier call for domain routing (Phase A retrieval)
+DOMAIN_CLASSIFIER_MODEL      = "grok-3-mini"
 MAX_TOKENS_DOMAIN_CLASSIFIER = 96
 
 # Tiered model routing
@@ -35,22 +31,12 @@ MANAGER_MODEL         = "grok-3-mini"   # 3 structural proposals
 LEAD_MODEL            = "grok-3"        # 1 synthesis/merge call
 WORKER_ANALYSIS_MODEL = "grok-3-mini"   # Call 1 (analysis) — high-volume structured JSON
 WORKER_WRITE_MODEL    = "grok-3"        # Call 2 (section write) — the final product
+WORKER_MODEL          = WORKER_WRITE_MODEL
 POLISHER_MODEL        = "grok-3-mini"   # Phase D polish — parallel, formatting-focused
 SOURCE_GATE_MODEL     = "grok-3-mini"   # 2-pass source gate — per-skill aggregate Grok call
-
-# Legacy alias kept for any code outside Phase C that still imports WORKER_MODEL
-WORKER_MODEL = WORKER_WRITE_MODEL
-
-# ---------------------------------------------------------------------------
-# Execution limits
-# ---------------------------------------------------------------------------
-MAX_REPLAN_ROUNDS = 4
-MAX_NODES         = 15
-RETRY_BACKOFF     = [1, 4]   # seconds between retries (len + 1 = total attempts)
 
 # ---------------------------------------------------------------------------
 # Chat Agent
 # ---------------------------------------------------------------------------
 CHAT_THINKER_MODEL  = "grok-3-mini"   # Thinking layer — skill selection + step plan
 CHAT_RESPONSE_MODEL = "grok-3-mini"   # Chat mode generation (upgrade to grok-3 for quality)
-

@@ -1,13 +1,5 @@
 """
-run_pipeline — Phase 5 research pipeline (current primary production path).
-
-WHEN TO USE THIS vs run_orchestrator
---------------------------------------
-Use ``run_pipeline`` (this module) for all full research reports.  It is the
-CURRENT production path.
-
-Use ``run_orchestrator`` (agents/orchestrator/runner.py) for legacy DAG-style
-skill execution or the replan-loop flow.  See runner.py for the full comparison.
+run_pipeline — Phase 5 strength-based research pipeline.
 
 Phase sequence
 --------------

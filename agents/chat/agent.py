@@ -24,26 +24,11 @@ _ROOT = str(Path(__file__).resolve().parent.parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from agents.chat.thinker import Thinker, ThinkPlan
-
-
-def _coerce_research_intensity(raw: int) -> int:
-    """
-    Normalize to tier 1–3. Accepts API values 1–3 or legacy thinker outputs 1–10.
-    """
-    x = int(raw)
-    if x in (1, 2, 3):
-        return x
-    x = max(1, min(10, x))
-    if x <= 3:
-        return 1
-    if x <= 7:
-        return 2
-    return 3
 from agents.chat.executor import ChatModeExecutor
 from agents.chat.models import (
     AVAILABLE_MODELS, DEFAULT_MODEL_ID, make_client, get_model_info
 )
+from agents.chat.thinker import Thinker, ThinkPlan
 
 
 # ---------------------------------------------------------------------------
@@ -164,13 +149,10 @@ class ChatAgent:
         plan: ThinkPlan,
         message: str,
     ) -> str:
-        """Execute research mode via the full run_pipeline(). Returns Markdown."""
+        """Execute research mode via run_pipeline(). Returns Markdown."""
         from agents.orchestrator.pipeline import run_pipeline
 
-        strength = _coerce_research_intensity(plan.strength)
-        audience = plan.audience or "practitioner"
-
-        logger.info("[Research Mode] strength=%d audience=%s", strength, audience)
+        logger.info("[Research Mode] strength=%d audience=%s", plan.strength, plan.audience or "practitioner")
 
         if not (self._api_key or "").strip():
             raise ValueError(
@@ -179,8 +161,8 @@ class ChatAgent:
 
         report_md = await run_pipeline(
             query=message,
-            strength=strength,
-            audience=audience,
+            strength=plan.strength,
+            audience=plan.audience or "practitioner",
             output_language="en",
             model_id=self._model_id,
             llm_api_key=self._api_key,
@@ -234,8 +216,8 @@ class ChatAgent:
             - str fragments for visible assistant text (chat tokens or research markdown chunks).
 
         Inputs:
-            execution_mode: "chat" or "research" — user-selected run mode.
-            chat_variant: "standard" or "extended" — thinker extended flag when execution_mode is chat.
+            execution_mode:    "chat" or "research" — user-selected run mode.
+            chat_variant:      "standard" or "extended" — thinker extended flag when execution_mode is chat.
             research_strength: 1–3 (low/medium/high) when execution_mode is research.
         """
         history = history or []
@@ -252,7 +234,7 @@ class ChatAgent:
         )
         if execution_mode == "research":
             plan.mode = "research"
-            plan.strength = _coerce_research_intensity(int(research_strength))
+            plan.strength = max(1, min(3, int(research_strength)))
         else:
             plan.mode = "chat"
 
@@ -269,7 +251,7 @@ class ChatAgent:
             if chunk.startswith("§STEP:"):
                 line = chunk.rstrip("\n")
                 try:
-                    rest = line[len("§STEP:") :]
+                    rest = line[len("§STEP:"):]
                     sid_str, stype, sdesc = rest.split(":", 2)
                     yield {
                         "kind": "step",
