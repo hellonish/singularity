@@ -11,7 +11,9 @@ engine = create_async_engine(
     pool_size=5,
     max_overflow=10,
     pool_pre_ping=True,
-    pool_recycle=300,
+    # Research jobs can run up to 30 min; recycle must exceed job timeout so
+    # a connection held for the job's duration isn't cut mid-execution.
+    pool_recycle=1800,
     echo=False,
     future=True,
 )

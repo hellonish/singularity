@@ -13,6 +13,7 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -26,6 +27,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+
+from api.config import settings
 
 
 def _uuid() -> uuid.UUID:
@@ -129,11 +132,15 @@ class UserLlmCredential(Base):
         _TZDateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    # Stored at write time so reads never need to decrypt just for display.
+    last_four: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+
     user: Mapped[User] = relationship(back_populates="llm_credentials")
 
     __table_args__ = (
         UniqueConstraint("user_id", "provider", name="uq_user_llm_provider"),
-        Index("idx_user_llm_credentials_user", "user_id"),
+        # Compound index matches the most common lookup pattern: WHERE user_id = ? AND provider = ?
+        Index("idx_user_llm_credentials_user_provider", "user_id", "provider"),
     )
 
 
@@ -163,7 +170,10 @@ class Report(Base):
     )
     threads: Mapped[list[Thread]] = relationship(back_populates="report")
 
-    __table_args__ = (Index("idx_reports_user_id", "user_id", "created_at"),)
+    __table_args__ = (
+        CheckConstraint("strength BETWEEN 1 AND 3", name="ck_report_strength"),
+        Index("idx_reports_user_id", "user_id", "created_at"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +223,10 @@ class ResearchJob(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     strength: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
     # Chat-catalog model_id; full pipeline runs on this model with the user's BYOK key for that provider.
-    llm_model_id: Mapped[str] = mapped_column(String(128), nullable=False, default="grok-3-mini")
+    # Default reads from settings so it can be changed via env var without a migration.
+    llm_model_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, default=lambda: settings.default_llm_model_id
+    )
     attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     max_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     current_phase: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -227,6 +240,7 @@ class ResearchJob(Base):
     report: Mapped[Report] = relationship(back_populates="research_jobs")
 
     __table_args__ = (
+        CheckConstraint("strength BETWEEN 1 AND 3", name="ck_research_job_strength"),
         Index(
             "idx_rj_idempotency",
             "user_id",

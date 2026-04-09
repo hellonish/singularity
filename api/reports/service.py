@@ -6,7 +6,9 @@ and optimistic-locking patch coordination.
 """
 from __future__ import annotations
 
+import difflib
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,6 +20,8 @@ from sqlalchemy.orm import selectinload
 
 from api.db.models import Report, ReportVersion, User
 from storage import get_blob_store
+
+logger = logging.getLogger(__name__)
 
 # Content size threshold: inline if smaller, blob otherwise.
 _INLINE_THRESHOLD = 500_000  # ~500 KB
@@ -96,6 +100,51 @@ async def get_latest_version(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def batch_get_latest_versions(
+    db: AsyncSession,
+    report_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, Optional[ReportVersion]]:
+    """
+    Fetch the latest ReportVersion for each report in a single query.
+
+    Returns a dict mapping report_id → latest ReportVersion (or None).
+    Avoids N+1 queries when listing reports with version metadata.
+    """
+    if not report_ids:
+        return {}
+
+    # Use a lateral/distinct-on subquery to get max version_num per report,
+    # then join back to fetch the full row.
+    from sqlalchemy import and_
+    from sqlalchemy.dialects.postgresql import array
+
+    # Subquery: max version_num per report_id
+    sub = (
+        select(
+            ReportVersion.report_id,
+            func.max(ReportVersion.version_num).label("max_ver"),
+        )
+        .where(ReportVersion.report_id.in_(report_ids))
+        .group_by(ReportVersion.report_id)
+        .subquery()
+    )
+
+    result = await db.execute(
+        select(ReportVersion).join(
+            sub,
+            and_(
+                ReportVersion.report_id == sub.c.report_id,
+                ReportVersion.version_num == sub.c.max_ver,
+            ),
+        )
+    )
+    rows = result.scalars().all()
+    mapping: dict[uuid.UUID, Optional[ReportVersion]] = {rid: None for rid in report_ids}
+    for row in rows:
+        mapping[row.report_id] = row
+    return mapping
 
 
 async def list_versions(
@@ -234,7 +283,6 @@ async def initiate_patch(
     # Verify selected_text exists in content (fuzzy match)
     content = await load_content(version)
     if selected_text not in content:
-        import difflib
         ratio = difflib.SequenceMatcher(None, selected_text, content).quick_ratio()
         if ratio < 0.85:
             raise HTTPException(
@@ -250,7 +298,26 @@ async def delete_report(
     report_id: uuid.UUID,
     user_id: uuid.UUID,
 ) -> None:
-    """Soft-verify ownership and delete a report and all its versions."""
+    """Delete a report, its versions, and any associated blob-store objects."""
     report = await get_report(db, report_id, user_id)
+
+    # Delete S3/local blobs before removing the DB rows so we don't leak
+    # storage if the process crashes between the DB delete and the blob delete.
+    versions_result = await db.execute(
+        select(ReportVersion).where(ReportVersion.report_id == report_id)
+    )
+    versions = versions_result.scalars().all()
+    blob_uris = [v.content_uri for v in versions if v.content_uri]
+    if blob_uris:
+        store = get_blob_store()
+        for uri in blob_uris:
+            key = uri.replace("local://", "").replace("s3://", "")
+            try:
+                await store.delete(key)
+            except Exception:
+                # Log but don't abort the delete — a leaked blob is better
+                # than a failed delete leaving orphaned DB rows.
+                logger.warning("Failed to delete blob %s during report deletion", uri)
+
     await db.delete(report)
     await db.commit()

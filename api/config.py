@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_JWT_SECRET_PLACEHOLDER = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -13,7 +16,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # JWT
-    jwt_secret: str = "change-me-in-production"
+    jwt_secret: str = _JWT_SECRET_PLACEHOLDER
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
@@ -46,6 +49,26 @@ class Settings(BaseSettings):
     # Quotas
     default_daily_token_budget: int = 1_000_000
     max_concurrent_jobs_per_user: int = 2
+
+    # Default LLM model used when a job has no explicit model_id
+    default_llm_model_id: str = "grok-3-mini"
+
+    @model_validator(mode="after")
+    def _validate_production_secrets(self) -> "Settings":
+        """Fail fast in production if critical secrets are missing or placeholder."""
+        if self.environment == "production":
+            errors: list[str] = []
+            if not self.jwt_secret or self.jwt_secret == _JWT_SECRET_PLACEHOLDER:
+                errors.append("JWT_SECRET must be set to a strong secret in production")
+            if not self.llm_credentials_encryption_key:
+                errors.append("LLM_CREDENTIALS_ENCRYPTION_KEY must be set in production")
+            if not self.google_client_id:
+                errors.append("GOOGLE_CLIENT_ID must be set in production")
+            if errors:
+                raise ValueError(
+                    "Production configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
+                )
+        return self
 
 
 settings = Settings()

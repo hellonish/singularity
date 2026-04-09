@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -17,6 +18,7 @@ from api.config import settings
 from api.deps import get_db, get_redis, set_redis_pool
 from api.middleware.auth import AuthMiddleware
 from api.middleware.rate_limit import RateLimitMiddleware
+from api.middleware.request_id import RequestIdFilter, RequestIdMiddleware
 from api.middleware.usage_emitter import UsageEmitterMiddleware
 from api.reports.router import router as reports_router
 from api.research.router import router as research_router
@@ -25,6 +27,45 @@ from api.users.router import router as users_router
 from api.db.models import Base
 from api.db.session import engine
 
+
+def _configure_logging() -> None:
+    """
+    Set up structured logging.
+
+    - In production: JSON lines via python-json-logger so log aggregators
+      (Datadog, CloudWatch, Loki) can parse fields without regex.
+    - In development: human-readable format with request_id included.
+
+    The RequestIdFilter is added to the root handler so every log record
+    produced during a request carries the request_id field automatically.
+    """
+    log_level = logging.DEBUG if settings.environment == "development" else logging.INFO
+
+    try:
+        from pythonjsonlogger import jsonlogger
+
+        formatter: logging.Formatter = jsonlogger.JsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(name)s %(request_id)s %(message)s",
+            rename_fields={"asctime": "timestamp", "levelname": "level"},
+        )
+    except ImportError:
+        # Fall back to plain text if python-json-logger isn't installed.
+        formatter = logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s request_id=%(request_id)s — %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    handler.addFilter(RequestIdFilter())
+
+    root = logging.getLogger()
+    root.setLevel(log_level)
+    # Replace any handlers added by uvicorn/gunicorn so our format wins.
+    root.handlers = [handler]
+
+
+_configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -88,11 +129,13 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 # Innermost (runs closest to route handlers)
-# Execution order (reverse of add order): Auth → RateLimit → UsageEmitter
+# Execution order (reverse of add order): RequestId → Auth → RateLimit → UsageEmitter
+# RequestId runs first so every subsequent middleware and handler has request_id available.
 # Auth must run before RateLimit so rate limiting uses per-user keys, not shared IP.
 app.add_middleware(UsageEmitterMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 # CORS — must wrap everything.
 # In development, allow any localhost / 127.0.0.1 port so PUT (e.g. BYOK keys) works when the

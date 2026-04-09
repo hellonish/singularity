@@ -147,7 +147,7 @@ class UsageEmitterMiddleware(BaseHTTPMiddleware):
         else:
             event_type = "api_request"
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             _emit_usage_event(
                 user_id=user_id,
                 event_type=event_type,
@@ -159,5 +159,16 @@ class UsageEmitterMiddleware(BaseHTTPMiddleware):
                 ip_address=ip_address,
             )
         )
+        # Attach a done-callback so unhandled exceptions in the task are
+        # logged rather than silently dropped as "Task exception was never retrieved".
+        task.add_done_callback(_log_task_exception)
 
         return response
+
+
+def _log_task_exception(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        logger.exception(
+            "Unhandled exception in background usage-emit task",
+            exc_info=task.exception(),
+        )

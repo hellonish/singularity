@@ -89,11 +89,15 @@ async def get_decrypted_provider_key(
 
 
 def credential_row_to_public(row: UserLlmCredential) -> dict:
-    try:
-        plain = decrypt_llm_secret(row.encrypted_secret)
-        lf = last_four(plain)
-    except Exception:
-        lf = "????"
+    # Use the pre-computed last_four column; fall back to decrypting only for
+    # rows written before this column was added (migration backfill not yet done).
+    lf = row.last_four
+    if lf is None:
+        try:
+            plain = decrypt_llm_secret(row.encrypted_secret)
+            lf = last_four(plain)
+        except Exception:
+            lf = "????"
     return {
         "id": row.id,
         "provider": row.provider,
@@ -128,9 +132,11 @@ async def upsert_credential(
             detail="API key is too short",
         )
     enc = encrypt_llm_secret(secret)
+    lf = last_four(secret)
     existing = await get_credential_row(db, user_id, provider)
     if existing:
         existing.encrypted_secret = enc
+        existing.last_four = lf
         existing.label = label
         existing.updated_at = datetime.now(timezone.utc)
         await db.commit()
@@ -140,6 +146,7 @@ async def upsert_credential(
         user_id=user_id,
         provider=provider,
         encrypted_secret=enc,
+        last_four=lf,
         label=label,
     )
     db.add(row)

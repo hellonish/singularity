@@ -5,8 +5,8 @@ import uuid
 from typing import AsyncGenerator
 
 from arq import ArqRedis
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ def _job_to_response(job: ResearchJob) -> JobResponse:
 @router.post("/jobs", response_model=JobResponse)
 async def create_research_job(
     body: CreateJobRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     redis: ArqRedis = Depends(get_redis),
@@ -52,12 +53,8 @@ async def create_research_job(
         daily_token_budget=current_user.daily_token_budget,
         request=body,
     )
-    response_data = _job_to_response(job)
-    http_status = status.HTTP_201_CREATED if is_new else status.HTTP_200_OK
-    return JSONResponse(
-        content=response_data.model_dump(mode="json"),
-        status_code=http_status,
-    )
+    response.status_code = status.HTTP_201_CREATED if is_new else status.HTTP_200_OK
+    return _job_to_response(job)
 
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)

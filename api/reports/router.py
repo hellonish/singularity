@@ -1,9 +1,12 @@
 """Reports API router — CRUD, versions, export."""
 from __future__ import annotations
 
+import difflib
+import io
 import uuid
 from typing import Optional
 
+import markdown as md_lib
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -20,8 +23,10 @@ from api.db.schemas import (
     VersionMeta,
 )
 from api.reports.service import (
+    batch_get_latest_versions,
     create_version,
     delete_report,
+    get_latest_version,
     get_report,
     get_version_content,
     list_reports,
@@ -31,6 +36,10 @@ from api.reports.service import (
 from api.db.schemas import ThreadResponse
 from api.threads.service import get_or_create_default_report_thread
 from api.db.models import User
+
+# Maximum length of selected_text accepted in a patch request.
+# Prevents CPU exhaustion via expensive SequenceMatcher on large strings.
+_MAX_SELECTED_TEXT_LEN = 50_000
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -56,11 +65,10 @@ async def list_user_reports(
 ) -> ReportListResponse:
     """Cursor-paginated list of the user's reports, newest first."""
     reports, next_cursor = await list_reports(db, current_user.id, cursor, limit)
-    items = []
-    for r in reports:
-        from api.reports.service import get_latest_version
-        latest = await get_latest_version(db, r.id)
-        items.append(_report_to_meta(r, latest))
+    # Batch-fetch latest versions in a single query instead of N+1 per report.
+    report_ids = [r.id for r in reports]
+    latest_by_report = await batch_get_latest_versions(db, report_ids)
+    items = [_report_to_meta(r, latest_by_report.get(r.id)) for r in reports]
     return ReportListResponse(items=items, next_cursor=next_cursor)
 
 
@@ -89,7 +97,6 @@ async def get_report_meta(
 ) -> ReportMeta:
     """Retrieve metadata for a single report."""
     report = await get_report(db, report_id, current_user.id)
-    from api.reports.service import get_latest_version
     latest = await get_latest_version(db, report_id)
     return _report_to_meta(report, latest)
 
@@ -170,10 +177,16 @@ async def patch_report_version(
             detail="Content has been modified since you last read it. Please refresh.",
         )
 
+    # Guard against CPU exhaustion from SequenceMatcher on very large inputs.
+    if len(body.selected_text) > _MAX_SELECTED_TEXT_LEN:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"selected_text exceeds maximum length of {_MAX_SELECTED_TEXT_LEN} characters",
+        )
+
     # Verify selected text exists in content
     content = await load_content(version)
     if body.selected_text not in content:
-        import difflib
         ratio = difflib.SequenceMatcher(None, body.selected_text, content).quick_ratio()
         if ratio < 0.85:
             raise HTTPException(
@@ -212,7 +225,6 @@ async def export_version(
     content = await load_content(version)
 
     if format == "html":
-        import markdown as md_lib
         html_content = md_lib.markdown(content, extensions=["tables", "fenced_code", "toc"])
         export_content = f"<!DOCTYPE html><html><head><meta charset='utf-8'><title>Report</title></head><body>{html_content}</body></html>"
         media_type = "text/html"
@@ -222,10 +234,7 @@ async def export_version(
         media_type = "text/markdown"
         filename = f"report_v{version_num}.md"
 
-    import io
     buffer = io.BytesIO(export_content.encode("utf-8"))
-
-    from fastapi.responses import StreamingResponse
     return StreamingResponse(
         buffer,
         media_type=media_type,

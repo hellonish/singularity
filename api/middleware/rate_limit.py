@@ -54,9 +54,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def _get_redis_pool(self) -> Optional[ArqRedis]:
         if self._get_redis:
             return await self._get_redis()
-        # Lazy import to avoid circular references at module level
-        from api.deps import _redis_pool
-        return _redis_pool
+        # Use the public accessor rather than the private module variable
+        # so this doesn't break if deps.py is refactored.
+        from api.deps import get_redis_pool
+        return get_redis_pool()
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Only rate-limit API routes

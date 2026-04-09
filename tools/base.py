@@ -26,6 +26,11 @@ class ToolResult:
     raw: Any = None          # raw API/library response (for debugging)
     error: str | None = None # set on failure; call_with_retry never raises
 
+    def __post_init__(self) -> None:
+        # Clamp credibility_base to [0, 1] so downstream filtering logic
+        # can rely on the invariant without guarding every comparison.
+        self.credibility_base = max(0.0, min(1.0, self.credibility_base))
+
     @classmethod
     def failure(cls, error: str) -> "ToolResult":
         """Construct a failed result without raising."""

@@ -9,6 +9,7 @@ credibility_base is 1.0 — caller should set it from the source document's cred
 """
 import asyncio
 import io
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -17,6 +18,8 @@ from urllib.parse import urlparse
 import aiohttp
 
 from .base import ToolBase, ToolResult, ssl_ctx
+
+logger = logging.getLogger(__name__)
 
 _CHUNK_CHARS = 8000   # ~2000 tokens at 4 chars/token
 _TABLE_SEP   = " | "
@@ -69,10 +72,12 @@ def _pdf_title_from_url(url: str | None) -> str:
         if segments:
             stem = segments[-1]
             stem = re.sub(r"\.pdf$", "", stem, flags=re.IGNORECASE)
-            # Convert hyphens/underscores/dots to spaces and title-case
+            # Convert hyphens/underscores/dots to spaces, then capitalize
+            # only the first word — avoids over-casing acronyms like "iphone",
+            # "openai", "gpt", etc. that .title() would mangle.
             stem = re.sub(r"[-_.]+", " ", stem).strip()
             if stem:
-                return f"{stem.title()} — {domain}"
+                return f"{stem.capitalize()} — {domain}"
         return domain
     except Exception:
         return "PDF Document"
@@ -123,10 +128,17 @@ class PdfReaderTool(ToolBase):
                     resp.raise_for_status()
                     data = await resp.read()
 
-        # Try pdfplumber; fall back to PyMuPDF on any error
+        # Try pdfplumber; fall back to PyMuPDF on any error.
+        # Log the primary failure so it's visible in production without
+        # hiding behind the fallback's success.
         try:
             pages = await asyncio.to_thread(_extract_with_pdfplumber, data)
-        except Exception:
+        except Exception as primary_exc:
+            logger.warning(
+                "pdfplumber extraction failed (%s), retrying with PyMuPDF: %s",
+                type(primary_exc).__name__,
+                primary_exc,
+            )
             pages = await asyncio.to_thread(_extract_with_pymupdf, data)
 
         if not pages:

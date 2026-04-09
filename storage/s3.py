@@ -51,21 +51,31 @@ class S3BlobStore:
         return f"s3://{self._bucket}/{key}"
 
     async def read(self, key: str) -> str:
+        from botocore.exceptions import ClientError
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             try:
                 response = await s3.get_object(Bucket=self._bucket, Key=key)
                 body: bytes = await response["Body"].read()
                 return body.decode("utf-8")
-            except s3.exceptions.NoSuchKey:
-                raise FileNotFoundError(f"S3 object not found: s3://{self._bucket}/{key}")
+            except ClientError as exc:
+                error_code = exc.response.get("Error", {}).get("Code", "")
+                if error_code in ("NoSuchKey", "404"):
+                    raise FileNotFoundError(f"S3 object not found: s3://{self._bucket}/{key}") from exc
+                raise
 
     async def exists(self, key: str) -> bool:
+        from botocore.exceptions import ClientError
         async with self._session.client("s3", **self._client_kwargs()) as s3:
             try:
                 await s3.head_object(Bucket=self._bucket, Key=key)
                 return True
-            except Exception:
-                return False
+            except ClientError as exc:
+                error_code = exc.response.get("Error", {}).get("Code", "")
+                if error_code in ("404", "NoSuchKey"):
+                    return False
+                # Re-raise for auth errors, wrong bucket, network errors, etc.
+                # so callers don't treat infrastructure failures as missing keys.
+                raise
 
     async def delete(self, key: str) -> None:
         async with self._session.client("s3", **self._client_kwargs()) as s3:

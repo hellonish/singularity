@@ -27,6 +27,11 @@ def set_redis_pool(pool: ArqRedis) -> None:
     _redis_pool = pool
 
 
+def get_redis_pool() -> Optional[ArqRedis]:
+    """Return the current Redis pool without raising; None if not yet initialised."""
+    return _redis_pool
+
+
 async def get_redis() -> AsyncGenerator[ArqRedis, None]:
     if _redis_pool is None:
         raise RuntimeError("Redis pool has not been initialised")

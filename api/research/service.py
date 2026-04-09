@@ -22,7 +22,9 @@ async def _check_daily_quota(db: AsyncSession, user_id: uuid.UUID, daily_token_b
     Sum prompt_tokens + completion_tokens from today's usage events.
     Raises 429 if the user is over budget.
     """
-    today_start = _now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Build midnight-UTC using date arithmetic rather than replace() so the
+    # result is always timezone-aware regardless of how _now() is implemented.
+    today_start = datetime(_now().year, _now().month, _now().day, tzinfo=timezone.utc)
     result = await db.execute(
         select(
             func.coalesce(func.sum(UsageEvent.prompt_tokens), 0)
