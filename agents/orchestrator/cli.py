@@ -15,18 +15,16 @@ logger = logging.getLogger(__name__)
 from agents.chat.models import DEFAULT_MODEL_ID
 
 from .pipeline import run_pipeline
-from render import ReportHtmlRenderer
 
 
 def _save_report(report_md: str, query: str, metadata: dict) -> None:
-    """
-    Renders the Markdown report to a self-contained HTML file (final_report.html).
-    ReportHtmlRenderer embeds the Markdown client-side so KaTeX + Marked.js
-    handle math, formatting, and advanced symbols in the browser.
-    """
-    html = ReportHtmlRenderer().render(report_md, query=query, metadata=metadata)
-    Path("final_report.html").write_text(html, encoding="utf-8")
-    logger.info("Saved  →  final_report.html")
+    """Write the final Markdown report to ``final_report.md`` in the current directory."""
+    header = (
+        f"<!-- query: {query[:200]!r} | strength: {metadata.get('strength')} | "
+        f"audience: {metadata.get('audience')} | generated: {metadata.get('generated_at')} -->\n\n"
+    )
+    Path("final_report.md").write_text(header + report_md, encoding="utf-8")
+    logger.info("Saved  →  final_report.md")
 
 
 def _strength_run(
@@ -34,7 +32,6 @@ def _strength_run(
     strength: int,
     audience: str,
     lang: str,
-    trace: bool,
     model_id: str,
     llm_api_key: str,
 ) -> None:
@@ -46,7 +43,6 @@ def _strength_run(
             strength=strength,
             audience=audience or "practitioner",
             output_language=lang,
-            trace=trace,
             model_id=model_id,
             llm_api_key=llm_api_key,
         )
@@ -92,16 +88,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--lang", default="en", help="Output language (default: en)")
     parser.add_argument(
-        "--trace",
-        action="store_true",
-        default=False,
-        help=(
-            "Enable execution trace logging. Writes a structured trace directory "
-            "under traces/<run_id>/ with every LLM prompt, raw response, skill "
-            "selection plan, and parsed output for all pipeline phases."
-        ),
-    )
-    parser.add_argument(
         "--api-key",
         required=True,
         help="Provider API key for the selected model (BYOK; not read from .env).",
@@ -125,7 +111,6 @@ if __name__ == "__main__":
         args.strength,
         args.audience,
         args.lang,
-        trace=args.trace,
         model_id=args.model_id,
         llm_api_key=args.api_key,
     )

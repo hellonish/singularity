@@ -16,8 +16,8 @@ from typing import Optional
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Message, Thread
-from db.session import AsyncSessionLocal
+from api.db.models import Message, Thread
+from api.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 

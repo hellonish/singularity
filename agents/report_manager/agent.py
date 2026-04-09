@@ -14,13 +14,9 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from .report_tree import ReportTree, _extract_json, _enforce_node_count
 from .section_node import SectionNode
-
-if TYPE_CHECKING:
-    from trace import TraceLogger
 
 _SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
@@ -120,7 +116,6 @@ class ReportManagerAgent:
         available_skills: list[str],
         audience: str = "practitioner",
         skill_context: str = "",
-        logger: "TraceLogger | None" = None,
     ) -> ReportTree:
         """
         Generate one tree proposal using this manager's assigned perspective.
@@ -136,8 +131,6 @@ class ReportManagerAgent:
                               for each available_skill, sourced from skill.md files.
                               Lets the manager understand what evidence type each
                               skill produces when assigning skills to sections.
-            logger:           Optional TraceLogger; when provided, logs prompt +
-                              raw response + parsed tree for this manager call.
 
         Returns:
             ReportTree with exactly target_n nodes and proposal_id set.
@@ -175,15 +168,6 @@ class ReportManagerAgent:
         )
 
         tree = self._parse(raw, target_n)
-
-        if logger is not None:
-            logger.log_manager(
-                manager_id=self.manager_id,
-                system_prompt=self._system_prompt,
-                user_message=user_message,
-                raw_response=raw,
-                parsed_tree_dict=tree.to_dict(),
-            )
 
         return tree
 

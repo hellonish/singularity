@@ -11,8 +11,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Report, ReportVersion, ResearchJob
-from db.session import AsyncSessionLocal
+from api.db.models import Report, ReportVersion, ResearchJob
+from api.db.session import AsyncSessionLocal
 from storage import get_blob_store
 
 logger = logging.getLogger(__name__)

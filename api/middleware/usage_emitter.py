@@ -12,8 +12,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from db.models import UsageEvent
-from db.session import AsyncSessionLocal
+from api.db.models import UsageEvent
+from api.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,6 @@ async def _emit_usage_event(
     status_code: int,
     ua_string: str,
     ip_address: str,
-    request_id: Optional[str],
 ) -> None:
     """
     Persist a UsageEvent row in its own short-lived session.
@@ -87,7 +86,6 @@ async def _emit_usage_event(
         async with AsyncSessionLocal() as session:
             event = UsageEvent(
                 user_id=user_id,
-                session_id=request_id,
                 event_type=event_type,
                 route=route,
                 duration_ms=duration_ms,
@@ -130,7 +128,6 @@ class UsageEmitterMiddleware(BaseHTTPMiddleware):
         user_id = _extract_user_id(request)
         ua_string = request.headers.get("User-Agent", "")
         ip_address = _get_client_ip(request)
-        request_id: Optional[str] = getattr(request.state, "request_id", None)
         route = f"{request.method} {request.url.path}"
         success = response.status_code < 400
 
@@ -160,7 +157,6 @@ class UsageEmitterMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 ua_string=ua_string,
                 ip_address=ip_address,
-                request_id=request_id,
             )
         )
 

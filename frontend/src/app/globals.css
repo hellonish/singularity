@@ -20,7 +20,7 @@
   --shell-accent:   #6366f1;
   --shell-text:     #2a2824;
   --shell-muted:    #5c5952;
-  /* Editorial paper palette — mirrors render/html_report.py */
+  /* Editorial paper palette — report viewer */
   --rpt-bg:         #f7f5f0;
   --rpt-bg2:        #ffffff;
   --rpt-bg3:        #ece9e2;

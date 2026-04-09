@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user, get_db
 from api.llm_credentials_service import chat_models_for_providers, providers_with_valid_keys
-from db.models import User
+from api.db.models import User
 
 router = APIRouter(prefix="/llm", tags=["llm"])
 

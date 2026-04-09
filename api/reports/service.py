@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.models import Report, ReportVersion, User
+from api.db.models import Report, ReportVersion, User
 from storage import get_blob_store
 
 # Content size threshold: inline if smaller, blob otherwise.

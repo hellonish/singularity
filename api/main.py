@@ -17,14 +17,13 @@ from api.config import settings
 from api.deps import get_db, get_redis, set_redis_pool
 from api.middleware.auth import AuthMiddleware
 from api.middleware.rate_limit import RateLimitMiddleware
-from api.middleware.request_id import RequestIDMiddleware
 from api.middleware.usage_emitter import UsageEmitterMiddleware
 from api.reports.router import router as reports_router
 from api.research.router import router as research_router
 from api.threads.router import router as threads_router
 from api.users.router import router as users_router
-from db.models import Base
-from db.session import engine
+from api.db.models import Base
+from api.db.session import engine
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +88,11 @@ app = FastAPI(
 # ---------------------------------------------------------------------------
 
 # Innermost (runs closest to route handlers)
-# Execution order (reverse of add order): RequestID → Auth → RateLimit → UsageEmitter
+# Execution order (reverse of add order): Auth → RateLimit → UsageEmitter
 # Auth must run before RateLimit so rate limiting uses per-user keys, not shared IP.
 app.add_middleware(UsageEmitterMiddleware)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(AuthMiddleware)
-app.add_middleware(RequestIDMiddleware)
 
 # CORS — must wrap everything.
 # In development, allow any localhost / 127.0.0.1 port so PUT (e.g. BYOK keys) works when the
@@ -103,7 +101,6 @@ _cors_kw: dict = {
     "allow_credentials": True,
     "allow_methods": ["*"],
     "allow_headers": ["*"],
-    "expose_headers": ["X-Request-ID"],
 }
 if settings.environment == "development":
     _cors_kw["allow_origin_regex"] = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"

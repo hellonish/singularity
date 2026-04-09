@@ -17,7 +17,7 @@ from agents.chat.models import (
     ModelInfo,
 )
 from api.llm_secret_crypto import decrypt_llm_secret, encrypt_llm_secret, is_decrypt_error
-from db.models import UserLlmCredential
+from api.db.models import UserLlmCredential
 
 ALLOWED_PROVIDERS: frozenset[str] = frozenset({"grok", "gemini", "deepseek"})
 

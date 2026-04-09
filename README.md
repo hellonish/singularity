@@ -18,12 +18,11 @@ An AI-powered deep-research platform that orchestrates a multi-agent LLM pipelin
 ┌──────────────────┐  ┌───────────────────┐
 │   FastAPI API    │  │  Next.js Frontend  │
 │   (256 MB cap)   │  │   (128 MB cap)     │
-└──┬───┬───┬───┬───┘  └───────────────────┘
-   │   │   │   │
-   │   │   │   └──── UsageEmitter (fire-and-forget analytics)
-   │   │   └──────── RateLimitMiddleware (Redis sliding window)
-   │   └───────────── AuthMiddleware (JWT + Google OAuth)
-   └───────────────── RequestIDMiddleware (UUID per request)
+└──┬───┬───┬───┘  └───────────────────┘
+   │   │   │
+   │   │   └──── UsageEmitter (fire-and-forget analytics)
+   │   └──────── RateLimitMiddleware (Redis sliding window)
+   └──────────── AuthMiddleware (JWT + Google OAuth)
        │
        ▼ enqueue_job()
 ┌──────────────────┐
@@ -158,11 +157,8 @@ The deploy script handles Docker Hub image pulls, environment validation, and vo
 ### CLI (without the web app)
 
 ```bash
-# Phase-5 pipeline (primary)
-python -m agents.orchestrator.cli "your research question" --strength 5 --audience expert
-
-# With execution trace export
-python -m agents.orchestrator.cli "your question" --strength 7 --trace
+# Phase-5 pipeline (primary) — writes final_report.md in the current directory
+python -m agents.orchestrator.cli "your research question" --strength 2 --audience expert --api-key YOUR_KEY
 
 # Interactive chat REPL
 python -m agents.chat.cli
@@ -206,8 +202,8 @@ Six Docker containers share 2 GB of RAM with hard memory caps:
 | Data connectors | 14 tools (ArXiv, PubMed, GitHub, SEC EDGAR, YouTube, etc.) |
 | LLM providers | 3 (xAI Grok, Google Gemini, DeepSeek) — 10 models |
 | API endpoints | 31 REST + SSE endpoints |
-| Database | 8 tables, 12 indexes (including 1 partial unique), 5 migrations |
-| Middleware | 5 layers: RequestID → Auth → RateLimit → UsageEmitter → CORS |
+| Database | 8 tables, 12 indexes (including 1 partial unique), 6 migrations |
+| Middleware | 4 layers: Auth → RateLimit → UsageEmitter → CORS |
 | Build time | 13 days, 65 commits, 1 engineer |
 
 ---

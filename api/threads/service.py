@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.reports.service import get_report, get_version_content, load_content
-from db.models import Message, Report, Thread, User
+from api.db.models import Message, Report, Thread, User
 
 
 def _now() -> datetime:

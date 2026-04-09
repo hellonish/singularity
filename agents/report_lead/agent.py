@@ -7,12 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from agents.report_manager.report_tree import ReportTree, _enforce_node_count, _extract_json
-
-if TYPE_CHECKING:
-    from trace import TraceLogger
 
 _SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
 
@@ -28,7 +24,6 @@ class ReportLeadAgent:
         query: str,
         section_count_range: tuple[int, int],
         audience: str = "practitioner",
-        logger: "TraceLogger | None" = None,
     ) -> ReportTree:
         """
         Takes 3 Manager proposals, returns the final authoritative tree.
@@ -38,8 +33,6 @@ class ReportLeadAgent:
             query:                Original research question.
             section_count_range:  (lo, hi) — final tree must stay within this range.
             audience:             Target reader type.
-            logger:               Optional TraceLogger; logs the full Lead call when
-                                  provided (proposals JSON, raw response, final tree).
         """
         lo, hi = section_count_range
         proposals_json = json.dumps(
@@ -60,14 +53,6 @@ class ReportLeadAgent:
         )
 
         tree = self._parse(raw, section_count_range)
-
-        if logger is not None:
-            logger.log_lead(
-                system_prompt=self._system_prompt,
-                user_message=user_message,
-                raw_response=raw,
-                final_tree_dict=tree.to_dict(),
-            )
 
         return tree
 

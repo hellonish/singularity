@@ -126,7 +126,7 @@ Track every meaningful event for analytics, billing, and debugging:
 │  /auth/google   /research/jobs   /reports   /threads           │
 │  /users/me/stats   /users/me/usage                             │
 ├────────────────────────────────────────────────────────────────┤
-│  Middleware: JWT auth · Rate limit · Request ID · Usage emitter│
+│  Middleware: JWT auth · Rate limit · Usage emitter              │
 └──────────────┬───────────────────────────────┬─────────────────┘
                │ enqueue                        │ read/write
 ┌──────────────▼──────────────┐   ┌────────────▼────────────────┐
@@ -177,11 +177,11 @@ Track every meaningful event for analytics, billing, and debugging:
 | Agent | Owns | Deliverables |
 |-------|------|-------------|
 | **BE-1 (Infra)** | `docker-compose.yml`, `Dockerfile`, `Makefile`, `requirements_api.txt`, `pyproject.toml`, `.env.example`, CI pipeline | Running dev environment |
-| **BE-2 (Core API)** | `api/`, `db/`, `api/auth/`, `api/research/`, `workers/` | Auth + research jobs + SSE |
+| **BE-2 (Core API)** | `api/` (incl. `api/db/`), `api/auth/`, `api/research/`, `workers/` | Auth + research jobs + SSE |
 | **BE-3 (Features)** | `api/reports/`, `api/threads/`, `patch/`, `api/users/`, usage tracking middleware | Reports, Q&A, patch, stats |
 | **FE-1 (Foundation)** | `frontend/` setup, Google Auth, landing page, dashboard shell, design system | Authenticated app shell |
 | **FE-2 (Report UI)** | Report viewer, chat panel, streaming, patch flow, version history | Core UX flows |
-| **Tech Lead** | Integration, `models/api_schemas.py` bridge, architecture decisions | Cohesion, quality |
+| **Tech Lead** | Integration, `api/db/schemas/` + ORM contracts, architecture decisions | Cohesion, quality |
 | **QA** | `tests/api/`, `tests/workers/`, `frontend/e2e/` | >80% coverage, E2E critical path |
 
 ---
@@ -196,37 +196,32 @@ singularity/
 │   ├── main.py               # App factory, lifespan, middleware stack
 │   ├── config.py             # pydantic-settings, all env vars
 │   ├── deps.py               # get_db, get_current_user, get_redis
+│   ├── db/
+│   │   ├── models.py         # All ORM models (SQLAlchemy)
+│   │   ├── session.py        # Async engine, session factory
+│   │   ├── schemas/          # Pydantic request/response models (auth, threads, research, …)
+│   │   └── migrations/       # Alembic
+│   │       ├── env.py
+│   │       └── versions/
 │   ├── auth/
 │   │   ├── router.py         # POST /auth/google, POST /auth/refresh, POST /auth/logout
-│   │   ├── service.py        # verify Google ID token, JWT issue, user upsert
-│   │   └── schemas.py        # GoogleAuthRequest, TokenPair
+│   │   └── service.py        # verify Google ID token, JWT issue, user upsert
 │   ├── research/
 │   │   ├── router.py         # POST /jobs, GET /jobs/{id}, GET /jobs/{id}/events, POST /jobs/{id}/cancel
-│   │   ├── service.py        # Job lifecycle, idempotency, SSE pub
-│   │   └── schemas.py
+│   │   └── service.py        # Job lifecycle, idempotency, SSE pub
 │   ├── reports/
 │   │   ├── router.py         # CRUD, versions, export
-│   │   ├── service.py        # Ownership check, blob load
-│   │   └── schemas.py
+│   │   └── service.py        # Ownership check, blob load
 │   ├── threads/
 │   │   ├── router.py         # POST /threads, POST /threads/{id}/messages (SSE)
-│   │   ├── service.py        # Context assembly, message persist, summary
-│   │   └── schemas.py
+│   │   └── service.py        # Context assembly, message persist, summary
 │   ├── users/
 │   │   ├── router.py         # GET /me, GET /me/stats, GET /me/usage
-│   │   ├── service.py        # Aggregate usage events, compute stats
-│   │   └── schemas.py        # UsageStats, UsageEvent, DeviceBreakdown
+│   │   └── service.py        # Aggregate usage events, compute stats
 │   └── middleware/
 │       ├── auth.py
 │       ├── rate_limit.py     # Redis sliding window
-│       ├── request_id.py
 │       └── usage_emitter.py  # Async emit after response
-├── db/
-│   ├── models.py             # All ORM models
-│   ├── session.py            # Async engine, session factory
-│   └── migrations/           # Alembic
-│       ├── env.py
-│       └── versions/
 ├── workers/
 │   ├── main.py               # ARQ WorkerSettings
 │   ├── research_job.py       # run_research_job task
@@ -341,7 +336,6 @@ CREATE INDEX idx_messages_thread ON messages(thread_id, created_at);
 CREATE TABLE usage_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_id      TEXT,
     event_type      TEXT NOT NULL,  -- 'llm_call'|'report_generate'|'chat_message'|'patch'|'report_view'
     model           TEXT,
     prompt_tokens   INTEGER,
@@ -614,7 +608,6 @@ async def emit_usage_event(request: Request, response: Response):
 
     event = UsageEvent(
         user_id=user_id,
-        session_id=request.headers.get("X-Session-ID"),
         event_type=classify_route(request.url.path),
         duration_ms=request.state.duration_ms,
         success=response.status_code < 400,
@@ -869,8 +862,8 @@ claude --dangerously-skip-permissions \
 
 ```
 1. Tech Lead (this session) writes shared contracts first:
-   - db/models.py          (so BE agents agree on schema)
-   - models/api_schemas.py (Pydantic bridge layer)
+   - api/db/models.py       (ORM — BE agents agree on persistence schema)
+   - api/db/schemas/        (Pydantic request/response layer)
    - api/config.py         (all env vars agreed)
 
 2. Spawn BE-1 (Infra) immediately — no dependencies.

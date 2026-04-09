@@ -14,7 +14,7 @@ from api.llm_credentials_service import (
     require_provider_key_for_model,
     validate_model_id,
 )
-from api.threads.schemas import (
+from api.db.schemas import (
     CreateThreadRequest,
     MessageResponse,
     PatchThreadRequest,
@@ -33,7 +33,7 @@ from api.threads.service import (
     save_message,
     update_thread_pin,
 )
-from db.models import User
+from api.db.models import User
 
 router = APIRouter(prefix="/threads", tags=["threads"])
 

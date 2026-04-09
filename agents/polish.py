@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from llm.base import BaseLLMClient
-    from trace import TraceLogger
 
 _PROMPT_PATH = Path(__file__).parent / "report_polisher" / "prompts" / "system_prompt.md"
 
@@ -66,7 +65,6 @@ async def _polish_section(
     audience: str,
     idx: int,
     total: int,
-    logger: "TraceLogger | None" = None,
 ) -> str:
     """Send one section to the LLM polisher and return polished markdown."""
     prompt = (
@@ -87,14 +85,6 @@ async def _polish_section(
     result = re.sub(r'\n?```$', '', result)
     polished = result.strip() or section   # fall back to original if LLM returns empty
 
-    if logger is not None:
-        logger.log_polish(
-            system_prompt=system_prompt,
-            user_message=prompt,
-            raw_response=result,
-            section_idx=idx,
-        )
-
     return polished
 
 
@@ -110,11 +100,9 @@ class PolishAgent:
     def __init__(
         self,
         client: "BaseLLMClient",
-        logger: "TraceLogger | None" = None,
     ) -> None:
         self.client = client
         self._system_prompt: str = _PROMPT_PATH.read_text(encoding="utf-8")
-        self._logger = logger
 
     async def polish(self, report_md: str, query: str, audience: str) -> str:
         """
@@ -135,7 +123,6 @@ class PolishAgent:
             _polish_section(
                 self.client, self._system_prompt,
                 sec, query, audience, i, len(sections),
-                logger=self._logger,
             )
             for i, sec in enumerate(sections)
         ]

@@ -30,8 +30,8 @@ Both paths use common infrastructure:
 
 Path: `agents/orchestrator/cli.py`
 
-- Dispatches between phase-5 (`--strength`) and legacy (`--depth`) modes.
-- Renders final markdown report into `final_report.html` through `render/html_report.py`.
+- Runs phase-5 `run_pipeline` with `--strength` (and BYOK `--api-key`).
+- Writes the final Markdown report to `final_report.md` in the working directory.
 
 ### 2.2 Chat REPL
 
@@ -255,8 +255,7 @@ This creates a single runtime dial for depth, breadth, and cost profile.
 
 ## 11) Operational Artifacts
 
-- Final report file: `final_report.html`
-- Optional traces: `traces/<run_id>/` (when `--trace` is enabled)
+- Orchestrator CLI output: `final_report.md` (local working directory)
 - Cached run collections in Qdrant: `run_<id>`
 
 ---

@@ -33,7 +33,6 @@ from agents.report_lead import ReportLeadAgent
 from agents.report_worker import ReportWorkerAgent
 from agents.retriever import Retriever
 from vector_store.client import VectorStoreClient
-from trace import TraceLogger
 
 import sys
 _ROOT = str(Path(__file__).resolve().parent.parent.parent)
@@ -200,7 +199,6 @@ async def _phase_b(
     strength: StrengthConfig,
     available_skills: list[str],
     audience: str,
-    trace_logger: TraceLogger | None = None,
     on_activity: OnActivityFn = None,
     llm: BaseLLMClient | None = None,
 ) -> ReportTree:
@@ -264,7 +262,6 @@ async def _phase_b(
             available_skills=available_skills,
             audience=audience,
             skill_context=skill_context,
-            logger=trace_logger,
         )
         await _maybe_activity(
             on_activity,
@@ -294,7 +291,6 @@ async def _phase_b(
         query=query,
         section_count_range=(lo, hi),
         audience=audience,
-        logger=trace_logger,
     )
     await _maybe_activity(
         on_activity,
@@ -417,7 +413,6 @@ async def _phase_c(
     query: str,
     vs: VectorStoreClient,
     ctx,
-    trace_logger: TraceLogger | None = None,
     gate_client=None,
     on_phase: OnPhaseFn = None,
     on_activity: OnActivityFn = None,
@@ -537,7 +532,6 @@ async def _phase_c(
                 qdrant_chunks=chunks,
                 audience=audience,
                 research_query=query,
-                logger=trace_logger,
                 # Issue 3: Phase C+ parameters (leaf nodes only)
                 strength=strength if is_leaf else None,
                 collection_name=collection_name if is_leaf else None,
@@ -575,8 +569,6 @@ async def run_pipeline(
     strength: int = 2,
     audience: str = "practitioner",
     output_language: str = "en",
-    trace: bool = False,
-    trace_root: str = "traces",
     on_phase: OnPhaseFn = None,
     on_activity: OnActivityFn = None,
     *,
@@ -593,11 +585,6 @@ async def run_pipeline(
         strength:        1–3 intensity (1=low, 2=medium, 3=high); depth and retrieval scale with tier.
         audience:        Target reader type (practitioner / expert / layperson …).
         output_language: ISO 639-1 language code for the report.
-        trace:           When True, write a structured trace directory to `trace_root`
-                         containing every LLM prompt, raw response, and parsed output
-                         for all phases (B planning, A retrieval, C writing, D polish).
-        trace_root:      Directory under which per-run trace folders are created.
-        Each run gets its own sub-folder named by run_id.
         on_phase:        Optional async callback ``(phase, description)`` for coarse
                          job progress (planning / retrieval / writing / polish).
         on_activity:     Optional async callback receiving structured activity dicts
@@ -630,17 +617,6 @@ async def run_pipeline(
             "meta": {"strength": strength, "run_id": run_id},
         },
     )
-
-    trace_logger: TraceLogger | None = None
-    if trace:
-        trace_logger = TraceLogger(run_id=run_id, query=query, trace_root=trace_root)
-        trace_logger.write_overview({
-            "strength":             strength,
-            "audience":             audience,
-            "output_language":      output_language,
-            "pipeline_model_id":    model_id,
-        })
-        logger.info("  Trace    : enabled → %s/%s/", trace_root, run_id)
 
     ctx = ExecutionContext(language=output_language, depth="strength")
 
@@ -682,7 +658,6 @@ async def run_pipeline(
         strength=sc,
         available_skills=list(TIER1_SKILLS),   # full tier-1 set — retrieval picks later
         audience=audience,
-        trace_logger=trace_logger,
         on_activity=on_activity,
         llm=llm,
     )
@@ -732,7 +707,6 @@ async def run_pipeline(
             active_collection,
             ctx,
             tree=tree,
-            trace_logger=trace_logger,
             domain_key=classified_domain,
             domain_label=domain_label,
             domain_confidence=domain_conf,
@@ -774,7 +748,6 @@ async def run_pipeline(
         query=query,
         vs=vs,
         ctx=ctx,
-        trace_logger=trace_logger,
         gate_client=gate_client,
         on_phase=on_phase,
         on_activity=on_activity,
@@ -798,7 +771,6 @@ async def run_pipeline(
         query,
         audience,
         llm,
-        trace_logger=trace_logger,
         on_activity=on_activity,
     )
 
@@ -807,8 +779,6 @@ async def run_pipeline(
     logger.info("  Sections written : %d", len(tree.nodes))
     logger.info("  Total words      : %s", f"{total_words:,}")
     logger.info("  Report length    : %s chars", f"{len(report_md):,}")
-    if trace_logger is not None:
-        logger.info("  Trace saved      : %s/%s/", trace_root, run_id)
 
     # Enforce TTL on stale run collections so Qdrant does not grow unbounded.
     try:
@@ -826,7 +796,6 @@ async def _phase_d(
     query: str,
     audience: str,
     llm: BaseLLMClient,
-    trace_logger: TraceLogger | None = None,
     on_activity: OnActivityFn = None,
 ) -> str:
     """Phase D — Polish the assembled report for visual excellence."""
@@ -841,7 +810,7 @@ async def _phase_d(
             "meta": {"section_count": section_count},
         },
     )
-    polisher = PolishAgent(llm, logger=trace_logger)
+    polisher = PolishAgent(llm)
     polished = await polisher.polish(report_md, query, audience)
     await _maybe_activity(
         on_activity,

@@ -24,7 +24,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from agents.report_manager.section_node import SectionNode
 from agents.report_manager.report_tree import ReportTree
@@ -40,10 +40,6 @@ _PROMPT_PARENT = (_PROMPT_DIR / "prompt_parent.md").read_text(encoding="utf-8")
 
 ENTITY_COVERAGE_GOAL  = 0.80   # augmentation loop: target fraction of entities covered
 NOVELTY_RATE_CEILING  = 0.25   # augmentation loop: stop when new chunks are this novel or less
-
-if TYPE_CHECKING:
-    from trace import TraceLogger
-
 
 _STOP_WORDS = frozenset({
     "the", "a", "an", "of", "in", "on", "at", "for", "and", "or", "to", "by",
@@ -86,7 +82,6 @@ class ReportWorkerAgent:
         qdrant_chunks: list[Any],     # list of DocumentChunk objects
         audience: str = "practitioner",
         research_query: str = "",
-        logger: "TraceLogger | None" = None,
         # Phase C+ parameters (optional — augmentation only runs when all are provided)
         strength=None,
         collection_name: str | None = None,
@@ -99,8 +94,6 @@ class ReportWorkerAgent:
         Phase C+ augmentation loop runs for leaf nodes when `strength`, `vs`, and
         `collection_name` are all provided.  It expands the chunk pool iteratively
         using gap-driven retrieval, stopping when 2 of 3 signals fire.
-
-        When `logger` is provided, both calls are fully traced.
         """
         children_content = self._gather_children_content()
         chunks_text, source_map = self._format_chunks(qdrant_chunks)
@@ -116,16 +109,6 @@ class ReportWorkerAgent:
             temperature=0.2,
         )
         analysis = self._parse_call(raw1, expected_call=1)
-
-        if logger is not None:
-            logger.log_worker_call1(
-                node_id=self.node.node_id,
-                node_title=self.node.title,
-                system_prompt=self._system_prompt,
-                user_message=call1_msg,
-                raw_response=raw1,
-                parsed=analysis,
-            )
 
         # ── Phase C+: Evidence Augmentation Loop (leaf nodes only) ──
         aug_meta: dict[str, Any] = {
@@ -181,17 +164,6 @@ class ReportWorkerAgent:
         self.node.source_map = self._filter_cited_sources(source_map, content, citations)
         if faithfulness_score is not None:
             self.node.faithfulness_score = faithfulness_score
-
-        if logger is not None:
-            logger.log_worker_call2(
-                node_id=self.node.node_id,
-                node_title=self.node.title,
-                system_prompt=self._system_prompt,
-                user_message=call2_msg,
-                raw_response=raw2,
-                parsed=write_out,
-                final_content=content,
-            )
 
         return WorkerResult(
             node_id=self.node.node_id,

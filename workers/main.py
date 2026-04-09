@@ -9,8 +9,8 @@ from arq.connections import RedisSettings
 from sqlalchemy import select
 
 from api.config import settings
-from db.models import ResearchJob
-from db.session import AsyncSessionLocal
+from api.db.models import ResearchJob
+from api.db.session import AsyncSessionLocal
 from workers.patch_job import run_patch_job
 from workers.research_job import run_research_job
 from workers.summary_job import run_summary_job

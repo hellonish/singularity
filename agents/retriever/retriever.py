@@ -16,7 +16,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from models import ExecutionContext, PlanNode
 from skills import SKILL_REGISTRY, TIER1_SKILLS
@@ -28,9 +28,6 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "system_prompt.md").read_t
 
 QUERY_MAX_CHARS         = 150   # hard cap on query string length
 JACCARD_DEDUP_THRESHOLD = 0.75  # queries with Jaccard similarity above this are duplicates
-
-if TYPE_CHECKING:
-    from trace import TraceLogger
 
 OnActivityFn = Callable[[dict[str, Any]], Awaitable[None]] | None
 
@@ -77,7 +74,7 @@ class Retriever:
     Usage:
         retriever = Retriever(llm_client, vector_store_client)
         active_skills = await retriever.run(
-            query, strength, run_id, collection_name, ctx, tree=tree, trace_logger=tl
+            query, strength, run_id, collection_name, ctx, tree=tree
         )
     """
 
@@ -93,7 +90,6 @@ class Retriever:
         collection_name: str,
         ctx: ExecutionContext,
         tree=None,          # ReportTree | None
-        trace_logger: "TraceLogger | None" = None,
         domain_key: str | None = None,
         domain_label: str | None = None,
         domain_confidence: str | None = None,
@@ -111,9 +107,6 @@ class Retriever:
 
         When ``domain_key`` is set (from a small classifier call), it is passed into
         the user prompt so skill selection aligns with the research domain.
-
-        ``trace_logger`` is only for disk trace artifacts; standard Phase A lines
-        go to the module logger so runs work with tracing off.
         """
         from skills.tier1_retrieval.base import BaseRetrievalSkill
         retrieval_registry: dict[str, BaseRetrievalSkill] = {
@@ -224,15 +217,6 @@ class Retriever:
                 }
             )
 
-        if trace_logger is not None:
-            trace_logger.log_retriever_plan(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                raw_response=raw,
-                skill_queries={k: v if isinstance(v[0], str) else [q["query"] for q in v]
-                               for k, v in skill_queries.items()},
-            )
-
         async def _run_skill(skill_name: str, queries: list[str]) -> None:
             skill = retrieval_registry.get(skill_name)
             if skill is None:
@@ -289,14 +273,6 @@ class Retriever:
                         },
                     }
                 )
-            if trace_logger is not None:
-                trace_logger.log_skill_result(
-                    skill_name=skill_name,
-                    queries=queries,
-                    sources_found=summary.get("sources_found", 0),
-                    chunks_stored=summary.get("chunks_stored", 0),
-                )
-
         await asyncio.gather(*[
             _run_skill(name, queries) for name, queries in skill_queries.items()
         ])

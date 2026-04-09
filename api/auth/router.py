@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth.schemas import GoogleAuthRequest, RefreshRequest, TokenPair
+from api.db.schemas import GoogleAuthRequest, RefreshRequest, TokenPair
 from api.auth.service import (
     create_sse_token,
     create_token_pair,
@@ -13,7 +13,7 @@ from api.auth.service import (
     verify_refresh_token,
 )
 from api.deps import get_current_user, get_db
-from db.models import User
+from api.db.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

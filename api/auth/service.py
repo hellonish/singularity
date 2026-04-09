@@ -14,9 +14,9 @@ from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.auth.schemas import TokenPair
+from api.db.schemas import TokenPair
 from api.config import settings
-from db.models import RefreshToken, User
+from api.db.models import RefreshToken, User
 
 
 def _hash_token(raw: str) -> str:

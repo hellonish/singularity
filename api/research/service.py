@@ -9,8 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
-from api.research.schemas import CreateJobRequest
-from db.models import Report, ResearchJob, UsageEvent, User
+from api.db.schemas import CreateJobRequest
+from api.db.models import Report, ResearchJob, UsageEvent, User
 
 
 def _now() -> datetime:

@@ -12,7 +12,7 @@ from api.llm_credentials_service import (
     normalize_provider,
     upsert_credential,
 )
-from api.users.schemas import (
+from api.db.schemas import (
     DeviceBreakdownResponse,
     LlmCredentialDeleteResponse,
     LlmCredentialListResponse,
@@ -30,7 +30,7 @@ from api.users.service import (
     get_usage_series,
     get_user_profile,
 )
-from db.models import User
+from api.db.models import User
 
 router = APIRouter(prefix="/users", tags=["users"])
 

@@ -1,1 +1,0 @@
-{"seq": 1, "ts": "2026-03-27T21:17:16.863479+00:00", "event": "overview", "run_id": "8ee3ee23c636", "strength": 3, "audience": "practitioner", "output_language": "en", "manager_model": "grok-3-mini", "lead_model": "grok-3", "worker_analysis_model": "grok-3-mini", "worker_write_model": "grok-3", "polisher_model": "grok-3-mini"}

@@ -13,7 +13,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
-from db.models import Report, UsageEvent, User
+from api.db.models import Report, UsageEvent, User
 
 
 def _now() -> datetime:

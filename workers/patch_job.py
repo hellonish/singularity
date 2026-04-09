@@ -19,8 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.llm_credentials_service import get_decrypted_provider_key
-from db.models import Report, ReportVersion
-from db.session import AsyncSessionLocal
+from api.db.models import Report, ReportVersion
+from api.db.session import AsyncSessionLocal
 from workers.research_job import _publish_event, create_report_version
 
 logger = logging.getLogger(__name__)

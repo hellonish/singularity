@@ -22,15 +22,13 @@
 | `agents/` | 5,455 | Multi-agent orchestration, planning, retrieval, writing, polish |
 | `api/` | 3,738 | FastAPI REST server, auth, middleware, SSE streaming |
 | `skills/` | 1,775 | 44 pluggable skills across 3 tiers |
-| `render/` | 999 | Self-contained HTML report renderer (KaTeX + Marked.js) |
 | `tools/` | 1,386 | 14 external data connector adapters |
 | `workers/` | 932 | ARQ background job workers with orphan recovery |
-| `db/` | 770 | SQLAlchemy async ORM models + Alembic migrations |
+| `api/db/` | 770 | SQLAlchemy async ORM models, Pydantic API schemas, Alembic migrations |
 | `vector_store/` | 528 | Qdrant wrapper with fastembed embeddings |
 | `models/` | 518 | Pydantic/dataclass contracts |
 | `llm/` | 375 | Multi-provider LLM abstraction (Grok, Gemini, DeepSeek) |
 | `patch/` | 341 | Report patch/edit service |
-| `trace/` | 337 | Execution trace logger |
 | `citations/` | 191 | Source provenance and bibliography formatting |
 | `storage/` | 175 | Blob storage abstraction (local + S3) |
 | `utils/` | 126 | JSON parser utilities |
@@ -65,12 +63,12 @@ Browser (Next.js 16 + React 19)
   └── Chat → POST /api/v1/threads/{id}/messages
        │
        └──→ FastAPI (uvicorn)
-              ├── Middleware: RequestID → Auth → RateLimit → UsageEmitter → CORS
+              ├── Middleware: Auth → RateLimit → UsageEmitter → CORS
               ├── ARQ Redis: enqueue_job → Worker process
               │     ├── run_research_job → run_pipeline() → ReportVersion
               │     ├── run_summary_job → thread summarization
               │     └── run_patch_job → report edits
-              ├── PostgreSQL 16: 8 tables, 12 indexes, 5 migrations
+              ├── PostgreSQL 16: 8 tables, 12 indexes, 6 migrations
               ├── Qdrant: per-run vector collections for RAG retrieval
               └── Blob Storage: local filesystem or S3
 ```
@@ -244,11 +242,10 @@ Coverage spans: academic papers, legal cases, medical trials, financial filings,
 
 ### Middleware Stack
 
-Execution order: `RequestID → Auth → RateLimit → UsageEmitter → CORS`
+Execution order: `Auth → RateLimit → UsageEmitter → CORS`
 
 | Middleware | Purpose |
 |------------|---------|
-| `RequestIDMiddleware` | UUID per request, `X-Request-ID` header propagated request→response |
 | `AuthMiddleware` | JWT validation on all `/api/v1/*` routes (except whitelisted paths) |
 | `RateLimitMiddleware` | Redis sorted-set sliding window, 60 req/min per user, fail-open on Redis outage |
 | `UsageEmitterMiddleware` | Fire-and-forget `UsageEvent` record per request (async, never blocks response) |
@@ -275,7 +272,7 @@ Execution order: `RequestID → Auth → RateLimit → UsageEmitter → CORS`
 
 ### 8 Tables, 12 Indexes, 5 Migrations
 
-**Tables** (`db/models.py`, 335 lines):
+**Tables** (`api/db/models.py`, 335 lines):
 
 | Table | Purpose | Key Columns |
 |-------|---------|-------------|
@@ -307,7 +304,7 @@ Execution order: `RequestID → Auth → RateLimit → UsageEmitter → CORS`
 | `idx_ue_user_day` | usage_events | `user_id, created_at` | Compound |
 | `idx_ue_event_type` | usage_events | `user_id, event_type, created_at` | Compound |
 
-**Connection pooling** (`db/session.py`):
+**Connection pooling** (`api/db/session.py`):
 
 | Setting | Value |
 |---------|-------|
@@ -465,12 +462,10 @@ Worker (Python) → Redis pub/sub → FastAPI SSE endpoint → Browser EventSour
 
 | Layer | What's Tracked |
 |-------|---------------|
-| **Request tracing** | `X-Request-ID` on every request/response, propagated through all middleware |
-| **Usage analytics** | `UsageEvent` table — append-only records: event_type, route, duration_ms, success, status_code, user_agent, IP, device_type, OS, browser, session_id |
+| **Usage analytics** | `UsageEvent` table — append-only records: event_type, route, duration_ms, success, status_code, user_agent, IP, device_type, OS, browser |
 | **Phase tracking** | `ResearchJob.current_phase` column updated in DB at each phase transition + SSE event |
 | **Activity feed** | `job_activity` SSE events for pipeline lifecycle milestones |
 | **Sentry** | Optional — FastAPI + SQLAlchemy integrations, 20% trace sample rate |
-| **Execution trace** | `TraceLogger` module — structured debug logging for full pipeline observability |
 | **Job timing** | `created_at`, `started_at`, `finished_at`, `expires_at` — full lifecycle columns |
 
 ---
@@ -603,8 +598,8 @@ Fixed-cost, zero-marginal-cost-per-user model for compute. Variable costs limite
 | API endpoints | 31 |
 | Database tables | 8 |
 | Database indexes | 12 (including 1 partial unique) |
-| Migrations | 5 |
-| Middleware layers | 5 (RequestID, Auth, RateLimit, UsageEmitter, CORS) |
+| Migrations | 6 |
+| Middleware layers | 4 (Auth, RateLimit, UsageEmitter, CORS) |
 | Docker containers | 6 in production |
 | Production VM | AWS t3-small, 2 GB RAM, ~$25/month |
 | Total prod memory | ~1.8 GB across 6 containers |

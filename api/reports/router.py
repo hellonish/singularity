@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.deps import get_current_user, get_db, get_redis
-from api.reports.schemas import (
+from api.db.schemas import (
     PatchRequest,
     PatchResponse,
     ReportListResponse,
@@ -28,9 +28,9 @@ from api.reports.service import (
     list_versions,
     load_content,
 )
-from api.threads.schemas import ThreadResponse
+from api.db.schemas import ThreadResponse
 from api.threads.service import get_or_create_default_report_thread
-from db.models import User
+from api.db.models import User
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 

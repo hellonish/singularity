@@ -12,9 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
 from api.deps import get_current_user, get_db, get_redis
-from api.research.schemas import CreateJobRequest, JobResponse
+from api.db.schemas import CreateJobRequest, JobResponse
 from api.research.service import cancel_job, create_job, get_job
-from db.models import ResearchJob, User
+from api.db.models import ResearchJob, User
 
 router = APIRouter(prefix="/research", tags=["research"])
 
