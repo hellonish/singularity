@@ -47,7 +47,6 @@ class AcademicSearchSkill(BaseRetrievalSkill):
             return self._fail(node, result.error)
 
         sources = list(result.sources)
-        self._register_all(sources, node, ctx)
         fallback = result.raw.get("partial", False) if isinstance(result.raw, dict) else False
         return self._build_output(
             sources, node,

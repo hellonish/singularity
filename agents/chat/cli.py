@@ -478,7 +478,7 @@ if __name__ == "__main__":
               /model grok-3              Switch to Grok 3
               /mode research             Force research mode
               /extended on               Enable extended thinking
-              /skills                    List all 44 skills
+              /skills                    List all available skills
               /clear                     Reset conversation history
               /quit                      Exit
         """),

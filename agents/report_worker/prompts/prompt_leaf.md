@@ -10,7 +10,7 @@ Select the 3 most relevant tier-2 analysis skills for this section and run all t
 analyses in a single structured output:
 
 synthesis, comparative_analysis, gap_analysis, quality_check, entity_extraction,
-timeline_construct, citation_graph, contradiction_detect, claim_verification,
+timeline_construct, contradiction_detect, claim_verification,
 trend_analysis, causal_analysis, hypothesis_gen, statistical_analysis,
 credibility_score, meta_analysis, sentiment_cluster
 

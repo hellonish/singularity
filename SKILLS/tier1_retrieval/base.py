@@ -190,13 +190,6 @@ class BaseRetrievalSkill(SkillBase):
                 total_sources += 1
                 all_sources.append(src)
 
-        # Register citations
-        cit_reg = getattr(ctx, "citation_registry", None)
-        if cit_reg is not None:
-            for src in all_sources:
-                cid = cit_reg.register(src, self.name, node.output_slot)
-                src["citation_id"] = cid
-
         gate_info = (
             f", gate={len(all_survivors)}→{total_sources}"
             if (gate_client and original_query) else ""
@@ -225,13 +218,6 @@ class BaseRetrievalSkill(SkillBase):
             return self._fail(node, result.error)
 
         sources = list(result.sources)
-
-        # Register every source in the citation registry
-        cit_reg = getattr(ctx, "citation_registry", None)
-        if cit_reg is not None:
-            for src in sources:
-                cid = cit_reg.register(src, self.name, node.output_slot)
-                src["citation_id"] = cid
 
         n      = len(sources)
         status = (NodeStatus.OK      if n >= self.min_ok else
@@ -293,15 +279,6 @@ class BaseRetrievalSkill(SkillBase):
         _MAP = {"shallow": 5, "standard": 10, "deep": 20}
         key = node.depth_override or (getattr(ctx, "depth", None)) or ""
         return _MAP.get(key, default)
-
-    def _register_all(self, sources: list[dict], node: PlanNode, ctx) -> list[dict]:
-        """Register a list of sources and mutate each with citation_id. Returns sources."""
-        cit_reg = getattr(ctx, "citation_registry", None)
-        if cit_reg is not None:
-            for src in sources:
-                cid = cit_reg.register(src, self.name, node.output_slot)
-                src["citation_id"] = cid
-        return sources
 
     def _build_output(
         self,

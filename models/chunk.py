@@ -1,4 +1,4 @@
-"""Chunk and citation models shared between the vector store and citations packages."""
+"""Chunk models shared by vector-store ingestion and report writing."""
 from __future__ import annotations
 
 import uuid
@@ -58,17 +58,3 @@ class DocumentChunk:
             chunk_index=int(p.get("chunk_index", 0)),
             embedding=list(vec) if vec else [],
         )
-
-
-@dataclass
-class CitationRecord:
-    """A registered citation entry managed by CitationRegistry."""
-    citation_id:        str    # e.g. "[Smith2024]"
-    title:              str
-    authors:            list[str]
-    year:               str | None
-    url:                str
-    source_type:        str    # matches SourceType literals
-    credibility_base:   float
-    registered_by:      str    # skill name that found this source
-    registered_at_slot: str    # output_slot of the node that registered it

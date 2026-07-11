@@ -7,9 +7,7 @@ from pathlib import Path
 
 from skills.base import SkillBase
 from models import NodeStatus, QualityReport
-from context.budget import ContextBudgetManager
-
-_budget = ContextBudgetManager()
+from skills.tier2_analysis.base import _build_upstream_context
 
 
 class QualityCheckSkill(SkillBase):
@@ -21,7 +19,7 @@ class QualityCheckSkill(SkillBase):
             return {"error": f"prompt.md not found: {prompt_path}"}, NodeStatus.FAILED, 0.0
 
         system_prompt = prompt_path.read_text(encoding="utf-8")
-        upstream = _budget.build_context(node, ctx)
+        upstream = _build_upstream_context(node, ctx)
 
         axes_str = ", ".join(node.acceptance)
         user_message = (

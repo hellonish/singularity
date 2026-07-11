@@ -9,7 +9,7 @@ __pycache__
 .mypy_cache
 .env
 .env.*
-!.env.production
+!.env.example
 blob_storage/
 *.md
 !README.md

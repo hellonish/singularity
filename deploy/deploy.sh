@@ -17,13 +17,12 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 # ── Preflight checks ─────────────────────────────────────────────────────────
 info "Running preflight checks..."
 
-[ -f .env ] || error ".env file not found. Copy .env.production to .env and fill in values."
-grep -q 'YOUR_DOMAIN' .env 2>/dev/null && error "Replace YOUR_DOMAIN in .env with your actual domain."
-grep -qE '^POSTGRES_PASSWORD=\S' .env || error "POSTGRES_PASSWORD must be set in .env."
-grep -qE '^JWT_SECRET=\S' .env || error "JWT_SECRET must be set in .env."
-grep -qE '^NEXTAUTH_SECRET=\S' .env || error "NEXTAUTH_SECRET must be set in .env."
-grep -qE '^NEXTAUTH_URL=\S' .env || error "NEXTAUTH_URL must be set in .env."
-grep -qE '^GROK_API_KEY=\S' .env || warn "GROK_API_KEY not set — you need at least one LLM provider key."
+[ -f .env.production ] || error ".env.production file not found. Copy .env.example to .env.production and fill in values."
+grep -q 'YOUR_DOMAIN' .env.production 2>/dev/null && error "Replace YOUR_DOMAIN in .env.production with your actual domain."
+grep -qE '^POSTGRES_PASSWORD=\S' .env.production || error "POSTGRES_PASSWORD must be set in .env.production."
+grep -qE '^JWT_SECRET=\S' .env.production || error "JWT_SECRET must be set in .env.production."
+grep -qE '^NEXTAUTH_SECRET=\S' .env.production || error "NEXTAUTH_SECRET must be set in .env.production."
+grep -qE '^NEXTAUTH_URL=\S' .env.production || error "NEXTAUTH_URL must be set in .env.production."
 
 info "All checks passed."
 
@@ -67,34 +66,34 @@ info "Firewall configured (22, 80, 443 open)."
 
 # ── Build and start ──────────────────────────────────────────────────────────
 info "Building containers (this takes a few minutes on first run)..."
-docker compose -f docker-compose.prod.yml build
+docker compose --env-file .env.production -f docker-compose.prod.yml build
 
 info "Starting services..."
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 
 # ── Wait for health checks ──────────────────────────────────────────────────
 info "Waiting for services to become healthy..."
 sleep 15
 
-if docker compose -f docker-compose.prod.yml ps | grep -q "unhealthy"; then
-    error "Some services are unhealthy. Check: docker compose -f docker-compose.prod.yml ps"
+if docker compose --env-file .env.production -f docker-compose.prod.yml ps | grep -q "unhealthy"; then
+    error "Some services are unhealthy. Check: docker compose --env-file .env.production -f docker-compose.prod.yml ps"
 fi
 
 info "Running database migrations..."
-docker compose -f docker-compose.prod.yml exec api alembic upgrade head || \
+docker compose --env-file .env.production -f docker-compose.prod.yml exec api alembic upgrade head || \
     warn "Migration failed or alembic not configured. Check manually."
 
 # ── Done ─────────────────────────────────────────────────────────────────────
-DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d= -f2)
+DOMAIN=$(grep -E '^DOMAIN=' .env.production | cut -d= -f2)
 info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 info "Deployment complete!"
 info "App: https://${DOMAIN}"
 info ""
 info "Useful commands:"
-info "  View logs:      docker compose -f docker-compose.prod.yml logs -f"
-info "  Restart:        docker compose -f docker-compose.prod.yml restart"
-info "  Stop:           docker compose -f docker-compose.prod.yml down"
+info "  View logs:      docker compose --env-file .env.production -f docker-compose.prod.yml logs -f"
+info "  Restart:        docker compose --env-file .env.production -f docker-compose.prod.yml restart"
+info "  Stop:           docker compose --env-file .env.production -f docker-compose.prod.yml down"
 info "  Update & redeploy:"
-info "    git pull && docker compose -f docker-compose.prod.yml build"
-info "    docker compose -f docker-compose.prod.yml up -d"
+info "    git pull && docker compose --env-file .env.production -f docker-compose.prod.yml build"
+info "    docker compose --env-file .env.production -f docker-compose.prod.yml up -d"
 info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -1,4 +1,4 @@
-"""ExecutionContext — the shared mutable state for a single research run."""
+"""ExecutionContext — shared mutable state for a single research run."""
 from __future__ import annotations
 
 import json
@@ -22,11 +22,7 @@ CREDIBILITY_ADJ: dict[str, float] = {
 
 @dataclass
 class ExecutionContext:
-    """Mutable shared state passed through every skill and agent during a run.
-
-    ``citation_registry`` is injected lazily to avoid a circular import between
-    ``models`` and ``citations``.
-    """
+    """Mutable shared state passed through skills and agents during a run."""
     results:             dict[str, Any]            = field(default_factory=dict)
     node_status:         dict[str, NodeStatus]     = field(default_factory=dict)
     credibility_scores:  dict[str, float]          = field(default_factory=dict)
@@ -35,12 +31,6 @@ class ExecutionContext:
     depth:               str                       = "standard"  # "shallow" | "standard" | "deep"
     audience:            str                       = ""
     final_output_slot:   str | None                = None
-    citation_registry:   Any                       = field(default=None)
-
-    def __post_init__(self) -> None:
-        if self.citation_registry is None:
-            from citations.registry import CitationRegistry
-            self.citation_registry = CitationRegistry()
 
     def record(
         self,

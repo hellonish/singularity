@@ -83,7 +83,7 @@ def mock_node():
 async def test_skill_contract(skill_name, mock_ctx, mock_node):
     skill = SKILL_REGISTRY[skill_name]
     client = MockLLMClient()
-    registry = mock_ctx.citation_registry
+    registry = None
 
     # Special handling for fallback_router (returns SKIPPED)
     if skill_name == "fallback_router":

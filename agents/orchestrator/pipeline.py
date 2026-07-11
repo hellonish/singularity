@@ -115,8 +115,7 @@ def _format_report(
     Appends a single Reference List built from `source_map`
     (citation_id → {title, url, source_type, date}) collected by the workers.
     Entries are ordered by first appearance in the tree (reading order) and
-    junk URLs are filtered out.  The legacy CitationRegistry bib_md block is
-    intentionally dropped — it duplicated entries with worse metadata.
+    junk URLs are filtered out.
     """
     parts = [
         f"# Research Report\n\n**Query:** {query}\n\n---\n",

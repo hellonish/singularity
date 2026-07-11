@@ -8,7 +8,7 @@ models/
   context.py  — ExecutionContext, CREDIBILITY_ADJ
   output.py   — SourceRecord, SourceType, RetrievalOutput, AnalysisOutput,
                  AxisResult, QualityReport, OutputFormat, OutputDocument, SkillReturn
-  chunk.py    — DocumentChunk, CitationRecord
+  chunk.py    — DocumentChunk
 
 All names are re-exported here so ``from models import X`` continues to work
 for every existing import site.
@@ -28,7 +28,7 @@ from .output import (
     OutputDocument,
     SkillReturn,
 )
-from .chunk import DocumentChunk, CitationRecord
+from .chunk import DocumentChunk
 
 __all__ = [
     # enums
@@ -50,5 +50,4 @@ __all__ = [
     "SkillReturn",
     # chunk
     "DocumentChunk",
-    "CitationRecord",
 ]

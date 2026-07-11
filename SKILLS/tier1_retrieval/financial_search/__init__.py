@@ -34,8 +34,6 @@ class FinancialSearchSkill(BaseRetrievalSkill):
         if not sources:
             return self._fail(node, "No financial sources found")
 
-        self._register_all(sources, node, ctx)
-
         return self._build_output(
             sources, node,
             coverage_notes=f"{len(sources)} financial source(s) from SEC EDGAR + web",

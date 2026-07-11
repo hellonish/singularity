@@ -12,14 +12,65 @@ path; just place ``prompt.md`` next to ``skill.py``.
 import asyncio
 import importlib
 import json
+import textwrap
 from pathlib import Path
 from typing import Any
 
 from skills.base import SkillBase
 from models import NodeStatus, PlanNode, OutputDocument, OutputFormat
-from context.budget import ContextBudgetManager
 
-_budget = ContextBudgetManager()
+
+MAX_DIRECT_CHARS: int = 12000
+MAX_INDIRECT_CHARS: int = 350
+MAX_TOTAL_CHARS: int = 32000
+
+
+def _is_direct_dep(slot: str, direct_ids: set[str]) -> bool:
+    for node_id in direct_ids:
+        if node_id in slot or slot in node_id:
+            return True
+    return False
+
+
+def _extract_summary(result: Any, raw: str) -> str:
+    if isinstance(result, dict):
+        for key in ("summary", "synthesis", "report", "explainer"):
+            value = result.get(key)
+            if isinstance(value, str):
+                return textwrap.shorten(value, width=MAX_INDIRECT_CHARS)
+    return textwrap.shorten(raw, width=MAX_INDIRECT_CHARS)
+
+
+def _build_upstream_context(node: PlanNode, ctx) -> str:
+    """Build a bounded upstream context string for generic output skills."""
+    direct_ids = set(node.depends_on)
+    sections: list[tuple[str, str, float, bool]] = []
+
+    for slot, result in ctx.results.items():
+        cred = ctx.credibility_scores.get(slot, 0.5)
+        raw = result if isinstance(result, str) else json.dumps(result, default=str)
+        direct = _is_direct_dep(slot, direct_ids)
+        text = raw[:MAX_DIRECT_CHARS] if direct else _extract_summary(result, raw)
+        sections.append((slot, text, cred, direct))
+
+    sections.sort(key=lambda item: (not item[3], -item[2]))
+
+    parts: list[str] = []
+    if node.synthesis_hint:
+        parts.append(f"## Synthesis Hint\n{node.synthesis_hint}\n")
+
+    total = sum(len(part) for part in parts)
+    for slot, text, cred, _direct in sections:
+        entry = f"## Upstream: {slot} (credibility={cred:.2f})\n{text}\n"
+        if total + len(entry) > MAX_TOTAL_CHARS:
+            remaining = MAX_TOTAL_CHARS - total
+            if remaining > 100:
+                parts.append(entry[:remaining] + "\n[...truncated]")
+            break
+        parts.append(entry)
+        total += len(entry)
+
+    return "\n".join(parts)
 
 
 class BaseOutputSkill(SkillBase):
@@ -35,7 +86,7 @@ class BaseOutputSkill(SkillBase):
             return self._fail(f"Prompt file not found: {prompt_path}")
 
         system_prompt = prompt_path.read_text(encoding="utf-8")
-        upstream = _budget.build_context(node, ctx)
+        upstream = _build_upstream_context(node, ctx)
 
         audience = getattr(ctx, "audience", "") or ctx.results.get("metadata", {}).get("audience", "general")
         user_message = (

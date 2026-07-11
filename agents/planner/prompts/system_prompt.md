@@ -224,13 +224,13 @@ social_search, pdf_deep_extract, multimedia_search
 
 Tier 2 — Analysis:
 synthesis, comparative_analysis, gap_analysis, quality_check, translation,
-entity_extraction, timeline_construct, citation_graph, contradiction_detect,
+entity_extraction, timeline_construct, contradiction_detect,
 claim_verification, trend_analysis, causal_analysis, hypothesis_gen,
 statistical_analysis, credibility_score, fallback_router, meta_analysis,
 sentiment_cluster
 
 Tier 3 — Output:
-report_generator, exec_summary, bibliography_gen, decision_matrix, explainer,
+report_generator, exec_summary, decision_matrix, explainer,
 annotation_gen, visualization_spec, knowledge_delta
 
 Full descriptions, costs, and latencies are in DOMAIN_REGISTRY.json skill_registry.

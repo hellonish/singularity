@@ -113,7 +113,7 @@ cd singularity
 # Backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements_api.txt
+pip install -r requirements.txt
 
 # Frontend
 cd frontend && npm install && cd ..
@@ -149,7 +149,7 @@ cp .env.production .env
 
 # Deploy
 bash deploy/deploy.sh
-docker compose -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
 The deploy script handles Docker Hub image pulls, environment validation, and volume setup. Production uses pre-built images — no on-server compilation.
@@ -198,7 +198,7 @@ Six Docker containers share 2 GB of RAM with hard memory caps:
 |---|---|
 | Backend | 19,000 lines of Python across 207 files |
 | Frontend | 6,500 lines of TypeScript across 42 files |
-| Skills | 44 pluggable (18 retrieval + 18 analysis + 8 output) |
+| Skills | 42 pluggable (18 retrieval + 17 analysis + 7 output) |
 | Data connectors | 14 tools (ArXiv, PubMed, GitHub, SEC EDGAR, YouTube, etc.) |
 | LLM providers | 3 (xAI Grok, Google Gemini, DeepSeek) — 10 models |
 | API endpoints | 31 REST + SSE endpoints |

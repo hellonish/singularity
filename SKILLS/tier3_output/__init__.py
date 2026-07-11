@@ -13,5 +13,9 @@ from pathlib import Path
 
 _HERE = Path(__file__).parent
 for _skill_dir in sorted(_HERE.iterdir()):
-    if _skill_dir.is_dir() and not _skill_dir.name.startswith("_"):
+    if (
+        _skill_dir.is_dir()
+        and not _skill_dir.name.startswith("_")
+        and (_skill_dir / "__init__.py").exists()
+    ):
         importlib.import_module(f"{__name__}.{_skill_dir.name}")

@@ -1,8 +1,7 @@
-# Production Dockerfile for API + Worker
-# Multi-stage build optimized for small image size
+# Production images. Compose selects either the `api` or `frontend` target.
 
 # Stage 1: builder — install system deps and Python packages
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim AS api-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -11,12 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-COPY requirements.txt requirements_api.txt ./
+COPY requirements.txt ./
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt -r requirements_api.txt
+    pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: runtime image
-FROM python:3.12-slim
+FROM python:3.12-slim AS api
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
@@ -26,8 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
 
 # Copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=api-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=api-builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app
 
@@ -45,3 +44,51 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
 
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+FROM node:20-alpine AS frontend-deps
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app
+
+COPY --from=frontend-deps /app/node_modules ./node_modules
+COPY frontend/ ./
+
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN npm run build
+
+
+FROM node:20-alpine AS frontend
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+COPY --from=frontend-builder /app/public ./public
+COPY --from=frontend-builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=frontend-builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1
+
+CMD ["node", "server.js"]

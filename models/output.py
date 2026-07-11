@@ -27,13 +27,10 @@ OutputFormat = Literal[
 
 
 class SourceRecord(BaseModel):
-    """A single retrieved source produced by a tier-1 retrieval skill.
-
-    ``citation_id`` is empty until ``CitationRegistry.register()`` assigns one.
-    """
+    """A single retrieved source produced by a tier-1 retrieval skill."""
     model_config = ConfigDict(frozen=True)
 
-    citation_id:      str        = Field(default="", description="Assigned by CitationRegistry e.g. [Smith2024]")
+    citation_id:      str        = Field(default="", description="Optional citation key assigned by downstream report-writing code")
     title:            str
     url:              str
     snippet:          str        = Field(description="200-300 char extract from the source")

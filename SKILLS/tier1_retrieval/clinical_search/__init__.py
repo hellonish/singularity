@@ -29,8 +29,6 @@ class ClinicalSearchSkill(BaseRetrievalSkill):
         if not sources:
             return self._fail(node, "No clinical sources found (PubMed + ClinicalTrials.gov)")
 
-        self._register_all(sources, node, ctx)
-
         return self._build_output(
             sources, node,
             coverage_notes=f"{len(sources)} clinical source(s) from PubMed + ClinicalTrials.gov",
