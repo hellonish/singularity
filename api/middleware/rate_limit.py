@@ -1,119 +1,123 @@
-"""
-Redis-backed sliding-window rate limiter middleware.
+"""Small, dependency-free per-user rate limiting for write endpoints.
 
-Uses a sorted-set per client key to track request timestamps.
-Configurable via settings (or env vars):
-
-    RATE_LIMIT_RPM=60          # requests per minute
-    RATE_LIMIT_BURST=10        # burst allowance
-
-Pinned to per-user limits when ``request.state.user_id`` is available
-(post-auth), otherwise falls back to client IP.
+This implementation is intentionally process-local for the SQLite/local API
+foundation. Replace its event store with Redis before running multiple API
+processes, since each process otherwise has an independent limit.
 """
 from __future__ import annotations
 
-import logging
+import asyncio
+import math
 import time
-from typing import Optional
+from collections import defaultdict, deque
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Literal
 
-from arq import ArqRedis
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import TimeoutError as RedisTimeoutError
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from fastapi import Request
+from fastapi.responses import JSONResponse, Response
 
-from api.config import settings
-
-logger = logging.getLogger(__name__)
-
-# How many requests allowed per sliding window (60 s by default).
-_RATE_LIMIT_RPM: int = getattr(settings, "rate_limit_rpm", 60)
-_WINDOW_SECONDS: int = 60
+RateLimitAction = Literal["message", "chat", "report"]
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Sliding-window rate limiter backed by Redis sorted sets.
+@dataclass(frozen=True)
+class RateLimitResult:
+    allowed: bool
+    retry_after_seconds: float = 0.0
 
-    Each client is identified by user_id (when authenticated) or
-    source IP as a fallback.  The middleware maintains a sorted set
-    of timestamps in Redis and trims entries older than the window
-    before checking the count against the limit.
 
-    If Redis is unreachable (timeout/connection errors), requests pass through
-    without limiting so the API remains available; a warning is logged.
-    """
+class PerUserSlidingWindowLimiter:
+    """A concurrency-safe sliding-window limiter keyed by (user, action)."""
 
-    def __init__(self, app, redis_getter=None):
-        super().__init__(app)
-        # Allow injection of a redis getter for testing; production
-        # reads from the global pool set in api.deps.
-        self._get_redis = redis_getter
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._events: dict[tuple[str, RateLimitAction], deque[float]] = defaultdict(deque)
+        self._lock = asyncio.Lock()
 
-    async def _get_redis_pool(self) -> Optional[ArqRedis]:
-        if self._get_redis:
-            return await self._get_redis()
-        # Use the public accessor rather than the private module variable
-        # so this doesn't break if deps.py is refactored.
-        from api.deps import get_redis_pool
-        return get_redis_pool()
+    async def check(self, user_id: str, action: RateLimitAction, limit: int) -> RateLimitResult:
+        now = self._clock()
+        key = (user_id, action)
+        async with self._lock:
+            events = self._events[key]
+            window_start = now - 1.0
+            while events and events[0] <= window_start:
+                events.popleft()
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        # Only rate-limit API routes
-        if not request.url.path.startswith("/api/v1/"):
-            return await call_next(request)
+            if len(events) >= limit:
+                return RateLimitResult(allowed=False, retry_after_seconds=events[0] + 1.0 - now)
 
-        redis: Optional[ArqRedis] = await self._get_redis_pool()
-        if redis is None:
-            # Redis not ready yet (e.g. during startup) — pass through
-            return await call_next(request)
+            events.append(now)
+            return RateLimitResult(allowed=True)
 
-        client_key = self._client_key(request)
-        now = time.time()
-        window_start = now - _WINDOW_SECONDS
-        key = f"ratelimit:{client_key}"
 
-        pipe = redis.pipeline(transaction=True)
-        # Remove expired entries
-        pipe.zremrangebyscore(key, 0, window_start)
-        # Count current window entries
-        pipe.zcard(key)
-        # Add current request
-        pipe.zadd(key, {str(now): now})
-        # Set TTL on the key to auto-clean
-        pipe.expire(key, _WINDOW_SECONDS + 1)
-        try:
-            results = await pipe.execute()
-        except (RedisTimeoutError, RedisConnectionError) as exc:
-            # Redis down/slow would otherwise 500 every /api/v1 request; fail-open until Redis is healthy.
-            logger.warning(
-                "Rate limit skipped (Redis unreachable): %s client_key=%s",
-                exc,
-                client_key,
-            )
-            return await call_next(request)
+def action_for_request(request: Request) -> RateLimitAction | None:
+    """Return the one write action limited by this request, if any."""
 
-        current_count: int = results[1]
+    if request.method != "POST":
+        return None
 
-        if current_count >= _RATE_LIMIT_RPM:
-            logger.warning("Rate limit exceeded for %s (%d requests in window)", client_key, current_count)
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "detail": "Rate limit exceeded. Please slow down.",
-                    "retry_after_seconds": _WINDOW_SECONDS,
-                },
-            )
+    path = request.url.path.rstrip("/") or "/"
+    if path == "/chats":
+        return "chat"
+    if path == "/reports":
+        return "report"
 
-        return await call_next(request)
+    chat_segments = path.split("/")
+    if (
+        len(chat_segments) in {4, 5}
+        and chat_segments[1] == "chats"
+        and chat_segments[3] == "messages"
+        and (len(chat_segments) == 4 or chat_segments[4] == "stream")
+    ):
+        return "message"
+    return None
 
-    @staticmethod
-    def _client_key(request: Request) -> str:
-        """Use authenticated user_id when available, else IP."""
-        user_id: str | None = getattr(request.state, "user_id", None)
-        if user_id:
-            return f"user:{user_id}"
-        forwarded = request.headers.get("X-Forwarded-For", "")
-        ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
-        return f"ip:{ip}"
+
+class ChatReportRateLimitMiddleware:
+    """Enforce the chat/message/report creation limits for an identified user."""
+
+    def __init__(
+        self,
+        app,
+        *,
+        messages_per_second: int,
+        chats_per_second: int,
+        reports_per_second: int,
+    ) -> None:
+        self.app = app
+        self._limiter = PerUserSlidingWindowLimiter()
+        self._limits: dict[RateLimitAction, int] = {
+            "message": messages_per_second,
+            "chat": chats_per_second,
+            "report": reports_per_second,
+        }
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
+        action = action_for_request(request)
+        user_id = request.headers.get("x-user-id")
+        if action is None or not user_id:
+            await self.app(scope, receive, send)
+            return
+
+        result = await self._limiter.check(user_id, action, self._limits[action])
+        if result.allowed:
+            await self.app(scope, receive, send)
+            return
+
+        retry_after = max(1, math.ceil(result.retry_after_seconds))
+        response = JSONResponse(
+            status_code=429,
+            content={
+                "detail": f"Rate limit exceeded: {self._limits[action]} {action} requests per second",
+            },
+            headers={
+                "Retry-After": str(retry_after),
+                "X-RateLimit-Limit": str(self._limits[action]),
+            },
+        )
+        await response(scope, receive, send)

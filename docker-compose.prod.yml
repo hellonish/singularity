@@ -99,7 +99,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=production
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -108,37 +108,6 @@ services:
       resources:
         limits:
           memory: 256M
-
-  # ── Background Worker ──────────────────────────────────────────────────────
-  worker:
-    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: api
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env.production
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-singularity}:${POSTGRES_PASSWORD}@postgres:5432/singularity
-      - REDIS_URL=redis://redis:6379
-      - ENVIRONMENT=production
-    command: python -m workers.main
-    healthcheck:
-      test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379'); r.ping()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 1G
 
   # ── Frontend ───────────────────────────────────────────────────────────────
   frontend:

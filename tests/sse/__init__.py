@@ -1,0 +1,1 @@
+"""Backend SSE integration tests."""

@@ -1,12 +1,13 @@
 # ── Core ──────────────────────────────────────────────────────────────────────
 python-dotenv==1.0.0
 pydantic==2.10.6
+jsonschema==4.26.0
 
 # ── Platform API, persistence, and background jobs ───────────────────────────
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 sqlalchemy[asyncio]==2.0.41
-alembic==1.18.4
+aiosqlite==0.21.0
 asyncpg==0.31.0
 pydantic-settings==2.9.1
 arq==0.27.0
@@ -25,7 +26,7 @@ opentelemetry-sdk==1.38.0
 anyio==4.9.0
 
 # ── LLM clients ───────────────────────────────────────────────────────────────
-openai==1.109.1            # GrokClient (xAI via OpenAI-compatible SDK)
+openai==1.109.1            # Groq via its OpenAI-compatible API
 google-genai==1.63.0       # GeminiClient
 deepseek==1.0.0            # DeepSeekClient
 
