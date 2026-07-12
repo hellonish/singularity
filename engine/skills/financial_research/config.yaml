@@ -1,0 +1,9 @@
+id: financial_research
+version: "1.0"
+kind: domain
+description: Research company performance and risk using regulatory filings.
+tools:
+  - sec_edgar
+  - web_search
+instructions: instructions.md
+schemas: schemas.py

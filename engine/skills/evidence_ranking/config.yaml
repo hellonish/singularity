@@ -1,0 +1,7 @@
+id: evidence_ranking
+version: "1.0"
+kind: core
+description: Rank evidence by authority, relevance, recency, and directness.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

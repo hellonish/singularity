@@ -1,0 +1,9 @@
+id: medical_research
+version: "1.0"
+kind: domain
+description: Research medical questions using literature and trial registries.
+tools:
+  - pubmed
+  - clinicaltrials
+instructions: instructions.md
+schemas: schemas.py

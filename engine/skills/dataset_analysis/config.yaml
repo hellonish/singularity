@@ -1,0 +1,8 @@
+id: dataset_analysis
+version: "1.0"
+kind: core
+description: Execute generated Python against an explicitly supplied CSV dataset inside a network-blocked Modal Sandbox.
+tools:
+  - dataset_analysis
+instructions: instructions.md
+schemas: schemas.py

@@ -1,0 +1,7 @@
+id: contradiction_detection
+version: "1.0"
+kind: core
+description: Detect and preserve material disagreements among reliable sources.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

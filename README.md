@@ -109,6 +109,40 @@ The current streams use deterministic dummy chunks with a configurable delay
 (`SINGULARITY_SSE_DUMMY_DELAY_SECONDS`, default `0.15`). The future chat and
 report engines can publish real deltas through the same event contracts.
 
+## Terminal engine
+
+The REPL lives independently in `engine/cli` and mounts terminal agents through
+a small adapter registry. Chat is registered now; a research-report agent can
+be added later without coupling its commands or lifecycle to chat. Start it
+without putting a Groq key in the repository:
+
+```bash
+python -m engine.cli
+```
+
+On first launch, use `/key`, choose **Set or replace key**, and enter the Groq
+key in the hidden prompt. Singularity validates it and saves it in the
+operating-system credential store for subsequent sessions and directories.
+
+Inside the REPL, plain text streams a chat response. `/models`, `/effort`, and
+`/key` open arrow-key selectors; `/status`, `/reset`, `/clear`, `/help`, and
+`/quit` manage the current session. New sessions default to `medium` effort.
+The Groq key is persisted globally for the current operating-system user in
+macOS Keychain, Windows Credential Manager, or the Linux Secret Service through
+Python `keyring`; it is never written to the repository. Chat history remains
+local to the terminal process. Setting
+`SINGULARITY_MODAL_ENABLED=1` enables bounded, skill-scoped trusted tool calls
+through the configured Modal Function without sending the Groq key to Modal.
+
+The chat agent itself still accepts only `context` and `message`; the API key,
+model, temperature, and output cap belong to the terminal session. Before
+generation, it retrieves the selected model's live
+`context_window` and `max_completion_tokens` from Groq. It preserves the user
+message, reserves output and safety capacity, and trims only optional context.
+GPT-OSS input uses the Harmony tokenizer; unknown Groq tokenizers use a more
+conservative UTF-8 upper bound. Output is printed token-by-token as Groq emits
+streaming deltas.
+
 ## Groq BYOK
 
 The application never stores a Groq key in an LLM provider object. A user adds
@@ -138,6 +172,62 @@ The default test suite uses only real local API, database, and filesystem
 dependencies. The Groq end-to-end test is intentionally opt-in because it
 makes real provider requests: set `SINGULARITY_RUN_LIVE_TESTS=1`, provide
 `SINGULARITY_TEST_GROQ_API_KEY`, and run `pytest -m integration`.
+
+## Modal trusted tool deployment
+
+Deploy the trusted tool Function separately from the API after authenticating
+the Modal CLI outside this repository:
+
+```bash
+modal deploy modal_app/chat_tools.py --environment dev
+```
+
+The deployed app is `singularity-chat-tools` and its Function is
+`execute_chat_tool`. Provision the named `singularity-tool-providers` secret in
+Modal for optional external tool-provider credentials. Do not put Groq/BYOK,
+database, internal API, deployment, or Modal-control credentials in that
+secret. The terminal client sends only validated skill-scoped invocation data
+and enforces its lower effort timeout locally; the Function itself has a
+420-second ceiling. To run the separate deployed-function smoke test, set
+`SINGULARITY_RUN_MODAL_TESTS=1` and run `pytest -m integration`.
+
+Trusted chat operations now include `web_search`, guarded `web_fetch`,
+`browser_render`, `calculator`, and `current_time`, alongside the existing
+research providers and parsers. `web_search` discovers URLs; `web_fetch` reads
+and extracts one public HTTP page; `browser_render` is the JavaScript fallback.
+URL-reading operations reject private, local, reserved, link-local, embedded-
+credential, non-HTTP, and nonstandard-port targets.
+
+Repository inspection and generated dataset analysis are deliberately excluded
+from the trusted Function and local CLI planner. They use separate no-secret
+Modal Sandbox adapters: repository inspection permits only public GitHub clone
+traffic and predefined inspection operations, while dataset analysis has
+networking blocked and receives only a CSV plus generated Python. Production
+vector retrieval is also excluded from CLI and Modal; it executes through the
+authenticated API `RetrievalService` after relational ownership checks.
+
+## LangSmith observability
+
+The CLI chat agent uses LangSmith's standalone SDK directly; it does not use
+LangChain or LangGraph. Once configured, each chat turn records nested spans
+for local context selection, prompt budgeting, tool planning and Modal tool
+calls, Groq model lookup and streaming generation, and local compaction.
+
+Set these values outside source control:
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=singularity-dev
+```
+
+`LANGSMITH_ENDPOINT` is optional for a self-hosted deployment. By default,
+Singularity records only hashes, counts, durations, and operational metadata.
+Set `SINGULARITY_LANGSMITH_CAPTURE_CONTENT=true` only in an approved
+development environment to include sanitized messages and final outputs. The
+adapter never captures Groq/BYOK keys, database credentials, raw tool
+arguments, or raw provider errors, and LangSmith credentials are never sent to
+Modal. Tracing is fail-open: unavailable observability cannot interrupt chat.
 
 For machine-consumed responses, include `structured_output` with a JSON Schema.
 The API accepts only Groq strict-mode models (`openai/gpt-oss-20b` and

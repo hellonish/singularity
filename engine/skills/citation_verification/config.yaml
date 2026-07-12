@@ -1,0 +1,10 @@
+id: citation_verification
+version: "1.0"
+kind: core
+description: Verify citation reachability and claim-level evidentiary support.
+tools:
+  - web_search
+  - web_fetch
+  - pdf_reader
+instructions: instructions.md
+schemas: schemas.py

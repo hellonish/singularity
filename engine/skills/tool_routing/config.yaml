@@ -1,0 +1,7 @@
+id: tool_routing
+version: "1.0"
+kind: core
+description: Select trusted tools appropriate to a research subquestion.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

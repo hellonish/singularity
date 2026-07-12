@@ -17,3 +17,4 @@ class LLMRequestConfig:
     model_id: str
     temperature: float = 0.3
     max_output_tokens: int = 1500
+    reasoning_effort: str | None = None

@@ -1,0 +1,1 @@
+"""Authenticated production retrieval skill."""

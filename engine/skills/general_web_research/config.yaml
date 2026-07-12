@@ -1,0 +1,10 @@
+id: general_web_research
+version: "1.0"
+kind: core
+description: Discover public webpages, extract readable source text, and render JavaScript pages only when normal fetching fails.
+tools:
+  - web_search
+  - web_fetch
+  - browser_render
+instructions: instructions.md
+schemas: schemas.py

@@ -1,0 +1,7 @@
+id: deduplication
+version: "1.0"
+kind: core
+description: Remove duplicate sources and repeated evidence while preserving provenance.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

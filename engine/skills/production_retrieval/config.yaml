@@ -1,0 +1,8 @@
+id: production_retrieval
+version: "1.0"
+kind: core
+description: Retrieve semantically relevant workspace, chat, or report chunks after authenticated relational authorization.
+tools:
+  - production_retrieval
+instructions: instructions.md
+schemas: schemas.py

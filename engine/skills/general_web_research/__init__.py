@@ -1,0 +1,1 @@
+"""General web research skill."""

@@ -1,0 +1,7 @@
+id: claim_evidence_mapping
+version: "1.0"
+kind: core
+description: Map every material claim to explicit supporting evidence.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

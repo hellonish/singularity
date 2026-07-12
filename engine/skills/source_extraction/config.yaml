@@ -1,0 +1,10 @@
+id: source_extraction
+version: "1.0"
+kind: core
+description: Convert source material into normalized evidence passages.
+tools:
+  - web_fetch
+  - browser_render
+  - pdf_reader
+instructions: instructions.md
+schemas: schemas.py

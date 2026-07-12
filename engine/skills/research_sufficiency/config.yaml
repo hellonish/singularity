@@ -1,0 +1,7 @@
+id: research_sufficiency
+version: "1.0"
+kind: core
+description: Decide whether evidence is sufficient or another search cycle is needed.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

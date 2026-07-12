@@ -11,6 +11,10 @@ from dotenv import load_dotenv
 # Load developer-only integration credentials before isolating application state.
 load_dotenv()
 
+# Unit tests never emit developer conversation data to external observability.
+# A dedicated opt-in integration test can override this value explicitly.
+os.environ["LANGSMITH_TRACING"] = "false"
+
 # These values must exist before API modules are imported during test collection.
 TEST_ROOT = Path(tempfile.mkdtemp(prefix="singularity-tests-"))
 os.environ["SINGULARITY_DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_ROOT / 'test.db'}"

@@ -1,0 +1,8 @@
+id: repository_inspection
+version: "1.0"
+kind: core
+description: Clone a public GitHub repository and inspect files, history, tests, or static analysis inside a controlled Modal Sandbox.
+tools:
+  - repository_inspection
+instructions: instructions.md
+schemas: schemas.py

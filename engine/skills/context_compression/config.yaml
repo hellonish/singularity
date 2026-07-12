@@ -1,0 +1,7 @@
+id: context_compression
+version: "1.0"
+kind: core
+description: Compress accumulated research without losing claims or provenance.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

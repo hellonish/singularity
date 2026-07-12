@@ -1,7 +1,14 @@
 # ── Core ──────────────────────────────────────────────────────────────────────
 python-dotenv==1.0.0
+modal==1.5.2
+prompt_toolkit==3.0.52
+rich==14.2.0
+langsmith==0.3.45
+keyring==24.3.1
 pydantic==2.10.6
+PyYAML==6.0.3
 jsonschema==4.26.0
+tiktoken==0.12.0
 
 # ── Platform API, persistence, and background jobs ───────────────────────────
 fastapi==0.115.12
@@ -33,6 +40,9 @@ deepseek==1.0.0            # DeepSeekClient
 # ── Tools — HTTP ──────────────────────────────────────────────────────────────
 aiohttp==3.12.0            # async HTTP for all REST-based tools
 requests==2.32.3           # sync HTTP fallback
+beautifulsoup4==4.13.4     # webpage metadata extraction
+trafilatura==2.0.0         # main-content extraction
+playwright==1.52.0         # controlled JavaScript page rendering in Modal
 
 # ── Tools — Web search ────────────────────────────────────────────────────────
 ddgs==9.11.4               # WebFetchTool + StandardsFetchTool (free, no key)

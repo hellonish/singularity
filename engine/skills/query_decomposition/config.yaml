@@ -1,0 +1,7 @@
+id: query_decomposition
+version: "1.0"
+kind: core
+description: Break a broad research request into focused, answerable subquestions.
+tools: []
+instructions: instructions.md
+schemas: schemas.py

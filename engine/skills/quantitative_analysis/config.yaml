@@ -1,0 +1,8 @@
+id: quantitative_analysis
+version: "1.0"
+kind: core
+description: Compute arithmetic, percentages, compatible unit conversions, and basic descriptive statistics deterministically.
+tools:
+  - calculator
+instructions: instructions.md
+schemas: schemas.py

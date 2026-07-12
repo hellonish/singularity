@@ -1,0 +1,18 @@
+id: source_discovery
+version: "1.0"
+kind: core
+description: Discover relevant sources across trusted research providers.
+tools:
+  - web_search
+  - arxiv
+  - pubmed
+  - semantic_scholar
+  - github
+  - sec_edgar
+  - courtlistener
+  - clinicaltrials
+  - standards_fetch
+  - google_books
+  - dataset_hub
+instructions: instructions.md
+schemas: schemas.py

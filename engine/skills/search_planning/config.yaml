@@ -1,0 +1,7 @@
+id: search_planning
+version: "1.0"
+kind: core
+description: Create queries, filters, source priorities, and stopping criteria.
+tools: []
+instructions: instructions.md
+schemas: schemas.py
