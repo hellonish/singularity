@@ -65,3 +65,22 @@ def test_search_requires_a_typed_scope_not_untrusted_filters() -> None:
     store = _store()
     with pytest.raises(TypeError):
         store.search(query_text="anything")  # type: ignore[call-arg]
+
+
+def test_reingesting_a_document_upserts_instead_of_creating_duplicate_chunks() -> None:
+    store = _store()
+    scope = RetrievalScope(user_id="user_a", research_run_id="run_a")
+    kwargs = {
+        "scope": scope,
+        "text": "A source record that may be revisited after a worker retry.",
+        "source_type": "web",
+        "document_id": "https://example.test/source",
+    }
+
+    first = store.ingest_text(**kwargs)
+    second = store.ingest_text(**kwargs)
+    results = store.search(scope=scope, query_text="worker retry source", limit=8)
+
+    assert [chunk.id for chunk in first] == [chunk.id for chunk in second]
+    assert len(results) == 1
+    assert results[0].document_id == kwargs["document_id"]

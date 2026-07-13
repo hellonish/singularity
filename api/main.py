@@ -32,6 +32,7 @@ app.add_middleware(
     messages_per_second=settings.chat_messages_per_second,
     chats_per_second=settings.chats_per_second,
     reports_per_second=settings.reports_per_second,
+    research_runs_per_hour=settings.research_runs_per_hour,
 )
 
 

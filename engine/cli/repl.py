@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -15,10 +19,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 from engine.chat.effort import ChatEffort, get_chat_effort_profile
 from engine.cli.agents import ChatTerminalAgent, TerminalAgent
 from engine.cli.banner import COMMANDS, LOGO
-from engine.cli.credentials import CredentialStore, CredentialStoreError, SystemCredentialStore
 from engine.cli.models import TerminalSession
+from engine.cli.settings import GlobalTerminalSettingsStore, TerminalSettings
 from engine.cli.ui import TerminalUI
-from engine.llm.groq import GroqProvider, GroqProviderError
+from engine.llm.groq import GroqProviderError
+from engine.llm.providers import DEFAULT_MODEL_BY_PROVIDER, provider_for
 
 
 class EngineREPL:
@@ -28,20 +33,21 @@ class EngineREPL:
         self,
         session: TerminalSession,
         *,
-        credential_store: CredentialStore | None = None,
-        provider: GroqProvider | None = None,
+        settings_store: GlobalTerminalSettingsStore | None = None,
+        provider_factory: Callable[[str], object] | None = None,
         ui: TerminalUI | None = None,
     ) -> None:
         self.session = session
-        self._provider = provider or GroqProvider()
-        self._credential_store = credential_store or SystemCredentialStore()
-        chat = ChatTerminalAgent(provider=self._provider)
+        self._settings_store = settings_store or GlobalTerminalSettingsStore()
+        self._provider_factory = provider_factory or provider_for
+        chat = ChatTerminalAgent()
         self._agents: dict[str, TerminalAgent] = {chat.name: chat}
         self.ui = ui or TerminalUI(session_state=self._session_state)
 
     def _session_state(self) -> dict[str, str]:
         return {
             "agent": self.session.agent_name,
+            "provider": self.session.provider,
             "model": self.session.model_id,
             "effort": str(self.session.effort),
             "key": "saved" if self.session.api_key else "missing",
@@ -55,9 +61,10 @@ class EngineREPL:
             effort=str(self.session.effort),
             key_configured=bool(self.session.api_key),
             modal_enabled=os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1",
+            provider=self.session.provider.title(),
         )
         if not self.session.api_key:
-            self.ui.warning("No Groq API key is saved. Use /key to configure one before chatting.")
+            self.ui.warning("No API key is saved. Use /key to configure one before chatting.")
         while True:
             try:
                 line = await self.ui.prompt()
@@ -94,8 +101,12 @@ class EngineREPL:
             self.ui.help(list(COMMANDS))
         elif command == "/models":
             await self._choose_model()
+        elif command == "/provider":
+            await self._choose_provider()
         elif command == "/effort":
             await self._choose_effort()
+        elif command == "/mode":
+            await self._choose_mode()
         elif command == "/key":
             await self._manage_key()
         elif command == "/status":
@@ -108,25 +119,71 @@ class EngineREPL:
             self.ui.error(f"Unknown command: {command}. Type /help.")
         return False
 
+    async def _research_live(self, query: str) -> None:
+        """Run the bounded graph with the selected provider key and Modal retrieval."""
+        from api.config import settings
+        from engine.research_workflow.runner import run_research
+
+        self.ui.start_status("Running live bounded LangGraph research…")
+        try:
+            strength = {
+                ChatEffort.INSTANT: 1,
+                ChatEffort.MEDIUM: 2,
+                ChatEffort.HIGH: 3,
+                ChatEffort.ULTRA: 3,
+            }[self.session.effort]
+            report = await run_research(
+                query=query,
+                strength=strength,
+                output_dir=Path(".artifacts/research"),
+                api_key=self.session.api_key,
+                provider_name=self.session.provider,
+                model_id=self.session.model_id,
+                on_progress=self.ui.render_research_progress,
+            )
+        except Exception as exc:
+            self.ui.stop_status()
+            self.ui.error(f"Live research failed: {type(exc).__name__}: {exc}")
+            self.ui.info("Diagnostics: .artifacts/research/latest-research-diagnostics.jsonl")
+            return
+        self.ui.stop_status()
+        self.ui.answer(report)
+
+    async def _choose_mode(self) -> None:
+        selected = await self.ui.choose(
+            title="Select mode",
+            text="Research mode uses your selected provider model and deployed Modal web tools; Chat mode is conversational.",
+            values=[
+                ("chat", "Chat      Selected provider conversation and optional trusted tools"),
+                ("research", "Research  Live bounded LangGraph workflow with sourced web evidence"),
+            ],
+            default=self.session.agent_name,
+        )
+        if selected is None:
+            return
+        self.session.agent_name = selected
+        self.ui.info(f"Mode selected: {selected}. Your next plain-text prompt will use {selected} mode.")
+
     def _require_key(self) -> bool:
         if self.session.api_key:
             return True
-        self.ui.error("No Groq API key is configured. Use /key first.")
+        self.ui.error(f"No {self.session.provider.title()} API key is configured. Use /key first.")
         return False
 
     async def _choose_model(self) -> None:
         if not self._require_key():
             return
-        self.ui.start_status("Loading Groq models…")
+        provider = self._provider_factory(self.session.provider)
+        self.ui.start_status(f"Loading {provider.display_name} models…")
         try:
-            models = await self._provider.list_models(api_key=self.session.api_key)
+            models = await provider.list_models(api_key=self.session.api_key)
         except GroqProviderError as exc:
             self.ui.stop_status()
             self.ui.error(f"Could not load models: {exc.message}")
             return
         self.ui.stop_status()
         selected = await self.ui.choose(
-            title="Select Groq model",
+            title=f"Select {provider.display_name} model",
             text="Use ↑/↓ to choose a model and Enter to confirm.",
             values=[(model.id, model.id) for model in models],
             default=self.session.model_id if any(model.id == self.session.model_id for model in models) else None,
@@ -135,7 +192,7 @@ class EngineREPL:
             return
         self.ui.start_status("Validating model…")
         try:
-            model = await self._provider.retrieve_model(api_key=self.session.api_key, model_id=selected)
+            model = await provider.retrieve_model(api_key=self.session.api_key, model_id=selected)
         except GroqProviderError as exc:
             self.ui.stop_status()
             self.ui.error(f"Could not select model: {exc.message}")
@@ -145,9 +202,34 @@ class EngineREPL:
             self.ui.error(f"Model is inactive: {model.id}")
             return
         self.session.model_id = model.id
+        self._save_settings()
         self.ui.info(f"Model selected: {model.id}")
 
+    async def _choose_provider(self) -> None:
+        selected = await self.ui.choose(
+            title="Select LLM provider",
+            text="Changing provider uses that provider's saved key and default model.",
+            values=[
+                ("deepseek", "DeepSeek    OpenAI-compatible DeepSeek API"),
+                ("openrouter", "OpenRouter  Multi-provider OpenAI-compatible API"),
+                ("groq", "Groq        Groq API"),
+            ],
+            default=self.session.provider,
+        )
+        if selected is None or selected == self.session.provider:
+            return
+        settings = self._settings_store.load()
+        self.session.provider = selected
+        self.session.model_id = settings.models.get(selected, DEFAULT_MODEL_BY_PROVIDER[selected])
+        self.session.api_key = settings.api_keys.get(selected, "")
+        self.session.credential_source = "global_config" if self.session.api_key else "none"
+        self._save_settings()
+        self.ui.info(f"Provider selected: {selected}; model is {self.session.model_id}.")
+
     async def _choose_effort(self) -> None:
+        if self.session.agent_name == "research":
+            await self._choose_research_depth()
+            return
         profiles = [get_chat_effort_profile(effort) for effort in ChatEffort]
         selected = await self.ui.choose(
             title="Select chat effort",
@@ -165,16 +247,61 @@ class EngineREPL:
         if selected is None:
             return
         self.session.apply_effort(selected)
+        self._save_settings()
         profile = get_chat_effort_profile(self.session.effort)
         self.ui.info(
             f"Effort selected: {self.session.effort} "
             f"(output={profile.max_output_tokens:,}, timeout={profile.timeout_seconds}s)"
         )
 
+    async def _choose_research_depth(self) -> None:
+        from engine.research_workflow.caps import RunCaps, format_runtime_seconds
+
+        depths = [
+            (ChatEffort.INSTANT, "Quick", 1),
+            (ChatEffort.MEDIUM, "Standard", 2),
+            (ChatEffort.HIGH, "Deep", 3),
+        ]
+        values = []
+        for effort, label, strength in depths:
+            caps = RunCaps.for_strength(strength)
+            values.append((
+                effort,
+                f"{label:8} {caps.qa_cycles} QA cycle(s) · {caps.max_nodes} nodes · "
+                f"{format_runtime_seconds(caps.llm_step_timeout_seconds)} per model step · "
+                f"{format_runtime_seconds(caps.max_runtime_seconds)} run max",
+            ))
+        default = self.session.effort
+        if default is ChatEffort.ULTRA:
+            default = ChatEffort.HIGH
+        selected = await self.ui.choose(
+            title="Select research depth",
+            text="Choose the bounded research graph size and maximum runtime.",
+            values=values,
+            default=default,
+        )
+        if selected is None:
+            return
+        self.session.apply_effort(selected)
+        self._save_settings()
+        strength = {
+            ChatEffort.INSTANT: 1,
+            ChatEffort.MEDIUM: 2,
+            ChatEffort.HIGH: 3,
+        }[self.session.effort]
+        caps = RunCaps.for_strength(strength)
+        label = {1: "quick", 2: "standard", 3: "deep"}[strength]
+        self.ui.info(
+            f"Research depth selected: {label} "
+            f"({caps.qa_cycles} QA cycle(s), {caps.max_nodes} nodes, "
+            f"{format_runtime_seconds(caps.llm_step_timeout_seconds)} per model step, "
+            f"{format_runtime_seconds(caps.max_runtime_seconds)} run max)"
+        )
+
     async def _manage_key(self) -> None:
         action = await self.ui.choose(
-            title="Groq API key",
-            text="The key is stored in your operating-system credential store, never in the repository.",
+            title=f"{self.session.provider.title()} API key",
+            text="The key is stored in your private global Singularity config file (mode 0600), never in the repository.",
             values=[
                 ("set", "Set or replace key"),
                 ("status", "Show key status"),
@@ -186,64 +313,56 @@ class EngineREPL:
             await self._set_key()
         elif action == "status":
             status = "configured" if self.session.api_key else "not configured"
-            self.ui.info(f"Groq key: {status}; source={self.session.credential_source}")
+            self.ui.info(f"{self.session.provider.title()} key: {status}; source={self.session.credential_source}")
         elif action == "remove":
             confirmed = await self.ui.choose(
-                title="Remove Groq API key",
-                text="This removes the key saved for Singularity from the operating-system credential store.",
+                title=f"Remove {self.session.provider.title()} API key",
+                text="This removes the selected provider's key from your global Singularity configuration.",
                 values=[(False, "Cancel"), (True, "Remove saved key")],
                 default=False,
             )
             if not confirmed:
                 return
-            try:
-                self._credential_store.delete_groq_key()
-            except CredentialStoreError as exc:
-                self.ui.error(str(exc))
-                return
             self.session.api_key = ""
             self.session.credential_source = "none"
-            self.ui.info("Saved Groq key removed.")
+            self._save_settings()
+            self.ui.info(f"Saved {self.session.provider.title()} key removed.")
 
     async def _set_key(self) -> None:
         try:
-            api_key = (await self.ui.prompt_secret("Groq API key: ")).strip()
+            api_key = (await self.ui.prompt_secret(f"{self.session.provider.title()} API key: ")).strip()
         except (EOFError, KeyboardInterrupt):
             self.ui.info("Key setup cancelled.")
             return
         if not api_key:
-            self.ui.error("Groq API key cannot be empty.")
+            self.ui.error(f"{self.session.provider.title()} API key cannot be empty.")
             return
-        self.ui.start_status("Validating Groq key…")
+        provider = self._provider_factory(self.session.provider)
+        self.ui.start_status(f"Validating {provider.display_name} key…")
         try:
-            await self._provider.list_models(api_key=api_key)
+            await provider.list_models(api_key=api_key)
         except GroqProviderError as exc:
             self.ui.stop_status()
-            self.ui.error(f"Groq key was not saved: {exc.message}")
-            return
-        try:
-            self._credential_store.set_groq_key(api_key)
-        except (CredentialStoreError, ValueError) as exc:
-            self.ui.stop_status()
-            self.ui.error(str(exc))
+            self.ui.error(f"{provider.display_name} key was not saved: {exc.message}")
             return
         self.ui.stop_status()
         self.session.api_key = api_key
-        self.session.credential_source = "system"
-        self.ui.info("Groq key validated and saved in the operating-system credential store.")
+        self.session.credential_source = "global_config"
+        self._save_settings()
+        self.ui.info(f"{provider.display_name} key validated and saved in the global configuration.")
 
     def _status(self) -> None:
         modal = "enabled" if os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1" else "disabled"
         langsmith = "enabled" if os.getenv("LANGSMITH_TRACING", "false").lower() in {"1", "true", "yes"} else "disabled"
         self.ui.table(title="Session status", rows=[
             ("Agent", self.session.agent_name),
+            ("Provider", self.session.provider),
             ("Model", self.session.model_id),
             ("Effort", str(self.session.effort)),
-            ("Groq key", f"{'configured' if self.session.api_key else 'missing'} ({self.session.credential_source})"),
+            ("API key", f"{'configured' if self.session.api_key else 'missing'} ({self.session.credential_source})"),
             ("History turns", str(len(self.session.history))),
             ("Modal tools", modal),
             ("LangSmith", langsmith),
-            ("Temperature", str(self.session.temperature)),
             ("Max output tokens", str(self.session.max_output_tokens)),
         ])
 
@@ -254,12 +373,45 @@ class EngineREPL:
         self.ui.info("Conversation history reset.")
 
     async def _send(self, message: str) -> None:
+        if self.session.agent_name == "research":
+            if not self._require_key():
+                return
+            await self._research_live(message)
+            return
         if not self._require_key():
             return
         agent = self._agents[self.session.agent_name]
         buffered = ""
+        run_id = uuid4().hex
+        diagnostics_path = Path(".artifacts/research/latest-chat-diagnostics.jsonl")
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text("", encoding="utf-8")
+
+        def record(event: dict) -> None:
+            payload = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "run_id": run_id,
+                **event,
+            }
+            with diagnostics_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+
+        record({
+            "phase": "chat",
+            "status": "started",
+            "provider": self.session.provider,
+            "model": self.session.model_id,
+            "effort": str(self.session.effort),
+        })
         try:
             async for output in agent.stream(message=message, session=self.session):
+                if output.kind != "delta":
+                    record({
+                        "phase": "chat",
+                        "status": output.kind,
+                        "message": output.content[:300],
+                        "elapsed_seconds": output.elapsed_seconds,
+                    })
                 if output.kind == "delta":
                     self.ui.stop_status()
                     buffered += output.content
@@ -272,20 +424,46 @@ class EngineREPL:
                     )
             if buffered:
                 self.ui.final_answer(buffered)
+            record({"phase": "chat", "status": "completed"})
         except (GroqProviderError, TimeoutError, ValueError) as exc:
+            record({
+                "phase": "chat",
+                "status": "failed",
+                "error_type": type(exc).__name__,
+                "provider_code": getattr(exc, "code", None),
+                "message": str(exc)[:500],
+            })
             self.ui.stop_status()
             if buffered:
                 self.ui.final_answer(buffered)
             self.ui.error(f"Agent failed: {exc}")
+            self.ui.info("Diagnostics: .artifacts/research/latest-chat-diagnostics.jsonl")
+
+    def _save_settings(self) -> None:
+        existing = self._settings_store.load()
+        api_keys = dict(existing.api_keys)
+        models = dict(existing.models)
+        if self.session.api_key:
+            api_keys[self.session.provider] = self.session.api_key
+        else:
+            api_keys.pop(self.session.provider, None)
+        models[self.session.provider] = self.session.model_id
+        self._settings_store.save(TerminalSettings(
+            api_keys=api_keys,
+            models=models,
+            selected_provider=self.session.provider,
+            model=self.session.model_id,
+            effort=self.session.effort.value,
+        ))
 
 
-def load_terminal_session(credential_store: CredentialStore | None = None) -> TerminalSession:
+def load_terminal_session(settings_store: GlobalTerminalSettingsStore | None = None) -> TerminalSession:
     load_dotenv(_REPO_ROOT / ".env")
-    store = credential_store or SystemCredentialStore()
-    try:
-        saved_key = store.get_groq_key()
-    except CredentialStoreError:
-        saved_key = None
-    if saved_key:
-        return TerminalSession(api_key=saved_key, credential_source="system")
-    return TerminalSession()
+    settings = (settings_store or GlobalTerminalSettingsStore()).load()
+    return TerminalSession(
+        api_key=settings.api_keys.get(settings.selected_provider, ""),
+        credential_source="global_config" if settings.api_keys.get(settings.selected_provider) else "none",
+        provider=settings.selected_provider,
+        model_id=settings.models.get(settings.selected_provider, settings.model),
+        effort=ChatEffort(settings.effort),
+    )

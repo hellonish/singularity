@@ -7,6 +7,8 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
 
+from _utils.json_parser import extract_object
+
 STRICT_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
         "openai/gpt-oss-20b",
@@ -24,7 +26,7 @@ class StructuredOutputSpec:
     """Immutable, strict response-format contract for one provider call."""
 
     name: str
-    schema_json: str
+    schema_json: str | None
 
     @classmethod
     def create(cls, *, name: str, schema: dict[str, Any]) -> "StructuredOutputSpec":
@@ -46,9 +48,18 @@ class StructuredOutputSpec:
 
     @property
     def schema(self) -> dict[str, Any]:
+        if self.schema_json is None:
+            raise StructuredOutputError("JSON-object mode has no schema")
         return json.loads(self.schema_json)
 
+    @classmethod
+    def json_object(cls) -> "StructuredOutputSpec":
+        """Request provider JSON mode when a full schema is unnecessary."""
+        return cls(name="json_object", schema_json=None)
+
     def groq_response_format(self) -> dict[str, Any]:
+        if self.schema_json is None:
+            return {"type": "json_object"}
         return {
             "type": "json_schema",
             "json_schema": {
@@ -62,11 +73,17 @@ class StructuredOutputSpec:
         try:
             value = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise StructuredOutputError("Provider returned malformed JSON") from exc
-        try:
-            Draft202012Validator(self.schema).validate(value)
-        except ValidationError as exc:
-            raise StructuredOutputError("Provider output does not match the requested schema") from exc
+            # Some routed backends wrap JSON-mode output in markdown fences or
+            # prose despite response_format; recover the embedded object before
+            # declaring the completion invalid.
+            value = extract_object(content)
+            if value is None:
+                raise StructuredOutputError("Provider returned malformed JSON") from exc
+        if self.schema_json is not None:
+            try:
+                Draft202012Validator(self.schema).validate(value)
+            except ValidationError as exc:
+                raise StructuredOutputError("Provider output does not match the requested schema") from exc
         return value
 
 

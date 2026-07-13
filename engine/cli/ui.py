@@ -24,7 +24,7 @@ from rich.table import Table
 from rich.text import Text
 
 COMMAND_WORDS = (
-    "/help", "/models", "/effort", "/key", "/status", "/reset", "/clear", "/quit",
+    "/help", "/provider", "/models", "/effort", "/mode", "/key", "/status", "/reset", "/clear", "/quit",
 )
 
 
@@ -88,11 +88,11 @@ class TerminalUI:
             prompt_continuation="   · ",
         )
 
-    def banner(self, *, logo: str, agent: str, model: str, effort: str, key_configured: bool, modal_enabled: bool) -> None:
+    def banner(self, *, logo: str, agent: str, model: str, effort: str, key_configured: bool, modal_enabled: bool, provider: str = "Groq") -> None:
         self.console.print(logo, style="bold cyan")
         details = Table.grid(padding=(0, 2))
         details.add_row("Agent", agent, "Model", model)
-        details.add_row("Effort", effort, "Groq key", "configured" if key_configured else "not configured")
+        details.add_row("Effort", effort, f"{provider} key", "configured" if key_configured else "not configured")
         details.add_row("Tools", "Modal enabled" if modal_enabled else "Local chat only", "Input", "Enter send · Shift+Enter newline")
         self.console.print(
             Panel(
@@ -105,9 +105,9 @@ class TerminalUI:
 
     def help(self, commands: list[tuple[str, str]]) -> None:
         self.console.print(Panel(
-            "[bold]Singularity[/bold] is a local, streaming AI chat runtime backed by your Groq account. "
-            "It keeps terminal conversation state in memory, stores the Groq key in your operating-system "
-            "credential store, can run validated trusted tools through Modal when enabled, and emits sanitized "
+            "[bold]Singularity[/bold] is a local, streaming AI chat runtime backed by Groq, DeepSeek, or OpenRouter. "
+            "It keeps terminal conversation state in memory, stores provider keys in a private global configuration "
+            "file, can run validated trusted tools through Modal when enabled, and emits sanitized "
             "LangSmith traces when configured.\n\n"
             "Type a message and press Enter to send. Use Shift+Enter for a new line. Commands beginning with / "
             "control the current session. Model and effort choices use arrow keys and Enter. Conversation history "
@@ -208,6 +208,10 @@ class TerminalUI:
     def error(self, message: str) -> None:
         self.console.print(Panel(message, title="Error", border_style="red"))
 
+    def answer(self, content: str) -> None:
+        """Render a complete, non-streamed answer such as a research report."""
+        self.console.print(Panel(Markdown(content), title="Answer", border_style="green"))
+
     def start_status(self, message: str) -> None:
         self.stop_status()
         self._status = self.console.status(message, spinner="dots")
@@ -267,6 +271,11 @@ class TerminalUI:
     def render_lifecycle(self, *, kind: str, content: str, elapsed_seconds: float | None = None) -> None:
         if kind == "thinking":
             self.start_status("Thinking…")
+        elif kind == "tool_planning_start":
+            self.update_status(content + "…")
+        elif kind == "tool_planning_timeout":
+            self.stop_status()
+            self.warning(content)
         elif kind == "tool_start":
             self.update_status(f"Using {content}…")
         elif kind == "tool_completed":
@@ -282,3 +291,26 @@ class TerminalUI:
             self.info(content)
         elif kind == "completed":
             self.stop_status()
+
+    def render_research_progress(self, event: dict) -> None:
+        """Render bounded-research progress without exposing tool payloads."""
+        status = str(event.get("status", ""))
+        message = str(event.get("message", "Research progress"))
+        elapsed = event.get("elapsed_seconds")
+        if status in {"started", "node_started", "tool_dispatched"}:
+            self.update_status(message + "…")
+            return
+        if status == "tool_completed":
+            suffix = f" in {float(elapsed):.1f}s" if isinstance(elapsed, (int, float)) else ""
+            sources = event.get("source_count")
+            source_text = f" — {sources} source(s)" if isinstance(sources, int) else ""
+            self.info(f"{message}{source_text}{suffix}")
+            return
+        if status == "tool_failed":
+            self.warning(message)
+            return
+        if status == "skipped":
+            self.warning(message)
+            return
+        if status in {"completed", "node_completed"}:
+            self.info(message)

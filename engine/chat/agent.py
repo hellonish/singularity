@@ -7,15 +7,16 @@ from engine.chat.budget import BudgetedChatPrompt, budget_chat_prompt, budget_co
 from engine.chat.context import ContextSnapshot
 from engine.chat.models import ChatAgentInput, ChatStreamEvent
 from engine.llm.config import LLMRequestConfig
-from engine.llm.groq import GroqProvider, GroqProviderError
+from engine.llm.groq import GroqProviderError
+from engine.llm.providers import LLMProvider, provider_for
 from engine.observability import LangSmithTracer
 
 
 class ChatAgent:
     """Terminal-first chat agent that can answer with or without report context."""
 
-    def __init__(self, provider: GroqProvider | None = None, tracer: LangSmithTracer | None = None) -> None:
-        self._provider = provider or GroqProvider()
+    def __init__(self, provider: LLMProvider | None = None, tracer: LangSmithTracer | None = None) -> None:
+        self._provider = provider or provider_for("groq")
         self._tracer = tracer or LangSmithTracer()
 
     async def stream(
@@ -127,7 +128,10 @@ class ChatAgent:
         if not content:
             raise GroqProviderError(
                 code="provider_empty_stream",
-                message="Groq completed the stream without visible assistant content after a low-effort retry",
+                message=(
+                    f"{config.provider.title()} model {config.model_id} completed the stream "
+                    "without visible assistant content"
+                ),
                 retryable=True,
             )
         yield ChatStreamEvent(type="completed", model_id=config.model_id, content=content)

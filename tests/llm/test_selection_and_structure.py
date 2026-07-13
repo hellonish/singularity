@@ -46,3 +46,34 @@ def test_strict_schema_validates_provider_output() -> None:
     assert spec.parse_and_validate('{"answer":"ok"}') == {"answer": "ok"}
     with pytest.raises(StructuredOutputError):
         spec.parse_and_validate('{"answer": 1}')
+
+
+def test_json_object_mode_accepts_any_valid_json_object() -> None:
+    spec = StructuredOutputSpec.json_object()
+
+    assert spec.groq_response_format() == {"type": "json_object"}
+    assert spec.parse_and_validate('{"answer":"yes"}') == {"answer": "yes"}
+
+
+def test_parse_recovers_json_wrapped_in_fences_or_prose() -> None:
+    spec = StructuredOutputSpec.json_object()
+
+    assert spec.parse_and_validate('```json\n{"answer":"yes"}\n```') == {"answer": "yes"}
+    assert spec.parse_and_validate('Here you go:\n{"answer":"yes"}\nHope this helps!') == {"answer": "yes"}
+    with pytest.raises(StructuredOutputError):
+        spec.parse_and_validate('{"answer": "truncat')
+
+
+def test_schema_validation_still_applies_to_recovered_json() -> None:
+    spec = StructuredOutputSpec.create(
+        name="answer",
+        schema={
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+            "additionalProperties": False,
+        },
+    )
+    assert spec.parse_and_validate('```json\n{"answer":"ok"}\n```') == {"answer": "ok"}
+    with pytest.raises(StructuredOutputError):
+        spec.parse_and_validate('```json\n{"answer": 1}\n```')

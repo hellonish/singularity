@@ -16,9 +16,11 @@ BANNER = LOGO
 
 COMMANDS = (
     ("/help", "About Singularity, usage, privacy, and command reference"),
-    ("/models", "Choose an available Groq model with arrow keys"),
-    ("/effort", "Choose instant, medium, high, or ultra effort"),
-    ("/key", "Set, inspect, or remove the Groq key in the system credential store"),
+    ("/provider", "Choose Groq, DeepSeek, or OpenRouter with arrow keys"),
+    ("/models", "Choose a model for the selected provider"),
+    ("/effort", "Choose chat effort or bounded research depth"),
+    ("/mode", "Choose chat or bounded research mode with arrow keys"),
+    ("/key", "Set, inspect, or remove the selected provider API key"),
     ("/status", "Show the current model, effort, credentials, tools, and session state"),
     ("/reset", "Clear this ephemeral conversation history"),
     ("/clear", "Clear the terminal screen"),

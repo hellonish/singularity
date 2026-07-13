@@ -10,6 +10,16 @@ from engine.chat.modal_tools import ChatToolExecutor, ChatToolResult
 from engine.observability import LangSmithTracer
 from engine.tools.contracts import ChatToolInvocation, validate_chat_tool_invocation
 
+TOOL_PLANNING_TIMEOUT_SECONDS = 10
+
+
+class ToolPlanningTimeout(TimeoutError):
+    pass
+
+
+class ToolExecutionTimeout(TimeoutError):
+    pass
+
 
 @dataclass(frozen=True)
 class PlannedToolCall:
@@ -60,42 +70,45 @@ class BoundedChatToolLoop:
         profile = get_chat_effort_profile(effort)
         calls_by_tool: dict[str, int] = {}
         completed: list[ExecutedToolCall] = []
-        async with asyncio.timeout(profile.timeout_seconds):
-            for _ in range(profile.max_agent_tool_steps):
+        for _ in range(profile.max_agent_tool_steps):
+            if progress_callback is not None:
+                await progress_callback("tool_planning_start", "Selecting a tool", None)
+            try:
+                async with asyncio.timeout(TOOL_PLANNING_TIMEOUT_SECONDS):
+                    async with self._tracer.span(
+                        "tool_planning",
+                        inputs={"query": self._tracer.text(query)},
+                        metadata={"prior_result_count": len(completed)},
+                        tags=["chat", "tool-planning"],
+                    ) as span:
+                        planned = await self._planner.plan(
+                            query=query,
+                            context=context,
+                            prior_results=tuple(completed),
+                        )
+                        span.end({"planned": planned.tool_name if planned else None})
+            except TimeoutError as exc:
                 if progress_callback is not None:
-                    await progress_callback("thinking", "", None)
-                async with self._tracer.span(
-                    "tool_planning",
-                    inputs={"query": self._tracer.text(query)},
-                    metadata={"prior_result_count": len(completed)},
-                    tags=["chat", "tool-planning"],
-                ) as span:
-                    planned = await self._planner.plan(
-                        query=query,
-                        context=context,
-                        prior_results=tuple(completed),
-                    )
-                    span.end({"planned": planned.tool_name if planned else None})
-                if planned is None:
-                    break
-                if calls_by_tool.get(planned.tool_name, 0) >= profile.max_calls_per_tool_type:
-                    break
-                invocation = ChatToolInvocation(
-                    run_id=run_id,
-                    skill_id=planned.skill_id,
-                    tool_name=planned.tool_name,
-                    query=planned.query,
-                    arguments=planned.arguments,
-                    effort=effort,
-                    timeout_seconds=profile.timeout_seconds,
-                )
-                # Validate at the orchestration boundary as well as in the
-                # executor/remote Function. This guarantees that alternate
-                # executors cannot accidentally dispatch untrusted arguments.
-                validate_chat_tool_invocation(invocation)
-                started_at = asyncio.get_running_loop().time()
-                if progress_callback is not None:
-                    await progress_callback("tool_start", f"{planned.skill_id}/{planned.tool_name}", None)
+                    await progress_callback("tool_planning_timeout", "Tool planning timed out after 10s", None)
+                raise ToolPlanningTimeout("Tool planning timed out after 10 seconds; no tool was dispatched") from exc
+            if planned is None:
+                break
+            if calls_by_tool.get(planned.tool_name, 0) >= profile.max_calls_per_tool_type:
+                break
+            invocation = ChatToolInvocation(
+                run_id=run_id,
+                skill_id=planned.skill_id,
+                tool_name=planned.tool_name,
+                query=planned.query,
+                arguments=planned.arguments,
+                effort=effort,
+                timeout_seconds=profile.timeout_seconds,
+            )
+            validate_chat_tool_invocation(invocation)
+            started_at = asyncio.get_running_loop().time()
+            if progress_callback is not None:
+                await progress_callback("tool_start", f"{planned.skill_id}/{planned.tool_name}", None)
+            try:
                 async with self._tracer.span(
                     f"modal_tool:{planned.skill_id}/{planned.tool_name}",
                     run_type="tool",
@@ -109,21 +122,25 @@ class BoundedChatToolLoop:
                 ) as span:
                     result = await self._executor.execute(invocation)
                     span.end({"success": result.error is None, "source_count": len(result.sources)})
-                elapsed = asyncio.get_running_loop().time() - started_at
-                calls_by_tool[planned.tool_name] = calls_by_tool.get(planned.tool_name, 0) + 1
+            except TimeoutError as exc:
                 if progress_callback is not None:
-                    await progress_callback(
-                        "tool_failed" if result.error else "tool_completed",
-                        f"{planned.skill_id}/{planned.tool_name}",
-                        elapsed,
-                    )
-                completed.append(
-                    ExecutedToolCall(
-                        skill_id=planned.skill_id,
-                        tool_name=planned.tool_name,
-                        result=_redact_result(result),
-                    )
+                    await progress_callback("tool_failed", f"{planned.skill_id}/{planned.tool_name} timed out", None)
+                raise ToolExecutionTimeout(
+                    f"{planned.skill_id}/{planned.tool_name} timed out after {profile.timeout_seconds} seconds"
+                ) from exc
+            elapsed = asyncio.get_running_loop().time() - started_at
+            calls_by_tool[planned.tool_name] = calls_by_tool.get(planned.tool_name, 0) + 1
+            if progress_callback is not None:
+                await progress_callback(
+                    "tool_failed" if result.error else "tool_completed",
+                    f"{planned.skill_id}/{planned.tool_name}",
+                    elapsed,
                 )
+            completed.append(ExecutedToolCall(
+                skill_id=planned.skill_id,
+                tool_name=planned.tool_name,
+                result=_redact_result(result),
+            ))
         return tuple(completed)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -106,6 +107,7 @@ class VectorStoreClient:
         source_url: str = "",
         source_title: str = "",
         credibility: float = 0.5,
+        metadata: dict[str, Any] | None = None,
     ) -> list[DocumentChunk]:
         chunks = [
             DocumentChunk(
@@ -117,7 +119,9 @@ class VectorStoreClient:
                 source_url=source_url,
                 source_title=source_title,
                 credibility=credibility,
+                metadata=metadata or {},
                 chunk_index=index,
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{scope.payload_filter()}:{document_id}:{index}")),
             )
             for index, (chunk_text, embedding) in enumerate(self._embedder.chunk_and_embed(text))
         ]
@@ -143,6 +147,7 @@ class VectorStoreClient:
         query_text: str,
         limit: int = 8,
         min_credibility: float = 0.0,
+        include_synthetic: bool = True,
     ) -> list[DocumentChunk]:
         from qdrant_client.models import FieldCondition, Filter, MatchValue, Range
 
@@ -157,10 +162,15 @@ class VectorStoreClient:
         ]
         if min_credibility:
             must.append(FieldCondition(key="credibility", range=Range(gte=min_credibility)))
+        filters: dict[str, Any] = {"must": must}
+        if not include_synthetic:
+            filters["must_not"] = [
+                FieldCondition(key="source_type", match=MatchValue(value="synthetic_research_answer"))
+            ]
         response = self.qdrant.query_points(
             collection_name=CHUNKS_COLLECTION,
             query=self._embedder.embed(query_text),
-            query_filter=Filter(must=must),
+            query_filter=Filter(**filters),
             limit=limit,
             with_payload=True,
             with_vectors=False,

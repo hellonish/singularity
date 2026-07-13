@@ -6,7 +6,7 @@ from typing import Literal
 
 import tiktoken
 
-from engine.chat.prompt import load_chat_system_prompt
+from engine.chat.prompt import build_runtime_system_prompt
 from engine.chat.context import ContextSnapshot
 from engine.llm.groq import GroqModel
 
@@ -156,7 +156,7 @@ def budget_context_snapshot(
 
 
 def _snapshot_items(snapshot: ContextSnapshot) -> list[_ContextItem]:
-    items = [_ContextItem("system", {"role": "system", "content": load_chat_system_prompt()}, required=True)]
+    items = [_ContextItem("system", {"role": "system", "content": build_runtime_system_prompt()}, required=True)]
     if snapshot.report is not None:
         items.append(
             _ContextItem(
@@ -214,7 +214,7 @@ def _messages(*, context: str, message: str) -> tuple[dict[str, str], ...]:
             f"User message:\n{message}"
         )
     return (
-        {"role": "system", "content": load_chat_system_prompt()},
+        {"role": "system", "content": build_runtime_system_prompt()},
         {"role": "user", "content": user_content},
     )
 

@@ -15,8 +15,29 @@ _MAX_REDIRECTS = 5
 async def _download(url: str) -> tuple[str, str, str]:
     current = url
     timeout = aiohttp.ClientTimeout(total=30, connect=10)
-    headers = {"User-Agent": "SingularityResearch/1.0"}
-    async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=aiohttp.TCPConnector(ssl=ssl_ctx())) as session:
+    # A realistic browser User-Agent (plus Accept headers) avoids the blanket
+    # 403s that CDNs/WAFs return for obviously-automated clients. Many public
+    # government and news sites (e.g. cdc.gov) reject a bespoke bot UA outright.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    # Some sites (e.g. who.int) emit very large response headers such as a
+    # multi-kilobyte Content-Security-Policy. aiohttp's default 8190-byte line
+    # limit raises "Got more than 8190 bytes when reading" and drops an
+    # otherwise-good source, so raise the header ceiling.
+    session = aiohttp.ClientSession(
+        timeout=timeout,
+        headers=headers,
+        connector=aiohttp.TCPConnector(ssl=ssl_ctx()),
+        max_line_size=65_536,
+        max_field_size=65_536,
+    )
+    async with session:
         for _ in range(_MAX_REDIRECTS + 1):
             await validate_public_url(current)
             async with session.get(current, allow_redirects=False) as response:
@@ -95,7 +116,16 @@ class WebFetchTool(ToolBase):
     skill_ids = ("general_web_research", "source_extraction", "citation_verification")
 
     async def call(self, query: str, url: str, max_characters: int = 50_000, **kwargs) -> ToolResult:
-        html, final_url, content_type = await _download(url)
+        try:
+            html, final_url, content_type = await _download(url)
+        except aiohttp.ClientResponseError as exc:
+            # A plain HTTP download was blocked by bot protection (403/429) or
+            # the origin refused it (451). Sites behind Akamai/Cloudflare
+            # fingerprint the TLS/JS client, which no header set defeats — fall
+            # back to a real headless browser before giving up the source.
+            if exc.status not in {403, 429, 451}:
+                raise
+            return await self._render_fallback(query, url, max_characters)
         text, metadata = _extract(html, final_url, max_characters)
         metadata["content_type"] = content_type
         source = {
@@ -108,3 +138,14 @@ class WebFetchTool(ToolBase):
             "metadata": metadata,
         }
         return ToolResult(content=text, sources=[source], credibility_base=0.75, raw=None)
+
+    async def _render_fallback(self, query: str, url: str, max_characters: int) -> ToolResult:
+        """Retry a blocked page through headless Chromium.
+
+        Imported lazily: browser_render imports _extract from this module, so a
+        top-level import would be circular, and Playwright is only needed on the
+        rare blocked-page path.
+        """
+        from .browser_render import BrowserRenderTool
+
+        return await BrowserRenderTool().call(query, url=url, max_characters=max_characters)

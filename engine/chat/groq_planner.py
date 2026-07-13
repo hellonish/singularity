@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from engine.chat.tool_loop import ExecutedToolCall, PlannedToolCall
+from engine.chat.prompt import build_runtime_system_prompt
 from engine.llm.config import LLMRequestConfig
-from engine.llm.groq import GroqProvider
+from engine.llm.providers import LLMProvider
 from engine.tools.contracts import chat_planner_tool_schemas
 
 
 class GroqChatToolPlanner:
-    def __init__(self, *, provider: GroqProvider, api_key: str, config: LLMRequestConfig) -> None:
+    def __init__(self, *, provider: LLMProvider, api_key: str, config: LLMRequestConfig) -> None:
         self._provider = provider
         self._api_key = api_key
         self._config = config
@@ -34,6 +35,7 @@ class GroqChatToolPlanner:
                 {
                     "role": "system",
                     "content": (
+                        f"{build_runtime_system_prompt()}\n\n"
                         "Use a tool only when it materially improves the answer. "
                         "Each function name encodes its approved skill and tool."
                     ),

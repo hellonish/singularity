@@ -147,6 +147,11 @@ class ResearchRunCreate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=500)
     report_id: Optional[str] = None
     engine_version: Optional[str] = Field(default=None, max_length=128)
+    provider_credential_id: Optional[str] = None
+    model_id: Optional[str] = Field(default=None, max_length=255)
+    strength: int = Field(default=2, ge=1, le=3)
+    audience: str = Field(default="practitioner", min_length=1, max_length=64)
+    output_language: str = Field(default="en", min_length=2, max_length=12)
     run_data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -160,8 +165,16 @@ class ResearchRunRead(APIModel):
     started_at: Optional[datetime]
     finished_at: Optional[datetime]
     error_message: Optional[str]
+    run_data: dict[str, Any]
+
+
+class ResearchRunEventRead(APIModel):
+    id: str
+    run_id: str
+    sequence: int
+    event_type: str
+    payload: dict[str, Any]
     created_at: datetime
-    updated_at: datetime
 
 
 class UsageRollupRead(APIModel):
@@ -206,7 +219,7 @@ class RefreshTokenRead(APIModel):
 
 
 class ProviderCredentialCreate(BaseModel):
-    provider: Literal["groq"]
+    provider: Literal["groq", "deepseek", "openrouter"]
     api_key: SecretStr = Field(min_length=1)
     label: Optional[str] = Field(default=None, max_length=160)
     default_model_id: Optional[str] = Field(default=None, max_length=255)

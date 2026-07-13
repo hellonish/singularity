@@ -52,6 +52,7 @@ class DocumentChunk:
     source_url: str = ""
     source_title: str = ""
     credibility: float = 0.5
+    metadata: dict = field(default_factory=dict)
     chunk_index: int = 0
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
@@ -72,6 +73,7 @@ class DocumentChunk:
             "source_url": self.source_url,
             "source_title": self.source_title,
             "credibility": self.credibility,
+            "metadata": self.metadata,
             "chunk_index": self.chunk_index,
             "text": self.text,
         }
@@ -99,6 +101,7 @@ class DocumentChunk:
             source_url=str(payload.get("source_url", "")),
             source_title=str(payload.get("source_title", "")),
             credibility=float(payload.get("credibility", 0.5)),
+            metadata=dict(payload.get("metadata", {})),
             chunk_index=int(payload.get("chunk_index", 0)),
         )
 

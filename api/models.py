@@ -116,7 +116,7 @@ class LLMProviderCredential(IdMixin, TimestampMixin, Base):
     chats: Mapped[list["Chat"]] = relationship(back_populates="provider_credential")
 
     __table_args__ = (
-        CheckConstraint("provider IN ('groq')", name="llm_credential_provider"),
+        CheckConstraint("provider IN ('groq', 'deepseek', 'openrouter')", name="llm_credential_provider"),
         CheckConstraint("status IN ('active', 'disabled')", name="llm_credential_status"),
         Index("ix_llm_credentials_user_provider", "user_id", "provider"),
     )
@@ -359,6 +359,9 @@ class ResearchRun(IdMixin, TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="research_runs")
     report: Mapped[Optional[Report]] = relationship(back_populates="research_runs")
+    events: Mapped[list["ResearchRunEvent"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="ResearchRunEvent.sequence"
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -366,6 +369,29 @@ class ResearchRun(IdMixin, TimestampMixin, Base):
             name="research_run_status",
         ),
         Index("ix_research_runs_user_created", "user_id", "created_at"),
+    )
+
+
+class ResearchRunEvent(IdMixin, Base):
+    """Durable progress event used to replay a run after an SSE reconnect."""
+
+    __tablename__ = "research_run_events"
+
+    run_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("research_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(96), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    run: Mapped[ResearchRun] = relationship(back_populates="events")
+
+    __table_args__ = (
+        UniqueConstraint("run_id", "sequence", name="research_run_event_sequence"),
+        Index("ix_research_run_events_run_sequence", "run_id", "sequence"),
     )
 
 

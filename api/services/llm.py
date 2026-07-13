@@ -9,7 +9,7 @@ from api.config import settings
 from api.models import Chat, User
 from api.schemas import LLMCompletionCreate
 from api.services.llm_credentials import get_credential
-from engine.llm import GroqProvider, resolve_request_config
+from engine.llm import provider_for, resolve_request_config
 from engine.llm.groq import GroqProviderError, GroqModel, LLMCompletion
 from engine.llm.structured import STRICT_STRUCTURED_OUTPUT_MODELS, StructuredOutputError, StructuredOutputSpec
 
@@ -36,11 +36,9 @@ async def list_models(
     credential_id: str,
 ) -> list[GroqModel]:
     credential = await get_credential(session, user.id, credential_id)
-    if credential.provider != "groq":
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported provider")
     api_key = decrypt_secret(credential.encrypted_secret)
     try:
-        return await GroqProvider().list_models(api_key=api_key)
+        return await provider_for(credential.provider).list_models(api_key=api_key)
     except GroqProviderError as exc:
         raise _groq_error(exc) from exc
 
@@ -51,9 +49,6 @@ async def complete(
     body: LLMCompletionCreate,
 ) -> tuple[LLMCompletion, object]:
     credential = await get_credential(session, user.id, body.provider_credential_id)
-    if credential.provider != "groq":
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported provider")
-
     conversation_model_id: str | None = None
     if body.chat_id is not None:
         chat = await session.get(Chat, body.chat_id)
@@ -69,7 +64,11 @@ async def complete(
         request_model_id=body.model_id,
         conversation_model_id=conversation_model_id,
         credential_default_model_id=credential.default_model_id,
-        application_fallback_model_id=settings.groq_fallback_model,
+        application_fallback_model_id={
+            "groq": settings.groq_fallback_model,
+            "deepseek": settings.deepseek_fallback_model,
+            "openrouter": settings.openrouter_fallback_model,
+        }[credential.provider],
         temperature=body.temperature,
         max_output_tokens=body.max_output_tokens,
     )
@@ -90,7 +89,7 @@ async def complete(
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     api_key = decrypt_secret(credential.encrypted_secret)
-    provider = GroqProvider()
+    provider = provider_for(credential.provider)
     try:
         available_models = await provider.list_models(api_key=api_key)
         if config.model_id not in {model.id for model in available_models}:

@@ -22,9 +22,10 @@ class TerminalContextFile:
 @dataclass
 class TerminalSession:
     api_key: str = ""
-    credential_source: Literal["system", "runtime", "none"] = "none"
+    credential_source: Literal["global_config", "runtime", "none"] = "none"
+    provider: Literal["groq", "deepseek", "openrouter"] = "groq"
     model_id: str = "openai/gpt-oss-20b"
-    agent_name: str = "chat"
+    agent_name: Literal["chat", "research"] = "chat"
     effort: ChatEffort = ChatEffort.MEDIUM
     context: str = ""
     context_source: str | None = None
@@ -52,6 +53,8 @@ class TerminalSession:
 class TerminalOutput:
     kind: Literal[
         "thinking",
+        "tool_planning_start",
+        "tool_planning_timeout",
         "tool_start",
         "tool_completed",
         "tool_failed",

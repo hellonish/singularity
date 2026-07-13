@@ -11,12 +11,13 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpe
 
 from engine.llm.config import LLMRequestConfig
 from engine.llm.structured import StructuredOutputSpec
+from engine.chat.prompt import build_runtime_system_prompt
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 logger = logging.getLogger(__name__)
 
 
-class GroqProviderError(RuntimeError):
+class ProviderError(RuntimeError):
     """A safe, classified provider failure that never exposes a secret."""
 
     def __init__(
@@ -32,6 +33,12 @@ class GroqProviderError(RuntimeError):
         self.message = message
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
+
+
+# Backwards-compatible import name. OpenRouter and DeepSeek share this error
+# contract, so the runtime class name must not falsely identify every failure
+# as Groq.
+GroqProviderError = ProviderError
 
 
 @dataclass(frozen=True)
@@ -61,13 +68,29 @@ class GroqProvider:
     """No client, key, or model is retained on this provider instance."""
 
     provider = "groq"
+    base_url = GROQ_BASE_URL
+    display_name = "Groq"
+    max_output_parameter = "max_completion_tokens"
+
+    def _classify_error(self, exc: Exception, *, operation: str) -> GroqProviderError:
+        return _classify_groq_error(exc, operation=operation, provider_name=self.display_name)
+
+    def _apply_reasoning(self, request_data: dict[str, Any], effort: str | None) -> None:
+        if effort is None:
+            return
+        if self.provider == "openrouter":
+            extra_body = dict(request_data.get("extra_body", {}))
+            extra_body["reasoning"] = {"effort": effort, "exclude": True}
+            request_data["extra_body"] = extra_body
+        else:
+            request_data["reasoning_effort"] = effort
 
     async def list_models(self, *, api_key: str) -> list[GroqModel]:
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL) as client:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 page = await client.models.list()
         except Exception as exc:
-            raise _classify_groq_error(exc, operation="retrieve models") from exc
+            raise self._classify_error(exc, operation="retrieve models") from exc
         return sorted(
             (GroqModel(id=model.id, owned_by=getattr(model, "owned_by", None)) for model in page.data),
             key=lambda model: model.id,
@@ -77,10 +100,10 @@ class GroqProvider:
         """Read the selected model's live context and completion limits."""
 
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL) as client:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 model = await client.models.retrieve(model_id)
         except Exception as exc:
-            raise _classify_groq_error(exc, operation="retrieve model limits") from exc
+            raise self._classify_error(exc, operation="retrieve model limits") from exc
         return GroqModel(
             id=model.id,
             owned_by=getattr(model, "owned_by", None),
@@ -100,18 +123,17 @@ class GroqProvider:
         """Yield real Groq text deltas while retaining no client or key state."""
 
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL) as client:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 request_data: dict[str, Any] = {
                     "model": config.model_id,
                     "messages": list(messages),
                     "temperature": config.temperature,
-                    "max_completion_tokens": config.max_output_tokens,
+                    self.max_output_parameter: config.max_output_tokens,
                     "stream": True,
                 }
                 if end_user_id is not None:
                     request_data["user"] = end_user_id
-                if config.reasoning_effort is not None:
-                    request_data["reasoning_effort"] = config.reasoning_effort
+                self._apply_reasoning(request_data, config.reasoning_effort)
                 stream = await client.chat.completions.create(**request_data)
                 async for chunk in stream:
                     if not chunk.choices:
@@ -120,7 +142,7 @@ class GroqProvider:
                     if delta:
                         yield delta
         except Exception as exc:
-            raise _classify_groq_error(exc, operation="stream chat response") from exc
+            raise self._classify_error(exc, operation="stream chat response") from exc
 
     async def complete(
         self,
@@ -132,35 +154,52 @@ class GroqProvider:
         structured_output: StructuredOutputSpec | None = None,
     ) -> LLMCompletion:
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL) as client:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 request_data: dict[str, Any] = {
                     "model": config.model_id,
-                    "messages": [{"role": "user", "content": message}],
+                    "messages": [
+                        {"role": "system", "content": build_runtime_system_prompt()},
+                        {"role": "user", "content": message},
+                    ],
                     "temperature": config.temperature,
-                    "max_completion_tokens": config.max_output_tokens,
+                    self.max_output_parameter: config.max_output_tokens,
                     "user": end_user_id,
                 }
                 if structured_output is not None:
                     request_data["response_format"] = structured_output.groq_response_format()
-                if config.reasoning_effort is not None:
-                    request_data["reasoning_effort"] = config.reasoning_effort
+                    if self.provider == "openrouter":
+                        # Do not let OpenRouter silently route a JSON-mode
+                        # request to a backend that lacks response_format.
+                        request_data["extra_body"] = {
+                            "provider": {"require_parameters": True}
+                        }
+                self._apply_reasoning(request_data, config.reasoning_effort)
                 response = await client.chat.completions.create(**request_data)
         except Exception as exc:
-            raise _classify_groq_error(exc, operation="complete request") from exc
+            raise self._classify_error(exc, operation="complete request") from exc
 
-        content = response.choices[0].message.content if response.choices else None
+        choice = response.choices[0] if response.choices else None
+        content = choice.message.content if choice else None
         if not content:
+            finish_reason = getattr(choice, "finish_reason", None) or "unknown"
             raise GroqProviderError(
                 code="provider_empty_response",
-                message="Groq returned no assistant content",
+                message=(
+                    f"{self.display_name} model {config.model_id} returned no assistant content "
+                    f"(finish_reason={finish_reason}, output_limit={config.max_output_tokens})"
+                ),
                 retryable=True,
             )
         try:
             parsed_output = structured_output.parse_and_validate(content) if structured_output else None
         except Exception as exc:
+            finish_reason = getattr(choice, "finish_reason", None) or "unknown"
+            detail = f"finish_reason={finish_reason}, output_limit={config.max_output_tokens}"
+            if finish_reason == "length":
+                detail += "; the completion was truncated, so a larger output-token budget is required"
             raise GroqProviderError(
                 code="provider_invalid_structured_output",
-                message="Groq returned structured output that failed validation",
+                message=f"{self.display_name} returned structured output that failed validation ({detail})",
                 retryable=True,
             ) from exc
         usage = response.usage
@@ -182,22 +221,21 @@ class GroqProvider:
     ) -> LLMToolCall | None:
         """Ask Groq for at most one validated tool decision, without streaming."""
         try:
-            async with AsyncOpenAI(api_key=api_key, base_url=GROQ_BASE_URL) as client:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 request_data: dict[str, Any] = {
                     "model": config.model_id,
                     "messages": list(messages),
                     "temperature": config.temperature,
-                    "max_completion_tokens": min(config.max_output_tokens, 512),
+                    self.max_output_parameter: min(config.max_output_tokens, 512),
                     "tools": tools,
                     "tool_choice": "auto",
                 }
                 if end_user_id is not None:
                     request_data["user"] = end_user_id
-                if config.reasoning_effort is not None:
-                    request_data["reasoning_effort"] = config.reasoning_effort
+                self._apply_reasoning(request_data, config.reasoning_effort)
                 response = await client.chat.completions.create(**request_data)
         except Exception as exc:
-            classified = _classify_groq_error(exc, operation="plan chat tool use")
+            classified = self._classify_error(exc, operation="plan chat tool use")
             # GPT-OSS can occasionally emit an invalid local-tool argument
             # object. Groq returns that as HTTP 400 before giving us a model
             # response. Planning is optional, so fall back to normal chat
@@ -227,7 +265,7 @@ class GroqProvider:
         return LLMToolCall(name=call.function.name, arguments=arguments)
 
 
-def _classify_groq_error(exc: Exception, *, operation: str) -> GroqProviderError:
+def _classify_groq_error(exc: Exception, *, operation: str, provider_name: str = "Groq") -> GroqProviderError:
     """Convert SDK/network failures into stable API-safe outcomes.
 
     Raw provider bodies are inspected only to distinguish exhausted credits from
@@ -235,11 +273,17 @@ def _classify_groq_error(exc: Exception, *, operation: str) -> GroqProviderError
     account-specific details.
     """
 
-    logger.warning("Groq %s failed: %s", operation, type(exc).__name__)
+    logger.warning("%s %s failed: %s", provider_name, operation, type(exc).__name__)
+    if isinstance(exc, json.JSONDecodeError):
+        return GroqProviderError(
+            code="provider_invalid_json_response",
+            message=f"{provider_name} returned an invalid JSON HTTP response while attempting to {operation}",
+            retryable=True,
+        )
     if isinstance(exc, (APITimeoutError, APIConnectionError)):
         return GroqProviderError(
             code="provider_unavailable",
-            message=f"Groq is temporarily unavailable while attempting to {operation}",
+            message=f"{provider_name} is temporarily unavailable while attempting to {operation}",
             retryable=True,
         )
     if isinstance(exc, APIStatusError):
@@ -256,13 +300,13 @@ def _classify_groq_error(exc: Exception, *, operation: str) -> GroqProviderError
         if status_code == 401:
             return GroqProviderError(
                 code="provider_credential_invalid",
-                message="The saved Groq credential is invalid or expired",
+                message=f"The saved {provider_name} credential is invalid or expired",
                 retryable=False,
             )
         if status_code == 403:
             return GroqProviderError(
                 code="provider_permission_denied",
-                message="The saved Groq credential does not have permission for this request",
+                message=f"The saved {provider_name} credential does not have permission for this request",
                 retryable=False,
             )
         if status_code in {402, 429}:
@@ -270,19 +314,19 @@ def _classify_groq_error(exc: Exception, *, operation: str) -> GroqProviderError
             if status_code == 402 or any(term in body_text for term in ("credit", "quota", "spend limit", "balance")):
                 return GroqProviderError(
                     code="provider_credits_exhausted",
-                    message="The Groq account has reached its credit or spend limit",
+                message=f"The {provider_name} account has reached its credit or spend limit",
                     retryable=False,
                 )
             return GroqProviderError(
                 code="provider_rate_limited",
-                message="Groq rate limit reached; retry after the indicated delay",
+                message=f"{provider_name} rate limit reached; retry after the indicated delay",
                 retryable=True,
                 retry_after_seconds=retry_after,
             )
         if status_code == 498:
             return GroqProviderError(
                 code="provider_capacity_unavailable",
-                message="Groq flex capacity is temporarily unavailable",
+                message=f"{provider_name} capacity is temporarily unavailable",
                 retryable=True,
                 retry_after_seconds=retry_after,
             )
@@ -291,23 +335,23 @@ def _classify_groq_error(exc: Exception, *, operation: str) -> GroqProviderError
             if "json_validate_failed" in body_text:
                 return GroqProviderError(
                     code="provider_structured_output_unsatisfied",
-                    message="Groq could not satisfy the structured-output schema; simplify the schema or increase the output-token limit",
+                    message=f"{provider_name} could not satisfy the structured-output schema; simplify the schema or increase the output-token limit",
                     retryable=False,
                 )
             return GroqProviderError(
                 code="provider_request_rejected",
-                message="Groq rejected this request; check the selected model and request settings",
+                message=f"{provider_name} rejected this request; check the selected model and request settings",
                 retryable=False,
             )
         if status_code >= 500:
             return GroqProviderError(
                 code="provider_unavailable",
-                message="Groq is temporarily unavailable; retry later",
+                message=f"{provider_name} is temporarily unavailable; retry later",
                 retryable=True,
                 retry_after_seconds=retry_after,
             )
     return GroqProviderError(
         code="provider_error",
-        message=f"Unable to {operation} with Groq",
+        message=f"Unable to {operation} with {provider_name}",
         retryable=False,
     )

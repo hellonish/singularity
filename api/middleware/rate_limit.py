@@ -17,7 +17,7 @@ from typing import Literal
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
-RateLimitAction = Literal["message", "chat", "report"]
+RateLimitAction = Literal["message", "chat", "report", "research"]
 
 
 @dataclass(frozen=True)
@@ -34,17 +34,17 @@ class PerUserSlidingWindowLimiter:
         self._events: dict[tuple[str, RateLimitAction], deque[float]] = defaultdict(deque)
         self._lock = asyncio.Lock()
 
-    async def check(self, user_id: str, action: RateLimitAction, limit: int) -> RateLimitResult:
+    async def check(self, user_id: str, action: RateLimitAction, limit: int, *, window_seconds: float = 1.0) -> RateLimitResult:
         now = self._clock()
         key = (user_id, action)
         async with self._lock:
             events = self._events[key]
-            window_start = now - 1.0
+            window_start = now - window_seconds
             while events and events[0] <= window_start:
                 events.popleft()
 
             if len(events) >= limit:
-                return RateLimitResult(allowed=False, retry_after_seconds=events[0] + 1.0 - now)
+                return RateLimitResult(allowed=False, retry_after_seconds=events[0] + window_seconds - now)
 
             events.append(now)
             return RateLimitResult(allowed=True)
@@ -61,6 +61,8 @@ def action_for_request(request: Request) -> RateLimitAction | None:
         return "chat"
     if path == "/reports":
         return "report"
+    if path == "/research/runs":
+        return "research"
 
     chat_segments = path.split("/")
     if (
@@ -83,6 +85,7 @@ class ChatReportRateLimitMiddleware:
         messages_per_second: int,
         chats_per_second: int,
         reports_per_second: int,
+        research_runs_per_hour: int = 3,
     ) -> None:
         self.app = app
         self._limiter = PerUserSlidingWindowLimiter()
@@ -90,6 +93,7 @@ class ChatReportRateLimitMiddleware:
             "message": messages_per_second,
             "chat": chats_per_second,
             "report": reports_per_second,
+            "research": research_runs_per_hour,
         }
 
     async def __call__(self, scope, receive, send) -> None:
@@ -104,7 +108,8 @@ class ChatReportRateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        result = await self._limiter.check(user_id, action, self._limits[action])
+        window_seconds = 3_600.0 if action == "research" else 1.0
+        result = await self._limiter.check(user_id, action, self._limits[action], window_seconds=window_seconds)
         if result.allowed:
             await self.app(scope, receive, send)
             return
@@ -113,7 +118,7 @@ class ChatReportRateLimitMiddleware:
         response = JSONResponse(
             status_code=429,
             content={
-                "detail": f"Rate limit exceeded: {self._limits[action]} {action} requests per second",
+                "detail": f"Rate limit exceeded: {self._limits[action]} {action} requests per {'hour' if action == 'research' else 'second'}",
             },
             headers={
                 "Retry-After": str(retry_after),

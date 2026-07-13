@@ -6,11 +6,10 @@ on SQLite and can later move to PostgreSQL.
 
 ## Current scope
 
-The new API owns the durable data model, SQLite lifecycle, local object store,
-and HTTP route templates. It creates the schema at startup. The routes persist
-real data, but the engine-specific work (LLM calls, research execution,
-progress publication, usage accounting, and authentication) is deliberately
-left behind stable service boundaries.
+The API owns the durable data model, SQLite development lifecycle, local object
+store, and HTTP route templates. Production uses Alembic before API/worker
+startup. The bounded research path is executable through the CLI and ARQ
+worker; other engine work remains behind stable service boundaries.
 
 The temporary development identity boundary is the `X-User-ID` request header.
 Create a user with `POST /users`, then send its ID in that header for all
@@ -63,7 +62,7 @@ All routes are available in the generated OpenAPI UI at `/docs`.
 | Summaries | `GET/POST /chats/{id}/summaries` | Stores durable chat-summary checkpoints. |
 | Reports | `GET/POST /reports`, `GET /reports/{id}`, `GET /reports/{id}/stream` | Creates and lists report metadata; the stream endpoint emits dummy report sections over SSE. |
 | Versions | `GET/POST /reports/{id}/versions`, `GET /reports/{id}/versions/{version_id}/content` | Saves version content into local object storage and exposes it as Markdown. |
-| Research | `GET/POST /research/runs`, `GET /research/runs/{id}`, `POST /research/runs/{id}/cancel`, `GET /research/runs/{id}/events` | Creates durable queued runs and a future-compatible SSE status contract; it does not yet execute research. |
+| Research | `GET/POST /research/runs`, `GET /research/runs/{id}`, `POST /research/runs/{id}/cancel`, `GET /research/runs/{id}/events` | Creates bounded LangGraph research runs, persists replayable events, and optionally dispatches them to the ARQ worker. |
 | LLM / BYOK | `GET/POST/PATCH /llm/credentials`, `GET /llm/credentials/{id}/models`, `POST /llm/completions` | Stores encrypted Groq credentials, discovers models with that credential, and runs request-scoped completions. |
 
 `POST /chats` is limited to 3 requests/second per user, message sends (normal
@@ -71,6 +70,42 @@ and streamed together) to 3 requests/second per user, and `POST /reports` to
 1 request/second per user. Exceeding a limit returns `429` with `Retry-After`.
 The current limiter is in-process; move its counters to Redis before running
 multiple API instances.
+
+## Bounded research workflow
+
+`engine/research_workflow/` contains the LangGraph state contracts and bounded runtime:
+
+- QA may add at most two research nodes per section per cycle.
+- Each research node may make at most four external tool calls: one search,
+  two page fetches, and one optional recovery call.
+- Strength controls the overall cycle, node, and runtime caps; it does
+  not increase either per-section QA suggestions or per-node tool calls.
+- `api/research_worker.py` is the ARQ entrypoint. It assembles the BYOK LLM
+  adapter, Modal executor, QA reviewer, vector scope, structured writer, and
+  LangGraph checkpointer directly from the persisted run configuration.
+- Use `Last-Event-ID` when reconnecting to `/research/runs/{id}/events`; events
+  are replayed from the durable `research_run_events` table.
+- The API rejects new research runs with `503` if its worker is disabled, so a
+  request is never accepted into a queue that has no consumer.
+
+Run the deterministic CLI smoke workflow without a provider key, Modal
+deployment, or frontend:
+
+```bash
+python -m engine.research_workflow.cli --demo --strength 1 --output-dir .artifacts/research \
+  "How does bounded research work?"
+```
+
+The deterministic smoke command writes `research-document.json` and
+`research-report.md`. In the terminal REPL, use `/mode` and choose **Research**;
+each subsequent plain-text prompt runs the live LangGraph workflow with the
+selected provider model and deployed Modal web tools, then renders the complete
+report directly in chat without writing report artifacts. It requires a saved
+key for the selected provider. Choose **Chat** in `/mode` to return to normal
+conversational chat.
+For live API execution, set the credential encryption key, Groq pricing rates,
+and `SINGULARITY_RESEARCH_WORKER_ENABLED=1`; production Compose starts the
+Alembic migration job and ARQ worker automatically.
 
 ## Backend SSE verification
 
@@ -124,13 +159,14 @@ On first launch, use `/key`, choose **Set or replace key**, and enter the Groq
 key in the hidden prompt. Singularity validates it and saves it in the
 operating-system credential store for subsequent sessions and directories.
 
-Inside the REPL, plain text streams a chat response. `/models`, `/effort`, and
-`/key` open arrow-key selectors; `/status`, `/reset`, `/clear`, `/help`, and
-`/quit` manage the current session. New sessions default to `medium` effort.
-The Groq key is persisted globally for the current operating-system user in
-macOS Keychain, Windows Credential Manager, or the Linux Secret Service through
-Python `keyring`; it is never written to the repository. Chat history remains
-local to the terminal process. Setting
+Inside the REPL, plain text streams a chat response. `/provider`, `/models`,
+`/effort`, and `/key` open arrow-key selectors; `/status`, `/reset`, `/clear`,
+`/help`, and `/quit` manage the current session. New sessions default to
+`medium` effort. Groq, DeepSeek, and OpenRouter are supported. The selected provider, API
+keys for each configured provider, selected provider, model, and effort are persisted globally in
+`~/.config/singularity/terminal.json` with private user-only permissions; it is
+never written to the repository. Chat history remains local to the terminal
+process. Setting
 `SINGULARITY_MODAL_ENABLED=1` enables bounded, skill-scoped trusted tool calls
 through the configured Modal Function without sending the Groq key to Modal.
 
@@ -179,7 +215,7 @@ Deploy the trusted tool Function separately from the API after authenticating
 the Modal CLI outside this repository:
 
 ```bash
-modal deploy modal_app/chat_tools.py --environment dev
+modal deploy engine/modal_app/chat_tools.py --env main
 ```
 
 The deployed app is `singularity-chat-tools` and its Function is

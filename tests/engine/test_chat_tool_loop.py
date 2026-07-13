@@ -1,9 +1,11 @@
 import asyncio
 from dataclasses import dataclass
 
+import pytest
+
 from engine.chat.effort import ChatEffort
 from engine.chat.modal_tools import ChatToolResult
-from engine.chat.tool_loop import BoundedChatToolLoop, PlannedToolCall
+from engine.chat.tool_loop import BoundedChatToolLoop, PlannedToolCall, ToolExecutionTimeout, ToolPlanningTimeout
 
 
 @dataclass
@@ -102,6 +104,34 @@ def test_tool_loop_emits_compact_lifecycle_progress() -> None:
         )
     )
 
-    assert [event[0] for event in events] == ["thinking", "tool_start", "tool_completed"]
+    # The single planned call yields plan→start→completed; any trailing
+    # planning rounds (from the profile's step budget) resolve to no tool.
+    assert [event[0] for event in events][:3] == ["tool_planning_start", "tool_start", "tool_completed"]
+    assert [event[0] for event in events].count("tool_start") == 1
     assert events[1][1] == "medical_research/pubmed"
     assert events[2][2] is not None
+
+
+def test_tool_loop_identifies_planning_timeout_before_dispatch() -> None:
+    class TimeoutPlanner:
+        async def plan(self, **kwargs):
+            raise TimeoutError
+
+    executor = FakeExecutor()
+    with pytest.raises(ToolPlanningTimeout, match="no tool was dispatched"):
+        asyncio.run(BoundedChatToolLoop(planner=TimeoutPlanner(), executor=executor).run(
+            run_id="run_1", query="search", effort=ChatEffort.INSTANT, context=""
+        ))
+    assert executor.invocations == []
+
+
+def test_tool_loop_identifies_execution_timeout_after_dispatch() -> None:
+    class TimeoutExecutor:
+        async def execute(self, invocation):
+            raise TimeoutError
+
+    planner = FakePlanner([PlannedToolCall("medical_research", "pubmed", "query", {})])
+    with pytest.raises(ToolExecutionTimeout, match="pubmed timed out"):
+        asyncio.run(BoundedChatToolLoop(planner=planner, executor=TimeoutExecutor()).run(
+            run_id="run_1", query="search", effort=ChatEffort.INSTANT, context=""
+        ))

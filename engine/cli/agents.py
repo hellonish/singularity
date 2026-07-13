@@ -3,18 +3,19 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 import asyncio
 import os
-from typing import Protocol
+from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from engine.chat import ChatAgent, ChatAgentInput
-from engine.chat.effort import get_chat_effort_profile, reasoning_effort_for_model
+from engine.chat.effort import chat_output_budget, get_chat_effort_profile, reasoning_effort_for_model
+from engine.chat.freshness import requests_tool_use, requires_fresh_evidence
 from engine.chat.groq_planner import GroqChatToolPlanner
 from engine.chat.modal_tools import ModalToolExecutor
-from engine.chat.tool_loop import BoundedChatToolLoop
+from engine.chat.tool_loop import BoundedChatToolLoop, ExecutedToolCall, PlannedToolCall
 from engine.cli.context import ChatContextSelector, LocalSummaryGenerator
 from engine.cli.models import TerminalHistoryTurn, TerminalOutput, TerminalSession
 from engine.llm.config import LLMRequestConfig
-from engine.llm.groq import GroqProvider
+from engine.llm.providers import LLMProvider, provider_for
 from engine.observability import LangSmithTracer
 
 
@@ -26,6 +27,24 @@ class TerminalAgent(Protocol):
     async def stream(self, *, message: str, session: TerminalSession) -> AsyncIterator[TerminalOutput]: ...
 
 
+class FreshnessEvidenceUnavailable(ValueError):
+    """A current-facts request could not obtain the required live evidence."""
+
+
+class _FreshnessWebSearchPlanner:
+    """Avoid an expensive model planning call for clearly fresh requests."""
+
+    async def plan(self, *, query: str, context: str, prior_results: tuple[ExecutedToolCall, ...]) -> PlannedToolCall | None:
+        if prior_results:
+            return None
+        return PlannedToolCall(
+            skill_id="general_web_research",
+            tool_name="web_search",
+            query=query,
+            arguments={"max_results": 8},
+        )
+
+
 class ChatTerminalAgent:
     name = "chat"
 
@@ -33,14 +52,15 @@ class ChatTerminalAgent:
         self,
         *,
         summary_generator: LocalSummaryGenerator | None = None,
-        provider: GroqProvider | None = None,
+        provider: LLMProvider | None = None,
         tracer: LangSmithTracer | None = None,
+        tool_executor_factory: Callable[[], Any] | None = None,
     ) -> None:
-        self._provider = provider or GroqProvider()
+        self._provider_override = provider
         self._tracer = tracer or LangSmithTracer()
-        self._agent = ChatAgent(provider=self._provider, tracer=self._tracer)
         self._selector = ChatContextSelector()
         self._summary_generator = summary_generator
+        self._tool_executor_factory = tool_executor_factory or ModalToolExecutor
 
     async def stream(self, *, message: str, session: TerminalSession) -> AsyncIterator[TerminalOutput]:
         response = ""
@@ -84,25 +104,36 @@ class ChatTerminalAgent:
                 "compaction_required": selection.compaction_required,
             })
         config = LLMRequestConfig(
-            provider="groq",
+            provider=session.provider,
             credential_id="terminal",
             model_id=session.model_id,
             temperature=session.temperature,
-            max_output_tokens=session.max_output_tokens,
+            max_output_tokens=chat_output_budget(session.model_id, session.max_output_tokens),
             reasoning_effort=reasoning_effort_for_model(session.model_id, session.effort),
         )
+        provider = self._provider_override or provider_for(session.provider)
         context = selection.context
-        if os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1":
-            planner = GroqChatToolPlanner(provider=self._provider, api_key=session.api_key, config=config)
+        needs_fresh_evidence = requires_fresh_evidence(message)
+        tool_requested = requests_tool_use(message)
+        modal_enabled = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
+        if tool_requested and not modal_enabled:
+            raise FreshnessEvidenceUnavailable("This request requires a tool, but Modal tools are disabled")
+        if modal_enabled and tool_requested:
+            planner = (
+                _FreshnessWebSearchPlanner()
+                if needs_fresh_evidence
+                else GroqChatToolPlanner(provider=provider, api_key=session.api_key, config=config)
+            )
             progress_queue: asyncio.Queue[TerminalOutput] = asyncio.Queue()
 
             async def emit_progress(kind: str, content: str, elapsed: float | None) -> None:
                 await progress_queue.put(TerminalOutput(kind=kind, content=content, elapsed_seconds=elapsed))
 
+            executor = self._tool_executor_factory()
             tool_task = asyncio.create_task(
                 BoundedChatToolLoop(
                     planner=planner,
-                    executor=ModalToolExecutor(),
+                    executor=executor,
                     tracer=self._tracer,
                 ).run(
                     run_id=str(uuid4()),
@@ -123,35 +154,57 @@ class ChatTerminalAgent:
             except Exception as exc:
                 if not tool_task.done():
                     tool_task.cancel()
+                    await asyncio.gather(tool_task, return_exceptions=True)
                 yield TerminalOutput(kind="metadata", content=f"tool loop unavailable: {type(exc).__name__}")
+                if tool_requested:
+                    raise FreshnessEvidenceUnavailable(
+                        f"Required tool execution failed during {type(exc).__name__}; no unsupported fallback was generated"
+                    ) from exc
                 executed = ()
+            finally:
+                close = getattr(executor, "aclose", None)
+                if close is not None:
+                    await close()
             if executed:
                 tool_context = self._tool_context(executed, max_citations=profile.max_document_chunks)
+                if tool_requested and not tool_context:
+                    raise FreshnessEvidenceUnavailable(
+                        "Live web evidence returned no usable sources; no historical fallback was generated"
+                    )
                 context = "\n\n".join(part for part in (context, tool_context) if part)
+            elif tool_requested:
+                raise FreshnessEvidenceUnavailable(
+                    "Live web evidence returned no usable sources; no historical fallback was generated"
+                )
 
         assistant_content = ""
         session.history.append(TerminalHistoryTurn("user", message))
         yield TerminalOutput(kind="thinking", content="")
-        async with asyncio.timeout(profile.timeout_seconds):
-            async for event in self._agent.stream(
-                ChatAgentInput(context=context, message=message),
-                api_key=session.api_key,
-                config=config,
-            ):
-                if event.type == "started":
-                    truncation = ", context trimmed" if event.context_truncated else ""
-                    yield TerminalOutput(
-                        kind="model_started",
-                        content=(
-                            f"effort={session.effort}, model={event.model_id}, input<={event.input_token_upper_bound}, "
-                            f"output<={event.max_output_tokens}{truncation}"
-                        ),
-                    )
-                elif event.type == "delta" and event.delta:
-                    assistant_content += event.delta
-                    yield TerminalOutput(kind="delta", content=event.delta)
-                elif event.type == "completed" and event.content:
-                    assistant_content = event.content
+        try:
+            async with asyncio.timeout(profile.timeout_seconds):
+                async for event in ChatAgent(provider=provider, tracer=self._tracer).stream(
+                    ChatAgentInput(context=context, message=message),
+                    api_key=session.api_key,
+                    config=config,
+                ):
+                    if event.type == "started":
+                        truncation = ", context trimmed" if event.context_truncated else ""
+                        yield TerminalOutput(
+                            kind="model_started",
+                            content=(
+                                f"effort={session.effort}, model={event.model_id}, input<={event.input_token_upper_bound}, "
+                                f"output<={event.max_output_tokens}{truncation}"
+                            ),
+                        )
+                    elif event.type == "delta" and event.delta:
+                        assistant_content += event.delta
+                        yield TerminalOutput(kind="delta", content=event.delta)
+                    elif event.type == "completed" and event.content:
+                        assistant_content = event.content
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"Final answer generation timed out after {profile.timeout_seconds} seconds"
+            ) from exc
         yield TerminalOutput(kind="completed", content="")
         if assistant_content:
             session.history.append(TerminalHistoryTurn("assistant", assistant_content))

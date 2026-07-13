@@ -38,7 +38,7 @@ def test_modal_executor_forwards_only_validated_tool_payload() -> None:
         "effort": "medium",
         "timeout_seconds": 60,
         "profile_limits": {
-            "max_agent_tool_steps": 4,
+            "max_agent_tool_steps": 6,
             "max_calls_per_tool_type": 2,
             "timeout_seconds": 60,
         },
