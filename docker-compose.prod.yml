@@ -119,6 +119,11 @@ services:
     volumes:
       - application_logs:/app/logs
     command: arq api.research_worker.WorkerSettings
+    # The image-level health check probes the FastAPI HTTP server, which this
+    # ARQ-only process deliberately does not run. Process liveness is covered
+    # by the restart policy and worker logs/job metrics.
+    healthcheck:
+      disable: true
     deploy:
       resources:
         limits:
