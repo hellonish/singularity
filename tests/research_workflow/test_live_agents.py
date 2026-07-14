@@ -241,3 +241,91 @@ def test_writer_falls_back_to_completed_cited_evidence_after_provider_failure(ca
         record.levelname == "WARNING" and "ProviderError" in record.getMessage()
         for record in caplog.records
     )
+
+
+def _answered_dag(caps: RunCaps) -> ResearchDAG:
+    dag = ResearchDAG()
+    dag.add_node(
+        ResearchNode(
+            node_id="root", question="What is bounded research?", section_id="overview", level=0,
+            status=ResearchNodeStatus.ANSWERED, answer="A bounded workflow.",
+            source_records=[{
+                "tag": "S1234567890", "name": "Primary source", "title": "Primary source",
+                "url": "https://example.test/source", "source_type": "web",
+            }],
+        ),
+        caps,
+    )
+    return dag
+
+
+_OUTLINE_JSON = '{"title":"T","limitations":[],"sections":[{"section_id":"overview","title":"Overview","node_ids":["root"]}]}'
+_SECTION_JSON = '{"section_id":"overview","title":"Overview","blocks":[{"kind":"paragraph","text":"Repaired.","reference_ids":["S1234567890"]}]}'
+
+
+class _RepairableModel:
+    """Returns a broken section body once, then a valid one on the repair retry."""
+
+    def __init__(self, first_section_response: str) -> None:
+        self.first_section_response = first_section_response
+        self.section_calls = 0
+
+    async def complete(self, prompt: str, *, max_output_tokens: int) -> str:
+        if "Design a coherent report outline" in prompt:
+            return _OUTLINE_JSON
+        if "a single ResearchDocumentV1 section object" in prompt:
+            self.section_calls += 1
+            if "was rejected" in prompt:
+                return _SECTION_JSON
+            return self.first_section_response
+        raise AssertionError(f"unexpected prompt: {prompt}")
+
+
+def test_writer_repairs_a_truncated_section_instead_of_dropping_it() -> None:
+    model = _RepairableModel('{"section_id":"overview","title":"Over')  # truncated JSON
+
+    document = asyncio.run(LLMWriter(model).write(_answered_dag(RunCaps.for_strength(1)), "bounded research"))
+
+    assert model.section_calls == 2
+    assert document["sections"][0]["blocks"][0]["text"] == "Repaired."
+
+
+def test_writer_rejects_a_hollow_section_and_repairs_it() -> None:
+    """A heading with no blocks and no children must not ship as a section."""
+    model = _RepairableModel('{"section_id":"overview","title":"Overview","blocks":[],"children":[]}')
+
+    document = asyncio.run(LLMWriter(model).write(_answered_dag(RunCaps.for_strength(1)), "bounded research"))
+
+    assert model.section_calls == 2
+    assert document["sections"][0]["blocks"][0]["text"] == "Repaired."
+
+
+def test_writer_excludes_unanswered_nodes_from_the_prompt() -> None:
+    """Failed nodes and unresolved QA suggestions carry no evidence; their
+    ``answer: None`` records must not dilute the outline or section prompts."""
+
+    class CapturingModel:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def complete(self, prompt: str, *, max_output_tokens: int) -> str:
+            self.prompts.append(prompt)
+            if "Design a coherent report outline" in prompt:
+                return _OUTLINE_JSON
+            return _SECTION_JSON
+
+    caps = RunCaps.for_strength(1)
+    dag = _answered_dag(caps)
+    dag.add_node(
+        ResearchNode(
+            node_id="ghost", question="An unanswered ghost question?", section_id="overview",
+            level=1, depends_on=["root"],
+        ),
+        caps,
+    )
+    model = CapturingModel()
+
+    document = asyncio.run(LLMWriter(model).write(dag, "bounded research"))
+
+    assert document["sections"]
+    assert all("ghost" not in prompt for prompt in model.prompts)

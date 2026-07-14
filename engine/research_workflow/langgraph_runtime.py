@@ -114,13 +114,19 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
         return {"report": report, "events": [{"kind": "report_written"}]}
 
     def route_after_qa(state: ResearchGraphState):
+        # Any gap-filling nodes QA just accepted must be researched before
+        # writing — including those from the final QA cycle, which previously
+        # went straight to the writer as permanently unanswered nodes.
         dag = ResearchDAG.model_validate(state["dag"])
-        if state.get("cycle", 0) < RunCaps(**state["caps"]).qa_cycles and dag.ready_nodes():
-            return "resolve"
-        return "write"
+        return "resolve" if dag.ready_nodes() else "write"
 
     def route_after_research(state: ResearchGraphState):
-        return "qa" if RunCaps(**state["caps"]).qa_cycles else "write"
+        # The cycle count gates QA passes (not resolve passes), so each QA
+        # pass's suggestions get exactly one resolution round and the run
+        # performs exactly caps.qa_cycles reviews.
+        if int(state.get("cycle", 0)) < RunCaps(**state["caps"]).qa_cycles:
+            return "qa"
+        return "write"
 
     graph = StateGraph(ResearchGraphState)
     graph.add_node("polish_prompt", polish)

@@ -23,6 +23,7 @@ TOOL_ARGUMENT_QUERY_TOOLS = frozenset(
 
 from .caps import RunCaps
 from .dag import ResearchNode
+from .evidence import rank_evidence
 from .runtime import ResearchInfrastructureError
 
 
@@ -291,13 +292,16 @@ class BoundedResearchResolver:
         # A research answer is only useful to the writer when it has a
         # citable, extracted source.  Do not turn an empty search result into
         # a plausible-but-unsupported synthetic answer. Redact credential-like
-        # tokens from tool output before it reaches an LLM prompt.
-        evidence = [
+        # tokens from tool output before it reaches an LLM prompt. Rank the
+        # surviving records (full-text fetches ahead of snippets, deduplicated
+        # by URL) because the answerer truncates to its evidence budget and
+        # must not lose the fetched pages to a flood of earlier snippets.
+        evidence = rank_evidence([
             _redact(item)
             for item in evidence
             if str(item.get("content", "")).strip()
             and str(item.get("url", "")).startswith(("https://", "http://"))
-        ]
+        ])
         if not evidence:
             result = {
                 "answered": False,

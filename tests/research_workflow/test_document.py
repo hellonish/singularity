@@ -84,6 +84,35 @@ def test_document_rejects_unknown_reference():
         validate_document(doc)
 
 
+def test_document_rejects_a_section_with_no_content():
+    """A heading with neither blocks nor children renders as an empty shell."""
+    doc = ResearchDocument(
+        title="Report",
+        query="Question",
+        sections=[DocumentSection(section_id="s1", title="Hollow")],
+    )
+    with pytest.raises(ValueError, match="has no content"):
+        validate_document(doc)
+
+
+def test_document_accepts_a_container_section_whose_children_hold_the_content():
+    doc = ResearchDocument(
+        title="Report",
+        query="Question",
+        sections=[DocumentSection(
+            section_id="s1",
+            title="Container",
+            children=[DocumentSection(
+                section_id="s1-a",
+                title="Child",
+                blocks=[ParagraphBlock(kind="paragraph", text="Finding", reference_ids=["Src1"])],
+            )],
+        )],
+        references=[ReferenceTag(tag="Src1", name="Source", url="https://example.com/source")],
+    )
+    assert validate_document(doc) == doc
+
+
 def test_document_requires_a_reference_for_every_content_block():
     doc = ResearchDocument(
         title="Report",
