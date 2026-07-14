@@ -118,6 +118,27 @@ def test_requires_bucket() -> None:
         S3ObjectStore(bucket="")
 
 
+def test_client_uses_path_style_addressing() -> None:
+    store = S3ObjectStore(
+        bucket="reports",
+        endpoint_url="https://proj.storage.supabase.co/storage/v1/s3",
+    )
+    captured: dict[str, object] = {}
+
+    class _Session:
+        def client(self, service_name, **kwargs):
+            captured["service_name"] = service_name
+            captured.update(kwargs)
+            return object()
+
+    store._session = _Session()
+    store._client()
+
+    assert captured["service_name"] == "s3"
+    assert captured["endpoint_url"] == "https://proj.storage.supabase.co/storage/v1/s3"
+    assert captured["config"].s3["addressing_style"] == "path"
+
+
 def test_factory_selects_s3(monkeypatch) -> None:
     from api.config import settings
     from api.storage import factory

@@ -20,6 +20,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.production.example
 *.db
 *.db-shm
 *.db-wal

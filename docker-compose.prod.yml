@@ -1,14 +1,17 @@
-# Production Docker Compose for AWS EC2 t3.micro (1GB RAM)
-# Uses Qdrant Cloud instead of local Qdrant to save ~42MB RAM
-# Deploy with: docker compose -f docker-compose.prod.yml up -d
+# EC2 production stack. PostgreSQL and report objects live in Supabase; the
+# frontend lives in Vercel.
+#
+# Validate:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml config
+# Deploy:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 
 services:
-  # ── Reverse proxy with auto-SSL ────────────────────────────────────────────
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    environment:
-      - DOMAIN=${DOMAIN:-localhost}
+    env_file:
+      - .env.production
     ports:
       - "80:80"
       - "443:443"
@@ -18,49 +21,19 @@ services:
       - caddy_config:/config
     depends_on:
       api:
-        condition: service_started
-      frontend:
-        condition: service_started
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          memory: 64M
+          memory: 96M
 
-  # ── Database ───────────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: singularity
-      POSTGRES_USER: ${POSTGRES_USER:-singularity}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    expose:
-      - "5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-singularity}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-    command: >
-      postgres
-      -c shared_buffers=64MB
-      -c effective_cache_size=128MB
-      -c work_mem=2MB
-      -c maintenance_work_mem=32MB
-      -c max_connections=50
-
-  # ── Cache & Queue ──────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     expose:
       - "6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -69,35 +42,29 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 320M
     command: >
       redis-server
-      --maxmemory 96mb
-      --maxmemory-policy allkeys-lru
-      --save 60 1000
       --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
 
   migrate:
-    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
+    image: ${API_IMAGE:-singularity/singularity-api:latest}
     build:
       context: .
       dockerfile: Dockerfile.prod
       target: api
-    depends_on:
-      postgres:
-        condition: service_healthy
     env_file:
       - .env.production
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-singularity}:${POSTGRES_PASSWORD}@postgres:5432/singularity
-      - ENVIRONMENT=production
-      - SINGULARITY_AUTO_CREATE_SCHEMA=false
+      SINGULARITY_AUTO_CREATE_SCHEMA: "false"
     command: alembic upgrade head
     restart: "no"
 
-  # ── API Server ─────────────────────────────────────────────────────────────
   api:
-    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
+    image: ${API_IMAGE:-singularity/singularity-api:latest}
     build:
       context: .
       dockerfile: Dockerfile.prod
@@ -106,8 +73,6 @@ services:
     expose:
       - "8000"
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -115,12 +80,10 @@ services:
     env_file:
       - .env.production
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-singularity}:${POSTGRES_PASSWORD}@postgres:5432/singularity
-      - REDIS_URL=redis://redis:6379
-      - ENVIRONMENT=production
-      - SINGULARITY_AUTO_CREATE_SCHEMA=false
-      - SINGULARITY_RESEARCH_WORKER_ENABLED=true
-      - SINGULARITY_LOG_FILE=/app/logs/api.log
+      REDIS_URL: redis://redis:6379/0
+      SINGULARITY_AUTO_CREATE_SCHEMA: "false"
+      SINGULARITY_RESEARCH_WORKER_ENABLED: "true"
+      SINGULARITY_LOG_FILE: /app/logs/api.log
     volumes:
       - application_logs:/app/logs
     healthcheck:
@@ -132,18 +95,16 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 512M
 
   worker:
-    image: ${DOCKERHUB_USER:-singularity}/singularity-api:latest
+    image: ${API_IMAGE:-singularity/singularity-api:latest}
     build:
       context: .
       dockerfile: Dockerfile.prod
       target: api
     restart: unless-stopped
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
@@ -151,54 +112,20 @@ services:
     env_file:
       - .env.production
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-singularity}:${POSTGRES_PASSWORD}@postgres:5432/singularity
-      - REDIS_URL=redis://redis:6379
-      - ENVIRONMENT=production
-      - SINGULARITY_AUTO_CREATE_SCHEMA=false
-      - SINGULARITY_RESEARCH_WORKER_ENABLED=true
-      - SINGULARITY_LOG_FILE=/app/logs/worker.log
+      REDIS_URL: redis://redis:6379/0
+      SINGULARITY_AUTO_CREATE_SCHEMA: "false"
+      SINGULARITY_RESEARCH_WORKER_ENABLED: "true"
+      SINGULARITY_LOG_FILE: /app/logs/worker.log
     volumes:
       - application_logs:/app/logs
     command: arq api.research_worker.WorkerSettings
     deploy:
       resources:
         limits:
-          memory: 512M
-
-  # ── Frontend ───────────────────────────────────────────────────────────────
-  frontend:
-    image: ${DOCKERHUB_USER:-singularity}/singularity-frontend:latest
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-      target: frontend
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-    restart: unless-stopped
-    expose:
-      - "3000"
-    env_file:
-      - .env.production
-    environment:
-      - NEXTAUTH_URL=${NEXTAUTH_URL}
-      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-      - INTERNAL_API_URL=http://api:8000
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 128M
+          memory: 1024M
 
 volumes:
-  postgres_data:
+  redis_data:
   caddy_data:
   caddy_config:
   application_logs:

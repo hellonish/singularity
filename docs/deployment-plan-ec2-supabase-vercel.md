@@ -1,4 +1,4 @@
-# Singularity deployment plan: EC2, Supabase, and AWS S3
+# Singularity deployment plan: EC2, Supabase, and Vercel
 
 ## 1. Target outcome
 
@@ -6,19 +6,18 @@ Deploy Singularity as three independently managed layers:
 
 1. **AWS EC2:** Caddy, FastAPI, Redis, and one ARQ research worker.
 2. **Supabase:** PostgreSQL for relational data and LangGraph checkpoints, plus a private Storage bucket accessed through Supabase's S3-compatible API for report content.
-3. **AWS S3 + CloudFront:** a static export of the Next.js frontend, served over HTTPS from a private S3 bucket.
+3. **Vercel:** the Next.js frontend, built from the repository's `frontend/` directory and served over HTTPS.
 
 The recommended public endpoints are:
 
-- `https://app.<domain>` -> CloudFront -> private AWS S3 frontend bucket
+- `https://app.<domain>` -> Vercel frontend project
 - `https://api.<domain>` -> EC2 Elastic IP -> Caddy -> FastAPI
 
 Redis, the ARQ worker, and the Supabase credentials remain private. Nothing should expose Redis port 6379 to the internet.
 
 ```mermaid
 flowchart LR
-    U[Browser] --> CF[CloudFront and TLS]
-    CF --> FE[Private AWS S3 frontend bucket]
+    U[Browser] --> FE[Vercel frontend and TLS]
     U --> APIURL[api domain]
     APIURL --> Caddy[Caddy on EC2]
     Caddy --> API[FastAPI container]
@@ -35,17 +34,19 @@ flowchart LR
 
 ## 2. Repository findings that affect deployment
 
-The repository already contains the correct service boundaries, but the current production files are not ready for this target architecture:
+The repository contains the correct service boundaries. Phase A was implemented
+locally on 2026-07-14; the historical gaps and their current status are:
 
 - `api/research_queue.py` dispatches `run_research_job` through Redis, and `api/research_worker.py` exposes `WorkerSettings` with `max_jobs = 1` and a four-hour job timeout.
 - `engine/research_workflow/checkpoint.py` automatically selects the PostgreSQL LangGraph checkpointer when `DATABASE_URL` starts with `postgres`.
 - `api/storage/s3.py` and `api/storage/factory.py` already provide an S3-compatible object-store adapter.
-- `docker-compose.prod.yml` still runs local PostgreSQL and the Node frontend. Both must be removed from the EC2 stack for this deployment.
-- The Compose file enables Redis AOF but does not mount `/data`; a container replacement can therefore discard the queue state.
-- Redis currently uses `allkeys-lru`. Queue keys must not be evicted; production should use `noeviction` and alert before memory exhaustion.
-- The Compose file is labelled for a 1 GB `t3.micro`, while its declared API, worker, Redis, Caddy, and frontend limits already total about 1.1 GB before the OS and Docker overhead. Even after moving PostgreSQL and the frontend off EC2, 1 GB is too narrow for the research worker.
-- `docker-compose.prod.yml` and `Dockerfile.prod` build `NEXT_PUBLIC_API_URL`, but the frontend reads `NEXT_PUBLIC_API_BASE`. Google login reads `NEXT_PUBLIC_GOOGLE_CLIENT_ID`, which is not currently passed into the frontend build.
+- `docker-compose.prod.yml` is now EC2-only: Caddy, Redis, migration, API, and worker. PostgreSQL and the Node frontend were removed.
+- Redis now mounts `/data`, uses AOF with `appendfsync everysec`, and uses `noeviction` so queue keys cannot be discarded silently.
+- The EC2 stack is sized for a 4 GiB production host rather than the old 1 GiB target.
+- The obsolete frontend Docker target and `NEXT_PUBLIC_API_URL` wiring were removed. Static builds use `NEXT_PUBLIC_API_BASE` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` directly.
 - The frontend is client-driven and has no route handlers or required server-side auth, so it is a good static-export candidate. It does use `next/image`, so the export must disable the default runtime image optimizer.
+- `frontend/next.config.ts` now emits `frontend/out/` with trailing-slash routes and unoptimized static images.
+- Supabase S3 clients now force path-style bucket addressing, and the missing Caddy configuration lives under `deploy/`.
 - The current local database contains application data and terminal research history. All research runs are already terminal (`completed` or `failed`), so old SQLite LangGraph checkpoint tables do not need to be made resumable in PostgreSQL.
 
 ## 3. Phase A: prepare the application for the target architecture
@@ -255,22 +256,19 @@ Migrate database-referenced objects, not every local file blindly; this avoids p
 
 Deploy API and worker from the exact same image tag so job payload and database contracts cannot drift.
 
-## 7. Phase E: deploy the frontend to AWS S3
+## 7. Phase E: deploy the frontend to Vercel
 
-1. Create a dedicated private bucket such as `<project>-frontend-prod`; this is separate from the Supabase report bucket.
-2. Keep S3 Block Public Access enabled and use CloudFront Origin Access Control.
-3. Create a CloudFront distribution with HTTPS-only viewer behavior, compression, and `index.html` as the default root object.
-4. Attach a viewer-request CloudFront Function that rewrites:
-   - `/dashboard/` -> `/dashboard/index.html`
-   - `/dashboard` -> `/dashboard/index.html`
-   - the same pattern for other extensionless routes
-5. Issue the frontend certificate in ACM `us-east-1`, attach `app.<domain>`, and add the DNS alias.
-6. Add `https://app.<domain>` as a Google OAuth authorized JavaScript origin.
-7. Build with the production public variables, then upload `frontend/out/`.
-8. Give hashed assets a long immutable cache lifetime; give HTML a short/no-cache policy.
-9. Invalidate HTML paths (or `/*` for the first simple release process) after upload.
+1. Import the `hellonish/singularity` GitHub repository as a new Vercel project.
+2. Set the project Root Directory to `frontend` and keep the detected Next.js framework preset.
+3. Use `npm run build`; Vercel should detect the static `out/` result from `output: "export"` automatically.
+4. Configure both public build variables for Production and Preview:
+   - `NEXT_PUBLIC_API_BASE=https://api.<domain>`
+   - `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<google-oauth-client-id>`
+5. Deploy `main`, then attach `app.<domain>` under the Vercel project's Domains settings.
+6. Add `https://app.<domain>` and the production Vercel URL as Google OAuth authorized JavaScript origins.
+7. After either public environment variable changes, redeploy because both values are compiled into the browser bundle.
 
-Do not enable the public S3 website endpoint. The S3 website endpoint supports HTTP only; CloudFront with OAC keeps the bucket private and supplies HTTPS.
+No database, Supabase Storage, JWT, Modal, Qdrant, or provider secret belongs in the Vercel project. The frontend talks to the public FastAPI endpoint using browser bearer tokens.
 
 ## 8. Verification gates
 
@@ -308,7 +306,7 @@ Deployment is complete only when all gates pass.
 
 ### Frontend
 
-- Direct loads and refreshes work for `/`, `/login/`, and `/dashboard/` through CloudFront.
+- Direct loads and refreshes work for `/`, `/login/`, and `/dashboard/` through Vercel.
 - No frontend bundle contains database, Supabase S3, Google client-secret, JWT, Modal, or Qdrant secrets.
 - Chat SSE and research SSE remain unbuffered end to end.
 
@@ -320,7 +318,7 @@ Deployment is complete only when all gates pass.
 4. Provision Supabase and validate Alembic plus object-store health from a staging EC2 instance.
 5. Build and test the SQLite/object migration command against a temporary Supabase project.
 6. Provision the production EC2 host and deploy API, Redis, and ARQ with a pinned image.
-7. Provision the private AWS S3 + CloudFront frontend and validate route rewrites.
+7. Import `frontend/` into Vercel, configure its public variables, and validate direct route loads.
 8. Perform the maintenance-window migration and API DNS cutover.
 9. Run all verification gates, then enable normal research submissions.
 10. After an agreed rollback window, retire the old SQLite/object deployment but retain encrypted backups according to the retention policy.
@@ -329,6 +327,6 @@ Deployment is complete only when all gates pass.
 
 - [Supabase database connection modes](https://supabase.com/docs/guides/database/connecting-to-postgres)
 - [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication)
-- [AWS secure static website with S3 and CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/getting-started-secure-static-website-cloudformation-template.html)
-- [AWS CloudFront Function for `index.html` URL rewrites](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/example_cloudfront_functions_url_rewrite_single_page_apps_section.html)
-- [AWS CloudFront Origin Access Control for S3](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html)
+- [Vercel monorepo projects and root directories](https://vercel.com/docs/monorepos)
+- [Vercel Git deployments](https://vercel.com/docs/git)
+- [Vercel environment variables](https://vercel.com/docs/environment-variables)

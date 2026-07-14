@@ -4,6 +4,7 @@ import hashlib
 from pathlib import PurePosixPath
 
 import aioboto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from api.storage.base import ObjectMetadata
@@ -36,6 +37,10 @@ class S3ObjectStore:
         self.bucket = bucket
         self._endpoint_url = endpoint_url
         self._region_name = region_name
+        # Supabase Storage exposes its S3 API below /storage/v1/s3 and requires
+        # path-style bucket addressing. Virtual-hosted addressing would move
+        # the bucket into the hostname and bypass that endpoint path.
+        self._client_config = Config(s3={"addressing_style": "path"})
         self._session = aioboto3.Session(
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
@@ -47,6 +52,7 @@ class S3ObjectStore:
             "s3",
             endpoint_url=self._endpoint_url,
             region_name=self._region_name,
+            config=self._client_config,
         )
 
     @staticmethod
