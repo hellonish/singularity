@@ -1,5 +1,25 @@
 # Singularity deployment plan: EC2, Supabase, and Vercel
 
+## Provisioning record
+
+The Supabase project for this deployment is provisioned as:
+
+| Item | Value |
+| --- | --- |
+| Project | `singularity-app` |
+| Project ref | `glrblmqkjaepdifjbvyr` |
+| Region | `us-east-1` |
+| PostgreSQL schema | Applied through the Supabase migration `initial_singularity_schema` and aligned to Alembic head `603bac1429aa` |
+| Report bucket | Private `singularity-reports` bucket |
+| S3 endpoint | `https://glrblmqkjaepdifjbvyr.storage.supabase.co/storage/v1/s3` |
+
+The project does not expose the application through Supabase's Data API: all
+application tables have RLS enabled with no client-facing policies. The API and
+worker connect with the server-only database connection, while report objects
+are accessed with server-only S3 credentials. Generate the database password
+and S3 access-key pair in the Supabase dashboard during EC2 secret provisioning;
+do not commit either value or put it in Vercel.
+
 ## 1. Target outcome
 
 Deploy Singularity as three independently managed layers:

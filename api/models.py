@@ -167,7 +167,7 @@ class ChatSummary(IdMixin, TimestampMixin, Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     through_message_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("messages.id", ondelete="SET NULL")
+        String(36), ForeignKey("messages.id", ondelete="SET NULL"), index=True
     )
     token_count: Mapped[Optional[int]] = mapped_column(Integer)
     summary_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
@@ -194,7 +194,7 @@ class Message(IdMixin, TimestampMixin, Base):
     input_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     parent_message_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("messages.id", ondelete="SET NULL")
+        String(36), ForeignKey("messages.id", ondelete="SET NULL"), index=True
     )
     message_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
@@ -273,8 +273,12 @@ class UsageHistory(IdMixin, TimestampMixin, Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False, default=Decimal("0"))
-    chat_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("chats.id", ondelete="SET NULL"))
-    report_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("reports.id", ondelete="SET NULL"))
+    chat_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="SET NULL"), index=True
+    )
+    report_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("reports.id", ondelete="SET NULL"), index=True
+    )
     event_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
 
     usage: Mapped[UsageAccount] = relationship(back_populates="history")
@@ -316,7 +320,7 @@ class ReportVersion(IdMixin, TimestampMixin, Base):
     )
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     parent_version_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("report_versions.id", ondelete="SET NULL")
+        String(36), ForeignKey("report_versions.id", ondelete="SET NULL"), index=True
     )
     content: Mapped[Optional[str]] = mapped_column(Text)
     content_uri: Mapped[Optional[str]] = mapped_column(String(1024), unique=True)
