@@ -1,16 +1,11 @@
 export const MODELS = [
-  { group: 'Anthropic', dot: '#d97757', items: [ { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' }, { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' } ] },
-  { group: 'OpenAI', dot: '#10a37f', items: [ { id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 mini' } ] },
-  { group: 'DeepSeek', dot: '#4d6bfe', items: [ { id: 'deepseek-v3', name: 'DeepSeek V3' }, { id: 'deepseek-r1', name: 'DeepSeek R1' } ] },
-  { group: 'xAI', dot: '#c9ccd1', items: [ { id: 'grok-4', name: 'Grok 4' } ] },
-  { group: 'Groq', dot: '#f55036', items: [ { id: 'llama-3.3-70b', name: 'Llama 3.3 70B' } ] },
+  { group: 'Groq', dot: '#f55036', items: [ { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' }, { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B' } ] },
+  { group: 'DeepSeek', dot: '#4d6bfe', items: [ { id: 'deepseek-chat', name: 'DeepSeek Chat' }, { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner' } ] },
+  { group: 'OpenRouter', dot: '#6467f2', items: [ { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B' }, { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' } ] },
 ];
 
 export const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', sub: 'Claude', dot: '#d97757', logo: '/logos/anthropic.svg', url: 'https://console.anthropic.com/settings/keys', prefix: 'sk-ant-…', blurb: 'Claude Opus & Sonnet — strongest long-form synthesis for Ultra research.', docHint: 'Tip: create a workspace key so usage is scoped per project.' },
-  { id: 'openai', name: 'OpenAI', sub: 'GPT-5', dot: '#10a37f', logo: '/logos/openai.svg', url: 'https://platform.openai.com/api-keys', prefix: 'sk-…', blurb: 'GPT-5 family — fast general reasoning for Chat and Medium research.', docHint: 'Set a monthly usage limit in Billing to stay in budget.' },
   { id: 'deepseek', name: 'DeepSeek', sub: 'V3 · R1', dot: '#4d6bfe', logo: '/logos/deepseek.svg', url: 'https://platform.deepseek.com/api_keys', prefix: 'sk-…', blurb: 'DeepSeek R1 reasoning at low cost — great value for High-depth runs.', docHint: 'Add credit first; keys are inactive until the balance is funded.' },
-  { id: 'grok', name: 'Grok', sub: 'xAI · Grok 4', dot: '#c9ccd1', logo: '/logos/grok.svg', url: 'https://console.x.ai', prefix: 'xai-…', blurb: 'Grok 4 with live signal — useful for fast, current-events research.', docHint: 'Create the key inside a Team to share it across seats.' },
   { id: 'groq', name: 'Groq', sub: 'Fast inference', dot: '#f55036', logo: '/logos/groq.svg', url: 'https://console.groq.com/keys', prefix: 'gsk_…', blurb: 'Groq LPU inference — the fastest tokens for Instant answers.', docHint: 'Free tier is rate-limited; upgrade for sustained Instant throughput.' },
   { id: 'openrouter', name: 'OpenRouter', sub: 'All models · one key', dot: '#6467f2', logo: '/logos/openrouter.svg', url: 'https://openrouter.ai/keys', prefix: 'sk-or-…', blurb: 'One key, every model — route across providers with automatic fallback.', docHint: 'Add credits or connect a provider key; set limits per key in the dashboard.' },
 ];
@@ -27,13 +22,10 @@ export const INTENSITIES = [
 // `advanceOn` records which real action moves the tour forward.
 export const OB_STEPS = [
   { target: 'menu-settings', title: 'Make Singularity your own', advanceOn: 'openSettings', hint: 'Click "Settings" to open your setup panel.', desc: 'Make Singularity your own — start by going to Settings.' },
-  { target: 'providers', title: 'Model provider setup', advanceOn: 'pickProvider', hint: 'Open the dropdown and pick a provider — try Anthropic.', desc: 'You can set up any model provider here, with your own key.' },
+  { target: 'providers', title: 'Model provider setup', advanceOn: 'pickProvider', hint: 'Pick a provider from the list to continue.', tip: 'Use Groq to try Singularity for free!', desc: 'You can set up any model provider here, with your own key.' },
   { target: 'keysetup', title: 'Add your key', advanceOn: 'saveKey', hint: 'Follow the steps, then paste your key and hit Save.', desc: 'Follow the steps to get your model key, then paste it in below.' },
-  { target: 'composer', title: 'Send your first message', advanceOn: 'finish', hint: 'We typed a message for you — press Enter to send it.', desc: "Yay! You're all set! Send your first message to Singularity." },
+  { target: 'composer', title: 'Send your first message', advanceOn: 'finish', hint: 'Type a message and press Enter to send it.', desc: "Yay! You're all set! Send your first message to Singularity." },
 ];
-
-// Prefilled first message that gets "typed" into the composer at the final step.
-export const OB_STARTER_MESSAGE = 'Hi Singularity! Give me a 3-point overview of what you can help me with.';
 
 export const REPORTS = [
   { id: 'r1', title: 'Solid-state battery supply chains and 2027 cost curves', time: '2h ago', chars: '48k chars', ver: 3, tier: 'ultra', chats: [ { id: 'c1', title: 'Supply chain risk' }, { id: 'c2', title: 'Cost sensitivity' }, { id: 'c3', title: 'Compare to LFP' } ] },

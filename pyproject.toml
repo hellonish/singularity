@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "singularity-cli"
+version = "0.1.0"
+description = "Singularity hosted chat and bounded research CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28,<1",
+  "prompt_toolkit>=3.0.52,<4",
+  "rich>=14,<15",
+]
+
+[project.scripts]
+singularity = "engine.cli.main:main"
+
+[tool.setuptools.packages.find]
+include = ["engine", "engine.cli", "engine.chat"]

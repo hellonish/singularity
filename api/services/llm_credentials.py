@@ -9,6 +9,9 @@ from api.models import LLMProviderCredential, User
 from api.schemas import ProviderCredentialCreate, ProviderCredentialUpdate
 
 
+_ACTIVE_CREDENTIAL_PROFILE_KEY = "active_provider_credential_id"
+
+
 async def get_credential(
     session: AsyncSession,
     user_id: str,
@@ -73,3 +76,37 @@ async def update_credential(
     await session.commit()
     await session.refresh(credential)
     return credential
+
+
+async def selected_credential_id(session: AsyncSession, user: User) -> str | None:
+    """Return the user's selected active credential, never a stale/disabled one."""
+
+    credential_id = (user.profile_data or {}).get(_ACTIVE_CREDENTIAL_PROFILE_KEY)
+    if not isinstance(credential_id, str):
+        return None
+    try:
+        await get_credential(session, user.id, credential_id)
+    except HTTPException:
+        return None
+    return credential_id
+
+
+async def select_credential(
+    session: AsyncSession,
+    user: User,
+    credential_id: str | None,
+) -> str | None:
+    """Persist a user's execution credential without exposing its secret."""
+
+    if credential_id is not None:
+        await get_credential(session, user.id, credential_id)
+    profile_data = dict(user.profile_data or {})
+    if credential_id is None:
+        profile_data.pop(_ACTIVE_CREDENTIAL_PROFILE_KEY, None)
+    else:
+        profile_data[_ACTIVE_CREDENTIAL_PROFILE_KEY] = credential_id
+    # Assign a fresh mapping so SQLAlchemy reliably records JSON changes.
+    user.profile_data = profile_data
+    await session.commit()
+    await session.refresh(user)
+    return credential_id

@@ -5,7 +5,9 @@ import { useAppStore, applyThemeAndAccent } from '@/store/app-store';
 import { Sidebar } from './sidebar';
 import { TopChrome } from './top-chrome';
 import { SettingsModal } from '@/components/modals/settings-modal';
+import { ErrorModal } from '@/components/modals/error-modal';
 import { Spotlight } from '@/components/onboarding/spotlight';
+import { WorkspaceProvider } from '@/components/workspace-provider';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme, accent } = useAppStore();
@@ -36,6 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         transition: 'background 0.3s, color 0.3s'
       }}
     >
+      <WorkspaceProvider>
       <Sidebar />
       <main
         data-screen-label="Workspace"
@@ -52,8 +55,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <TopChrome />
         {children}
         <SettingsModal />
+        <ErrorModal />
         <Spotlight />
       </main>
+      </WorkspaceProvider>
     </div>
   );
 }

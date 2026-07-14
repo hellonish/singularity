@@ -53,6 +53,8 @@ def test_json_object_mode_accepts_any_valid_json_object() -> None:
 
     assert spec.groq_response_format() == {"type": "json_object"}
     assert spec.parse_and_validate('{"answer":"yes"}') == {"answer": "yes"}
+    with pytest.raises(StructuredOutputError, match="not an object"):
+        spec.parse_and_validate('["not", "an object"]')
 
 
 def test_parse_recovers_json_wrapped_in_fences_or_prose() -> None:

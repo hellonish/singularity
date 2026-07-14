@@ -21,6 +21,10 @@ os.environ["SINGULARITY_DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_ROOT / 'tes
 os.environ["SINGULARITY_STORAGE_ROOT"] = str(TEST_ROOT / "objects")
 os.environ["SINGULARITY_CREDENTIAL_ENCRYPTION_KEY"] = "RE4M2MdV8AqhOY9WcOIbqCcJw_leyZsDR_2p3HnQp98="
 os.environ["SINGULARITY_SSE_DUMMY_DELAY_SECONDS"] = "0"
+# The deterministic suite uses the X-User-ID identity boundary; dedicated auth
+# tests exercise the bearer/JWT path explicitly by overriding these.
+os.environ["SINGULARITY_AUTH_MODE"] = "header"
+os.environ.setdefault("SINGULARITY_JWT_SECRET", "test-jwt-secret-not-for-production")
 
 import pytest
 from fastapi.testclient import TestClient

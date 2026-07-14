@@ -38,6 +38,10 @@ class TerminalSession:
     compacted_through: int = 0
     temperature: float = 0.3
     max_output_tokens: int = 1_500
+    # Cached live output ceiling for the selected model, populated when the model
+    # is retrieved from the provider. ``None`` falls back to the static
+    # per-provider ceiling in ``provider_output_budget``.
+    model_max_completion_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if self.api_key and self.credential_source == "none":

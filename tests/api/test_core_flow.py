@@ -4,6 +4,16 @@ from fastapi.testclient import TestClient
 
 from api.config import settings
 from api.routers import research as research_router
+from engine.llm.groq import GroqProvider
+
+
+def _stub_tier_probe(monkeypatch, tier: str) -> None:
+    """Keep the free-tier research gate hermetic by stubbing the network probe."""
+
+    async def _probe(self, *, api_key: str, model_id: str) -> str:
+        return tier
+
+    monkeypatch.setattr(GroqProvider, "probe_tier", _probe)
 
 
 def test_health_and_core_persistence_flow(client: TestClient, current_user: dict[str, str]) -> None:
@@ -48,6 +58,7 @@ def test_research_run_persists_caps_and_queued_event(client: TestClient, current
 
     monkeypatch.setattr(settings, "research_worker_enabled", True)
     monkeypatch.setattr(research_router, "enqueue_research_run", enqueue)
+    _stub_tier_probe(monkeypatch, "paid")
     credential = client.post(
         "/llm/credentials",
         json={"provider": "groq", "api_key": "gsk_test_research_run"},
@@ -79,3 +90,110 @@ def test_research_run_persists_caps_and_queued_event(client: TestClient, current
     assert "event: research.cancelled" in replay.text
     assert "id: 2" in replay.text
     assert "event: research.completed" not in replay.text
+
+
+def test_research_run_blocks_free_tier_groq_with_alternatives(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    async def enqueue(_run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(research_router, "enqueue_research_run", enqueue)
+    _stub_tier_probe(monkeypatch, "free")
+
+    groq = client.post(
+        "/llm/credentials",
+        json={"provider": "groq", "api_key": "gsk_free_tier_key"},
+        headers=current_user,
+    )
+    assert groq.status_code == 201, groq.text
+    # A paid credential on another provider is offered as an alternative.
+    other = client.post(
+        "/llm/credentials",
+        json={"provider": "openrouter", "api_key": "sk-or-paid-key"},
+        headers=current_user,
+    )
+    assert other.status_code == 201, other.text
+
+    response = client.post(
+        "/research/runs",
+        json={
+            "query": "How does bounded research work?",
+            "strength": 2,
+            "provider_credential_id": groq.json()["id"],
+        },
+        headers=current_user,
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "research_provider_free_tier"
+    alt_ids = {alt["credential_id"] for alt in detail["alternatives"]}
+    assert other.json()["id"] in alt_ids
+    assert groq.json()["id"] not in alt_ids
+
+
+def _create_credential(client: TestClient, headers: dict[str, str]) -> str:
+    credential = client.post(
+        "/llm/credentials",
+        json={"provider": "groq", "api_key": "gsk_test_research_mode"},
+        headers=headers,
+    )
+    assert credential.status_code == 201, credential.text
+    return credential.json()["id"]
+
+
+def test_research_test_mode_is_rejected_when_server_flag_is_off(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    async def enqueue(_run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(settings, "research_test_mode", False)
+    monkeypatch.setattr(research_router, "enqueue_research_run", enqueue)
+    credential_id = _create_credential(client, current_user)
+
+    response = client.post(
+        "/research/runs",
+        json={
+            "query": "one call each",
+            "provider_credential_id": credential_id,
+            "test_mode": True,
+        },
+        headers=current_user,
+    )
+    # The flag is never silently ignored: a misconfigured server is rejected.
+    assert response.status_code == 403, response.text
+
+
+def test_research_test_mode_uses_the_single_node_profile_when_enabled(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    async def enqueue(_run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(settings, "research_test_mode", True)
+    monkeypatch.setattr(research_router, "enqueue_research_run", enqueue)
+    credential_id = _create_credential(client, current_user)
+
+    response = client.post(
+        "/research/runs",
+        json={
+            "query": "one call each",
+            "strength": 3,
+            "provider_credential_id": credential_id,
+            "test_mode": True,
+        },
+        headers=current_user,
+    )
+    assert response.status_code == 202, response.text
+    run_data = response.json()["run_data"]
+    assert run_data["test_mode"] is True
+    # The minimal profile is applied regardless of the requested strength.
+    assert run_data["caps"]["max_nodes"] == 1
+    assert run_data["caps"]["qa_cycles"] == 0
+    assert run_data["caps"]["max_fetches"] == 1
+    # Fixed invariants are untouched.
+    assert run_data["caps"]["max_tool_calls_per_node"] == 4

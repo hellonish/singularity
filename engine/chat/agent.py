@@ -95,13 +95,30 @@ class ChatAgent:
             },
             tags=["chat", "groq", "stream"],
         ) as span:
-            async for delta in self._provider.stream_chat(
-                api_key=api_key,
-                config=effective_config,
-                messages=prompt.messages,
-            ):
-                content += delta
-                yield ChatStreamEvent(type="delta", model_id=config.model_id, delta=delta)
+            try:
+                async for delta in self._provider.stream_chat(
+                    api_key=api_key,
+                    config=effective_config,
+                    messages=prompt.messages,
+                ):
+                    content += delta
+                    yield ChatStreamEvent(type="delta", model_id=config.model_id, delta=delta)
+            except GroqProviderError as exc:
+                # GPT-OSS can spontaneously emit a tool call on this no-tools
+                # answer request; Groq then rejects the turn with "Tool choice
+                # is none, but model called a tool" before any text streams.
+                # It surfaces the model's failure to any downstream skill (each
+                # already ran), so retry the plain answer once. Only safe when
+                # nothing has streamed yet, so we never duplicate output.
+                if exc.code != "provider_invalid_model_output" or content:
+                    raise
+                async for delta in self._provider.stream_chat(
+                    api_key=api_key,
+                    config=effective_config,
+                    messages=prompt.messages,
+                ):
+                    content += delta
+                    yield ChatStreamEvent(type="delta", model_id=config.model_id, delta=delta)
             retried_at_low_effort = False
             if not content and effective_config.reasoning_effort not in {None, "low"}:
                 # Reasoning tokens and visible text share the completion

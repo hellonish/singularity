@@ -30,11 +30,15 @@ class BoundedResearchResolver:
     in a tool invocation.
     """
 
-    def __init__(self, executor, answerer: Answerer, *, timeout_seconds: int = 60, max_fetches: int = 2, progress_reporter=None):
+    def __init__(self, executor, answerer: Answerer, *, timeout_seconds: int = 60, max_fetches: int = 2, max_search_variants: int = 3, progress_reporter=None):
         self.executor = executor
         self.answerer = answerer
         self.timeout_seconds = timeout_seconds
         self.max_fetches = max(0, min(max_fetches, 2))
+        # How many reformulation attempts web_search may make. Production uses
+        # the full set; test mode sets this to 1 so a run makes exactly one
+        # real search call.
+        self.max_search_variants = max(1, min(max_search_variants, 3))
         self.progress_reporter = progress_reporter
 
     async def _progress(self, **event: Any) -> None:
@@ -56,8 +60,9 @@ class BoundedResearchResolver:
             budget regardless of how many Modal-level retries it takes.
 
             Raises ResearchInfrastructureError if the Modal backend stays
-            unreachable after every attempt — the backend is down, not just
-            this query.
+            unreachable after every attempt. A failed search is run-fatal;
+            a failed individual page fetch is handled below as a source-level
+            failure because the rest of the evidence may still be usable.
             """
             nonlocal calls
             if calls >= max_tool_calls:
@@ -112,7 +117,7 @@ class BoundedResearchResolver:
                 (node.question, {"max_results": 8}),
                 (f"{node.question} primary source", {"max_results": 5}),
                 (f"{node.question} report OR study OR data", {"max_results": 5}),
-            ]
+            ][: self.max_search_variants]
             last_result = None
             for query, arguments in variants:
                 if calls >= max_tool_calls:
@@ -148,11 +153,20 @@ class BoundedResearchResolver:
                 return_exceptions=True,
             )
             for item in fetched:
-                # A backend outage during a fetch is a run-level failure, not a
-                # single dead link. return_exceptions=True captured it here, so
-                # re-raise it to abort the run cleanly.
+                # A single destination can be slow, blocked, or temporarily
+                # unschedulable even while the deployed tool backend and every
+                # other source are healthy. Search has already succeeded, so
+                # retain the other retrieved evidence instead of failing the
+                # whole report for one URL.
                 if isinstance(item, ResearchInfrastructureError):
-                    raise item
+                    await self._progress(
+                        phase="researching",
+                        status="source_unavailable",
+                        message="Skipped an unavailable source",
+                        node_id=node.node_id,
+                        tool_name="web_fetch",
+                    )
+                    continue
                 if not isinstance(item, Exception):
                     evidence.extend(_evidence_from_result(item, node.question))
 

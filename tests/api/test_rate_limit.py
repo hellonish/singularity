@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from api.config import settings
 from api.routers import research as research_router
+from api.services.auth import create_access_token
 
 
 def test_fourth_message_in_a_second_is_rejected(client: TestClient, current_user: dict[str, str]) -> None:
@@ -26,6 +27,20 @@ def test_chat_and_report_creation_limits_are_enforced(client: TestClient, curren
 
     assert client.post("/reports", json={"title": "first"}, headers=current_user).status_code == 201
     assert client.post("/reports", json={"title": "blocked"}, headers=current_user).status_code == 429
+
+
+def test_bearer_authenticated_cli_requests_are_rate_limited(
+    client: TestClient, monkeypatch
+) -> None:
+    user = client.post("/users", json={"display_name": "CLI limiter"}).json()
+    monkeypatch.setattr(settings, "auth_mode", "bearer")
+    monkeypatch.setattr(settings, "jwt_secret", "rate-limit-secret")
+    access_token, _ = create_access_token(user["id"])
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    for _ in range(3):
+        assert client.post("/chats", json={"title": "chat"}, headers=headers).status_code == 201
+    assert client.post("/chats", json={"title": "blocked"}, headers=headers).status_code == 429
 
 
 def test_research_run_creation_has_a_separate_hourly_limit(client: TestClient, current_user: dict[str, str], monkeypatch) -> None:

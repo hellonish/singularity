@@ -11,10 +11,23 @@ store, and HTTP route templates. Production uses Alembic before API/worker
 startup. The bounded research path is executable through the CLI and ARQ
 worker; other engine work remains behind stable service boundaries.
 
-The temporary development identity boundary is the `X-User-ID` request header.
-Create a user with `POST /users`, then send its ID in that header for all
-user-scoped endpoints. Replace this dependency with real authentication without
-changing the routers or service calls.
+Identity has two modes, selected by `SINGULARITY_AUTH_MODE`:
+
+- `bearer` (default) — Google-federated browser authentication plus automatic
+  CLI device authentication. Both receive a short-lived access JWT plus a
+  rotating refresh token; every user-scoped endpoint requires
+  `Authorization: Bearer <access_jwt>`. The CLI route needs only the server's
+  JWT secret, while Google login also needs its OAuth client id.
+- `header` — the temporary `X-User-ID` boundary for local curl and the
+  deterministic test suite. Create a user with `POST /users`, then send its ID
+  in that header.
+
+Both modes resolve to the same `User` through a single dependency
+(`api/dependencies.py`), so routers and service calls are identical regardless
+of mode.
+
+Browser clients are enabled by configuring `SINGULARITY_CORS_ALLOW_ORIGINS`
+(comma-separated). It is empty by default, leaving CORS off.
 
 ## Data model
 
@@ -58,9 +71,10 @@ All routes are available in the generated OpenAPI UI at `/docs`.
 | System | `GET /health`, `GET /storage/health` | Reports application and configured storage health. |
 | Users | `POST /users`, `GET/PATCH/DELETE /users/me` | Creates users and their one-to-one usage account; deletion is a soft delete. |
 | Chats | `GET/POST /chats`, `GET/PATCH/DELETE /chats/{id}` | Creates, lists, updates, and archives chats. |
-| Messages | `GET/POST /chats/{id}/messages`, `POST /chats/{id}/messages/stream` | Persists the user message and streams dummy `accepted`, `delta`, and `completed` SSE events. |
+| Auth | `POST /auth/google`, `POST /auth/cli-device`, `POST /auth/refresh`, `POST /auth/logout` | Supports interactive Google login and zero-interaction CLI device sessions, issues an access JWT + rotating refresh token, and revokes tokens (family-wide on reuse). |
+| Messages | `GET/POST /chats/{id}/messages`, `POST /chats/{id}/messages/stream` | Persists the user message, streams the real engine `ChatAgent` reply as `accepted`/`delta`/`completed` SSE events, and persists the assistant reply. |
 | Summaries | `GET/POST /chats/{id}/summaries` | Stores durable chat-summary checkpoints. |
-| Reports | `GET/POST /reports`, `GET /reports/{id}`, `GET /reports/{id}/stream` | Creates and lists report metadata; the stream endpoint emits dummy report sections over SSE. |
+| Reports | `GET/POST /reports`, `GET /reports/{id}`, `GET /reports/{id}/stream` | Creates and lists report metadata; the stream endpoint replays the latest stored report version over SSE (or `report.pending` when none exists yet). |
 | Versions | `GET/POST /reports/{id}/versions`, `GET /reports/{id}/versions/{version_id}/content` | Saves version content into local object storage and exposes it as Markdown. |
 | Research | `GET/POST /research/runs`, `GET /research/runs/{id}`, `POST /research/runs/{id}/cancel`, `GET /research/runs/{id}/events` | Creates bounded LangGraph research runs, persists replayable events, and optionally dispatches them to the ARQ worker. |
 | LLM / BYOK | `GET/POST/PATCH /llm/credentials`, `GET /llm/credentials/{id}/models`, `POST /llm/completions` | Stores encrypted Groq credentials, discovers models with that credential, and runs request-scoped completions. |
@@ -100,17 +114,61 @@ The deterministic smoke command writes `research-document.json` and
 `research-report.md`. In the terminal REPL, use `/mode` and choose **Research**;
 each subsequent plain-text prompt runs the live LangGraph workflow with the
 selected provider model and deployed Modal web tools, then renders the complete
-report directly in chat without writing report artifacts. It requires a saved
-key for the selected provider. Choose **Chat** in `/mode` to return to normal
-conversational chat.
+report directly in the terminal. The hosted API owns Modal, Redis, the research
+worker, durable events, and the report artifact; the CLI only streams progress
+and the completed Markdown. It requires a saved key for the selected provider.
+Choose **Chat** in `/mode` to return to normal conversational chat.
 For live API execution, set the credential encryption key, Groq pricing rates,
 and `SINGULARITY_RESEARCH_WORKER_ENABLED=1`; production Compose starts the
 Alembic migration job and ARQ worker automatically.
 
+### Real-inference test mode (curl only)
+
+A gated test mode runs the full production path — real BYOK LLM calls and real
+Modal web tools — but shrinks a run to the minimum needed to prove the wiring:
+exactly **one node, one `web_search`, and one `web_fetch`**, with no QA cycle.
+It exists so you can pay for one cheap real run instead of a full report.
+
+It is off by default and requires **both** a server flag and a per-request
+field, so it can never engage in normal operation:
+
+- Server: `SINGULARITY_RESEARCH_TEST_MODE=1` (in addition to the usual
+  `SINGULARITY_RESEARCH_WORKER_ENABLED=1`, a running Redis + ARQ worker, and a
+  deployed Modal function with `SINGULARITY_MODAL_ENABLED=1`).
+- Request: `"test_mode": true` in the `POST /research/runs` body.
+
+If `test_mode` is sent while the server flag is off, the run is rejected with
+`403` (never silently upgraded to a full run). When enabled, the minimal
+profile is applied regardless of the requested `strength`.
+
+```bash
+# Server started with:
+#   SINGULARITY_AUTH_MODE=header SINGULARITY_RESEARCH_WORKER_ENABLED=1 \
+#   SINGULARITY_RESEARCH_TEST_MODE=1 SINGULARITY_MODAL_ENABLED=1 uvicorn api.main:app
+# plus a running Redis, ARQ worker (api/research_worker.py), and deployed Modal function.
+
+USER_ID=$(curl -s -X POST localhost:8000/users \
+  -H 'Content-Type: application/json' -d '{"display_name":"RT"}' | jq -r '.id')
+
+CRED_ID=$(curl -s -X POST localhost:8000/llm/credentials \
+  -H 'Content-Type: application/json' -H "X-User-ID: $USER_ID" \
+  -d '{"provider":"<provider>","api_key":"<your_real_key>","default_model_id":"<model_id>"}' | jq -r '.id')
+
+RUN_ID=$(curl -s -X POST localhost:8000/research/runs \
+  -H 'Content-Type: application/json' -H "X-User-ID: $USER_ID" \
+  -d "{\"query\":\"What is retrieval-augmented generation?\",\"provider_credential_id\":\"$CRED_ID\",\"test_mode\":true}" \
+  | jq -r '.id')
+
+# Stream the run to completion (real LLM + 1 search + 1 fetch):
+curl -N "localhost:8000/research/runs/$RUN_ID/events" -H "X-User-ID: $USER_ID"
+```
+
 ## Backend SSE verification
 
-Start the API with `uvicorn api.main:app --reload`. Create a temporary local
-user and resources (these commands require `jq`):
+Start the API in the `header` identity mode so the `X-User-ID` walkthrough
+works without a Google token: `SINGULARITY_AUTH_MODE=header uvicorn
+api.main:app --reload`. Create a temporary local user and resources (these
+commands require `jq`):
 
 ```bash
 USER_ID=$(curl -s -X POST http://localhost:8000/users \
@@ -140,44 +198,55 @@ curl -N "http://localhost:8000/reports/$REPORT_ID/stream" \
   -H "X-User-ID: $USER_ID"
 ```
 
-The current streams use deterministic dummy chunks with a configurable delay
-(`SINGULARITY_SSE_DUMMY_DELAY_SECONDS`, default `0.15`). The future chat and
-report engines can publish real deltas through the same event contracts.
+The chat stream runs the real engine `ChatAgent`, so the chat must have an
+active BYOK credential (create one with `POST /llm/credentials` and pass its id
+as `provider_credential_id` when creating the chat); without one the stream
+endpoint returns `422`. The report stream replays the latest stored report
+version, emitting a single `report.pending` event when a report has no version
+yet. `SINGULARITY_SSE_DUMMY_DELAY_SECONDS` (default `0.15`) still paces the
+per-chunk delay for the report replay.
 
 ## Terminal engine
 
 The REPL lives independently in `engine/cli` and mounts terminal agents through
-a small adapter registry. Chat is registered now; a research-report agent can
-be added later without coupling its commands or lifecycle to chat. Start it
-without putting a Groq key in the repository:
+a small adapter registry. The distributable CLI is a thin client for the
+hosted Singularity API: database, auth-session bootstrap, Redis, research
+workers, and Modal tools stay server-managed. Install and start it without a
+project `.env`:
 
 ```bash
-python -m engine.cli
+pipx install .
+singularity
 ```
 
-On first launch, use `/key`, choose **Set or replace key**, and enter the Groq
-key in the hidden prompt. Singularity validates it and saves it in the
-operating-system credential store for subsequent sessions and directories.
+For repository development, `python -m engine.cli` remains equivalent. On first
+launch, use `/key`, choose **Set or replace key**, and enter the selected
+provider key in the hidden prompt. That is the only end-user setup. The CLI
+automatically creates a renewable device API session, synchronizes the BYOK
+credential over TLS, and saves its local device/session state alongside the key
+in the private global configuration.
 
 Inside the REPL, plain text streams a chat response. `/provider`, `/models`,
 `/effort`, and `/key` open arrow-key selectors; `/status`, `/reset`, `/clear`,
 `/help`, and `/quit` manage the current session. New sessions default to
-`medium` effort. Groq, DeepSeek, and OpenRouter are supported. The selected provider, API
-keys for each configured provider, selected provider, model, and effort are persisted globally in
+`medium` effort. Groq, DeepSeek, and OpenRouter are supported. Provider keys,
+the selected provider/model/effort, and renewable device-session state are persisted globally in
 `~/.config/singularity/terminal.json` with private user-only permissions; it is
-never written to the repository. Chat history remains local to the terminal
-process. Setting
-`SINGULARITY_MODAL_ENABLED=1` enables bounded, skill-scoped trusted tool calls
-through the configured Modal Function without sending the Groq key to Modal.
+never written to the repository. Chat and research are persisted by the API.
+The default hosted endpoint is `https://singularity.hellonish.dev/api`; developers
+may override it with `SINGULARITY_API_URL`. Direct provider/Modal execution is
+retained only for repository development via
+`SINGULARITY_CLI_BACKEND=local`; shipped users do not configure Modal.
+If the default hosted endpoint is unavailable or does not expose CLI device
+authentication, the CLI falls back to `http://127.0.0.1:8000`. This fallback
+applies only to the implicit default; an explicit `SINGULARITY_API_URL` is
+never overridden.
 
-The chat agent itself still accepts only `context` and `message`; the API key,
-model, temperature, and output cap belong to the terminal session. Before
-generation, it retrieves the selected model's live
-`context_window` and `max_completion_tokens` from Groq. It preserves the user
-message, reserves output and safety capacity, and trims only optional context.
-GPT-OSS input uses the Harmony tokenizer; unknown Groq tokenizers use a more
-conservative UTF-8 upper bound. Output is printed token-by-token as Groq emits
-streaming deltas.
+The hosted API resolves the encrypted credential and model for each request,
+retrieves the model's live context/output limits, preserves the user message,
+and trims only optional context. Provider deltas travel to the CLI through the
+API's SSE contract and are rendered as they arrive; plaintext BYOK values are
+never returned by the API.
 
 ## Groq BYOK
 
@@ -296,6 +365,14 @@ pip install -r requirements.txt
 export SINGULARITY_DATABASE_URL=sqlite+aiosqlite:///./singularity.db
 export SINGULARITY_STORAGE_ROOT=./data/objects
 
+# Bearer auth (default) needs both; set a Google OAuth client id and a JWT
+# secret. Use SINGULARITY_AUTH_MODE=header to fall back to the X-User-ID flow.
+export SINGULARITY_GOOGLE_CLIENT_ID=...
+export SINGULARITY_JWT_SECRET=...
+
+# Allow a browser client (empty by default = CORS off):
+export SINGULARITY_CORS_ALLOW_ORIGINS=http://localhost:3000
+
 uvicorn api.main:app --reload
 ```
 
@@ -306,7 +383,7 @@ clean baseline instead of importing the removed v1 migration history.
 ## Verification
 
 ```bash
-python -m pytest tests/test_api_schema.py -q -o addopts=
+python -m pytest tests/database/test_schema.py -q -o addopts=
 
 # Full existing test suite:
 python -m pytest -q

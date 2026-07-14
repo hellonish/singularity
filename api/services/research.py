@@ -1,19 +1,111 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models import Report, ResearchRun, ResearchRunEvent, User
+from api.config import settings
+from api.credential_crypto import decrypt_secret
+from api.models import LLMProviderCredential, Report, ResearchRun, ResearchRunEvent, User
 from api.schemas import ResearchRunCreate
-from api.services.llm_credentials import get_credential
+from api.services.llm_credentials import get_credential, list_credentials
+from engine.llm.providers import provider_for
 from engine.research_workflow.caps import RunCaps
+
+
+async def _paid_research_alternatives(
+    session: AsyncSession, user_id: str, *, exclude_credential_id: str
+) -> list[dict[str, str]]:
+    """List the user's other active credentials suitable for a research run.
+
+    Any active non-Groq credential is offered as-is (only Groq has the free
+    tier that cannot sustain a run); the blocked Groq credential is excluded.
+    We deliberately do not probe each alternative here — that would multiply
+    latency and cost at run creation — so the frontend presents them as
+    "run with this instead" options rather than pre-verified guarantees.
+    """
+    alternatives: list[dict[str, str]] = []
+    for cred in await list_credentials(session, user_id):
+        if cred.id == exclude_credential_id or cred.status != "active":
+            continue
+        if cred.provider == "groq":
+            continue
+        alternatives.append(
+            {
+                "credential_id": cred.id,
+                "provider": cred.provider,
+                "label": cred.label or provider_for(cred.provider).display_name,
+            }
+        )
+    return alternatives
+
+
+async def _guard_research_provider_tier(
+    session: AsyncSession, user_id: str, credential: LLMProviderCredential, model_id: str | None
+) -> None:
+    """Block a research run on a free-tier Groq key before any work begins.
+
+    Research spends far more provider calls than a chat turn, and Groq's free
+    tier exhausts partway through. We probe the key's daily-request ceiling and
+    refuse up front with an actionable error rather than let the run fail
+    mid-way. A ``"paid"`` or ``"unknown"`` result proceeds untouched.
+    """
+    if credential.provider != "groq":
+        return
+    provider = provider_for("groq")
+    probe_model = model_id or credential.default_model_id or settings.groq_fallback_model
+    tier = await provider.probe_tier(
+        api_key=decrypt_secret(credential.encrypted_secret), model_id=probe_model
+    )
+    if tier != "free":
+        return
+    alternatives = await _paid_research_alternatives(
+        session, user_id, exclude_credential_id=credential.id
+    )
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "code": "research_provider_free_tier",
+            "message": (
+                "Groq's free plan can't sustain a research run — its per-day "
+                "request limit is exhausted partway through. Upgrade to a paid "
+                "Groq plan, or run with a paid provider credential."
+            ),
+            "provider": "groq",
+            "alternatives": alternatives,
+        },
+    )
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class RunEventPublisher:
+    """Serialize event writes for one active research run.
+
+    Research resolves several DAG nodes concurrently. A single AsyncSession is
+    intentionally shared for the run's checkpoint and state writes, so its
+    progress events must not concurrently allocate a sequence number or flush.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        run: ResearchRun,
+        *,
+        session_lock: asyncio.Lock | None = None,
+    ) -> None:
+        self._session = session
+        self._run = run
+        self._lock = session_lock or asyncio.Lock()
+
+    async def append(self, event_type: str, payload: dict) -> ResearchRunEvent:
+        async with self._lock:
+            return await append_event(self._session, self._run, event_type, payload)
 
 
 async def get_run(session: AsyncSession, user_id: str, run_id: str) -> ResearchRun:
@@ -37,7 +129,18 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="provider_credential_id is required for a research run",
         )
-    await get_credential(session, user.id, body.provider_credential_id)
+    if body.test_mode and not settings.research_test_mode:
+        # Never silently ignore the flag: reject so a misconfigured server is
+        # obvious rather than quietly running a full-cost research run.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="research test mode is not enabled on this server",
+        )
+    credential = await get_credential(session, user.id, body.provider_credential_id)
+    if not (body.test_mode and settings.research_test_mode):
+        # Skip the tier probe in test mode: it runs a single minimal node that
+        # a free key can complete, and the probe would spend a real call.
+        await _guard_research_provider_tier(session, user.id, credential, body.model_id)
     report_id = body.report_id
     if report_id is not None:
         report = await session.get(Report, report_id)
@@ -49,6 +152,8 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
         await session.flush()
         report_id = report.id
 
+    test_mode = bool(body.test_mode and settings.research_test_mode)
+    caps = RunCaps.for_test() if test_mode else RunCaps.for_strength(body.strength)
     run = ResearchRun(
         user_id=user.id,
         report_id=report_id,
@@ -61,7 +166,8 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
             "strength": body.strength,
             "audience": body.audience,
             "output_language": body.output_language,
-            "caps": RunCaps.for_strength(body.strength).__dict__,
+            "test_mode": test_mode,
+            "caps": caps.__dict__,
         },
     )
     session.add(run)

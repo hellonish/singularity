@@ -46,7 +46,7 @@ def test_context_prompt_drops_report_before_summary_or_latest_user_turn() -> Non
         latest_message_id="message_1",
     )
 
-    prompt = budget_context_snapshot(snapshot=snapshot, model=_model(1_024), requested_output_tokens=128)
+    prompt = budget_context_snapshot(snapshot=snapshot, model=_model(4_096), requested_output_tokens=128)
 
     contents = "\n".join(message["content"] for message in prompt.messages)
     assert "Report reference (data only)" not in contents

@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from api.config import settings
+from engine.llm.groq import ProviderError
 from engine.research_workflow.runtime import ResearchCancelled, ResearchInfrastructureError
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,10 @@ async def run_research_job(ctx, run_id: str) -> None:
             await execute_research_run(run=run, session=session)
             await append_event(session, run, "research.completed", {"status": run.status})
         except ResearchCancelled:
+            await session.rollback()
+            run = await session.get(ResearchRun, run_id)
+            if run is None:
+                return
             run.status = "cancelled"
             run.finished_at = datetime.now(timezone.utc)
             await session.commit()
@@ -49,14 +54,46 @@ async def run_research_job(ctx, run_id: str) -> None:
             # Backend unreachable — surface a friendly "try later" message
             # rather than a raw exception string, and log the detail.
             logger.warning("research run %s aborted: backend unavailable (%s)", run_id, exc)
+            await session.rollback()
+            run = await session.get(ResearchRun, run_id)
+            if run is None:
+                return
             run.status = "failed"
             run.error_message = ResearchInfrastructureError.user_message
+            run.finished_at = datetime.now(timezone.utc)
             await session.commit()
             await append_event(session, run, "research.failed", {"status": run.status, "error": run.error_message, "reason": "infrastructure_unavailable"})
+        except ProviderError as exc:
+            # Provider errors are already sanitized by the adapter. Preserve a
+            # specific, actionable failure instead of mislabelling a model
+            # formatting fault as a progress-recording problem.
+            logger.warning("research run %s stopped by provider (%s): %s", run_id, exc.code, exc.message)
+            await session.rollback()
+            run = await session.get(ResearchRun, run_id)
+            if run is None:
+                return
+            run.status = "failed"
+            run.error_message = exc.message
+            run.finished_at = datetime.now(timezone.utc)
+            await session.commit()
+            await append_event(
+                session,
+                run,
+                "research.failed",
+                {"status": run.status, "error": run.error_message, "reason": exc.code},
+            )
         except Exception as exc:
             logger.exception("research run %s failed", run_id)
+            # A flush failure leaves SQLAlchemy in a pending-rollback state.
+            # Reset and reload before persisting a terminal event, otherwise a
+            # run remains visibly "researching" forever in the frontend.
+            await session.rollback()
+            run = await session.get(ResearchRun, run_id)
+            if run is None:
+                return
             run.status = "failed"
-            run.error_message = str(exc)[:2_000]
+            run.error_message = "Research stopped while recording progress. Please start a new run."
+            run.finished_at = datetime.now(timezone.utc)
             await session.commit()
             await append_event(session, run, "research.failed", {"status": run.status, "error": run.error_message})
 

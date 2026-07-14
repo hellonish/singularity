@@ -7,7 +7,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from _utils.json_parser import extract_object
+from engine.utils.json_parser import extract_object
 
 STRICT_STRUCTURED_OUTPUT_MODELS = frozenset(
     {
@@ -79,6 +79,12 @@ class StructuredOutputSpec:
             value = extract_object(content)
             if value is None:
                 raise StructuredOutputError("Provider returned malformed JSON") from exc
+        # ``response_format={type: json_object}`` promises an object, not just
+        # syntactically valid JSON. Some OpenAI-compatible routed models have
+        # returned arrays here; allowing those through only makes the planner
+        # fail later with an opaque parsing error.
+        if self.schema_json is None and not isinstance(value, dict):
+            raise StructuredOutputError("Provider returned JSON that was not an object")
         if self.schema_json is not None:
             try:
                 Draft202012Validator(self.schema).validate(value)

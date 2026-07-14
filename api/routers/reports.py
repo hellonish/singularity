@@ -37,33 +37,70 @@ async def get_report(report_id: str, session: SessionDep, current_user: CurrentU
     return await report_service.get_report(session, current_user.id, report_id)
 
 
+@router.delete("/{report_id}", response_model=ReportRead)
+async def archive_report(report_id: str, session: SessionDep, current_user: CurrentUserDep) -> ReportRead:
+    report = await report_service.get_report(session, current_user.id, report_id)
+    return await report_service.archive_report(session, report)
+
+
+def _chunk_markdown(content: str) -> list[str]:
+    """Split stored markdown into replay chunks on blank-line boundaries.
+
+    Paragraph-sized chunks keep a client's streaming renderer working while
+    preserving the exact concatenated content.
+    """
+    if not content:
+        return []
+    parts = content.split("\n\n")
+    chunks = [part + "\n\n" for part in parts[:-1]]
+    if parts[-1]:
+        chunks.append(parts[-1])
+    return chunks
+
+
 @router.get("/{report_id}/stream")
 async def stream_report(
     report_id: str,
     session: SessionDep,
     current_user: CurrentUserDep,
+    store: StoreDep,
 ) -> StreamingResponse:
-    """Stream deterministic dummy report sections through the backend SSE contract."""
+    """Replay the latest stored report version over the backend SSE contract.
+
+    Real report content is produced by the research worker and saved as a report
+    version. When no version exists yet (research still running), the stream
+    emits a terminal ``report.pending`` event; live progress is available on
+    ``GET /research/runs/{id}/events``.
+    """
 
     report = await report_service.get_report(session, current_user.id, report_id)
     title = report.title or "Untitled report"
-    chunks = (
-        f"# {title}\n\n",
-        "## Summary\n\n",
-        "This is dummy report content streamed from the backend.\n",
-    )
+    version = await report_service.get_latest_version(session, report)
+    content = await report_service.read_version_content(version, store) if version is not None else ""
+    chunks = _chunk_markdown(content)
 
     async def events() -> AsyncIterator[str]:
         yield encode_sse(
             event="report.started",
             event_id=f"{report.id}:0",
-            data={"report_id": report.id, "title": title},
+            data={
+                "report_id": report.id,
+                "title": title,
+                "version_number": version.version_number if version is not None else None,
+            },
         )
-        content = ""
+        if version is None:
+            yield encode_sse(
+                event="report.pending",
+                event_id=f"{report.id}:1",
+                data={"report_id": report.id, "status": report.status},
+            )
+            return
+        emitted = ""
         for index, chunk in enumerate(chunks, start=1):
             if settings.sse_dummy_delay_seconds:
                 await asyncio.sleep(settings.sse_dummy_delay_seconds)
-            content += chunk
+            emitted += chunk
             yield encode_sse(
                 event="report.delta",
                 event_id=f"{report.id}:{index}",
@@ -72,7 +109,7 @@ async def stream_report(
         yield encode_sse(
             event="report.completed",
             event_id=f"{report.id}:{len(chunks) + 1}",
-            data={"report_id": report.id, "content": content},
+            data={"report_id": report.id, "content": emitted},
         )
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)

@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import Chat, ChatSummary, LLMProviderCredential, Message, Report, User
@@ -24,7 +25,9 @@ async def get_chat(session: AsyncSession, user_id: str, chat_id: str) -> Chat:
 
 async def list_chats(session: AsyncSession, user_id: str) -> list[Chat]:
     result = await session.execute(
-        select(Chat).where(Chat.user_id == user_id).order_by(Chat.last_message_at.desc(), Chat.created_at.desc())
+        select(Chat)
+        .where(Chat.user_id == user_id, Chat.status != "archived")
+        .order_by(Chat.last_message_at.desc(), Chat.created_at.desc())
     )
     return list(result.scalars())
 
@@ -102,7 +105,12 @@ async def create_message(session: AsyncSession, chat: Chat, body: MessageCreate)
         parent_message_id=body.parent_message_id,
         message_data=body.message_data,
     )
-    chat.last_message_at = _now()
+    # Bump recency with an UPDATE rather than mutating ``chat``: streaming
+    # callers persist the assistant turn after the request scope closed, where
+    # ``chat`` is detached and an attribute write would be silently dropped.
+    now = _now()
+    await session.execute(sql_update(Chat).where(Chat.id == chat.id).values(last_message_at=now))
+    chat.last_message_at = now
     session.add(message)
     await session.commit()
     await session.refresh(message)

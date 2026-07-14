@@ -9,6 +9,8 @@ from api.schemas import (
     LLMCompletionRead,
     ProviderCredentialCreate,
     ProviderCredentialRead,
+    ProviderCredentialSelectionRead,
+    ProviderCredentialSelectionUpdate,
     ProviderCredentialUpdate,
 )
 from api.services import llm as llm_service
@@ -42,6 +44,27 @@ async def update_credential(
         session, current_user.id, credential_id, require_active=False
     )
     return await credential_service.update_credential(session, credential, body)
+
+
+@router.get("/selection", response_model=ProviderCredentialSelectionRead)
+async def get_credential_selection(
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> ProviderCredentialSelectionRead:
+    return ProviderCredentialSelectionRead(
+        credential_id=await credential_service.selected_credential_id(session, current_user)
+    )
+
+
+@router.put("/selection", response_model=ProviderCredentialSelectionRead)
+async def set_credential_selection(
+    body: ProviderCredentialSelectionUpdate,
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> ProviderCredentialSelectionRead:
+    return ProviderCredentialSelectionRead(
+        credential_id=await credential_service.select_credential(session, current_user, body.credential_id)
+    )
 
 
 @router.get("/credentials/{credential_id}/models", response_model=list[AvailableModelRead])

@@ -7,7 +7,14 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    OpenAIError,
+)
 
 from engine.llm.config import LLMRequestConfig
 from engine.llm.structured import StructuredOutputSpec
@@ -48,6 +55,10 @@ class GroqModel:
     context_window: int | None = None
     max_completion_tokens: int | None = None
     active: bool = True
+    # Research stages require JSON-object mode. Groq and DeepSeek expose it as
+    # part of their chat-completions contract; OpenRouter overrides this with
+    # its per-model live catalog metadata.
+    supports_research: bool = True
 
 
 @dataclass(frozen=True)
@@ -112,6 +123,52 @@ class GroqProvider:
             active=bool(getattr(model, "active", True)),
         )
 
+    async def probe_tier(self, *, api_key: str, model_id: str) -> str:
+        """Classify a Groq key as ``"free"``, ``"paid"``, or ``"unknown"``.
+
+        A research run fires many sequential completions; Groq's free tier caps
+        the versatile models at as few as 1,000 requests/day, so a free key
+        cannot finish a single run. We infer the tier from the daily request
+        ceiling Groq reports in the ``x-ratelimit-limit-requests`` header of a
+        real completion against the *target* model — the value is configured
+        per organisation and per model, so a 1-token probe reads exactly the
+        limit the run would spend against.
+
+        ``"unknown"`` is returned whenever the probe cannot read a limit (a
+        non-Groq provider, a missing header, or any error). The caller must
+        treat ``"unknown"`` as "do not block": a probe failure should never
+        lock a user out of a key that may well be paid.
+        """
+        # Tier is a Groq-account concept; OpenRouter/DeepSeek subclasses reuse
+        # this provider but have no free-tier research problem to gate on.
+        if self.provider != "groq":
+            return "unknown"
+        try:
+            async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
+                raw = await client.chat.completions.with_raw_response.create(
+                    model=model_id,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_completion_tokens=1,
+                    temperature=0.0,
+                )
+        except Exception:
+            # Never surface a probe failure as a hard error: an invalid key or
+            # an unreachable API is caught by the run itself with a precise
+            # message. Here we simply decline to classify.
+            return "unknown"
+        limit = raw.headers.get("x-ratelimit-limit-requests")
+        try:
+            daily_requests = int(limit) if limit is not None else None
+        except (TypeError, ValueError):
+            daily_requests = None
+        if daily_requests is None:
+            return "unknown"
+        # Groq's free tier tops out around 14.4K requests/day, and the
+        # versatile models used for research sit far lower (~1K/day). Paid
+        # (Developer) keys report materially higher ceilings. 15K is a
+        # conservative divider that never misclassifies a paid key as free.
+        return "free" if daily_requests <= 15_000 else "paid"
+
     async def stream_chat(
         self,
         *,
@@ -130,6 +187,12 @@ class GroqProvider:
                     "temperature": config.temperature,
                     self.max_output_parameter: config.max_output_tokens,
                     "stream": True,
+                    # This is a plain answer turn with no tools declared. GPT-OSS
+                    # can otherwise decide to emit a tool call anyway, which Groq
+                    # rejects with "Tool choice is none, but model called a
+                    # tool". Sending tool_choice="none" explicitly closes the
+                    # harmony tool channel so the model only produces text.
+                    "tool_choice": "none",
                 }
                 if end_user_id is not None:
                     request_data["user"] = end_user_id
@@ -273,7 +336,17 @@ def _classify_groq_error(exc: Exception, *, operation: str, provider_name: str =
     account-specific details.
     """
 
-    logger.warning("%s %s failed: %s", provider_name, operation, type(exc).__name__)
+    # Log the exception type AND message (never a body, which may carry
+    # account-specific detail) so an unclassified failure is diagnosable
+    # from the logs instead of collapsing into an opaque "provider_error".
+    logger.warning(
+        "%s %s failed: %s: %s",
+        provider_name,
+        operation,
+        type(exc).__name__,
+        exc,
+    )
+    logger.debug("%s %s failure detail", provider_name, operation, exc_info=exc)
     if isinstance(exc, json.JSONDecodeError):
         return GroqProviderError(
             code="provider_invalid_json_response",
@@ -294,7 +367,7 @@ def _classify_groq_error(exc: Exception, *, operation: str, provider_name: str =
         if status_code == 400 and isinstance(body, dict) and body.get("failed_generation"):
             return GroqProviderError(
                 code="provider_invalid_tool_generation",
-                message="Groq rejected an invalid model-generated tool call",
+                message=f"{provider_name} rejected an invalid model-generated tool call",
                 retryable=True,
             )
         if status_code == 401:
@@ -350,6 +423,26 @@ def _classify_groq_error(exc: Exception, *, operation: str, provider_name: str =
                 retryable=True,
                 retry_after_seconds=retry_after,
             )
+    # An APIError without an HTTP status (e.g. GPT-OSS spontaneously emitting a
+    # tool call on a request that declared no tools -> "Tool choice is none, but
+    # model called a tool") reaches here because it is not an APIStatusError.
+    # It is a transient model-formatting fault, so mark it retryable rather than
+    # letting it collapse into the credential branch below.
+    if isinstance(exc, APIError):
+        return GroqProviderError(
+            code="provider_invalid_model_output",
+            message=f"{provider_name} returned an unusable model response; retry the request",
+            retryable=True,
+        )
+    # A missing/empty api_key makes the SDK raise a bare OpenAIError at client
+    # construction, before any HTTP call. Surface it as a credential problem the
+    # caller can act on, not the opaque generic error below.
+    if isinstance(exc, OpenAIError):
+        return GroqProviderError(
+            code="provider_credential_missing",
+            message=f"No usable {provider_name} credential is configured for this request",
+            retryable=False,
+        )
     return GroqProviderError(
         code="provider_error",
         message=f"Unable to {operation} with {provider_name}",

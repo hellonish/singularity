@@ -152,6 +152,10 @@ class ResearchRunCreate(BaseModel):
     strength: int = Field(default=2, ge=1, le=3)
     audience: str = Field(default="practitioner", min_length=1, max_length=64)
     output_language: str = Field(default="en", min_length=2, max_length=12)
+    # Real-inference smoke test flag. Honored only when the server enables
+    # SINGULARITY_RESEARCH_TEST_MODE; ignored otherwise. Forces a single-node
+    # run with one real search and one real fetch.
+    test_mode: bool = False
     run_data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -242,9 +246,20 @@ class ProviderCredentialRead(APIModel):
     updated_at: datetime
 
 
+class ProviderCredentialSelectionUpdate(BaseModel):
+    """Persist the credential used for new Chat and Research requests."""
+
+    credential_id: Optional[str] = None
+
+
+class ProviderCredentialSelectionRead(BaseModel):
+    credential_id: Optional[str] = None
+
+
 class AvailableModelRead(BaseModel):
     id: str
     owned_by: Optional[str] = None
+    supports_research: bool
 
 
 class LLMCompletionCreate(BaseModel):
@@ -287,3 +302,39 @@ class HealthRead(BaseModel):
 class StorageHealthRead(BaseModel):
     status: Literal["ok"]
     backend: str
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=1)
+
+
+class CLIDeviceLoginRequest(BaseModel):
+    """Authenticate one installed CLI without an interactive account login."""
+
+    device_token: SecretStr = Field(min_length=32, max_length=512)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class TokenPair(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int
+    token_type: Literal["bearer"] = "bearer"
+
+
+class WalkthroughRequest(BaseModel):
+    """Body for claim/complete/dismiss. The user id is never accepted here; it is
+    always derived from the authenticated caller."""
+
+    version: int = Field(ge=1)
+
+
+class WalkthroughClaimRead(BaseModel):
+    show: bool
+    walkthrough_key: str = Field(serialization_alias="walkthroughKey")
+    version: int
+
+    model_config = ConfigDict(populate_by_name=True)

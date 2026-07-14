@@ -13,7 +13,7 @@ def test_banner_and_chat_prompt_are_standalone_assets() -> None:
     assert "terminal agent runtime" in render_banner()
     assert CHAT_SYSTEM_PROMPT_PATH.name == "system.md"
     assert CHAT_SYSTEM_PROMPT_PATH.is_file()
-    assert "Singularity chat agent" in load_chat_system_prompt()
+    assert "You are Singularity" in load_chat_system_prompt()
 
 
 def test_runtime_prompt_injects_server_generated_current_time() -> None:

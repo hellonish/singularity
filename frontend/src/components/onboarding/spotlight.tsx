@@ -2,37 +2,76 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
-import { OB_STEPS, OB_STARTER_MESSAGE, PROVIDERS } from '@/lib/dummy-data';
+import { OB_STEPS, PROVIDERS } from '@/lib/dummy-data';
+import { claimWalkthrough, completeWalkthrough, dismissWalkthrough } from '@/lib/walkthrough';
 
 const SCRIM = 'rgba(6,9,14,0.74)';
 
 export function Spotlight() {
   const {
     onboarding, obStep, setObStep, setOnboarding,
-    setSettingsOpen, setUserMenuOpen, setView, setMode,
+    setSettingsOpen, setActiveSettingsTab, setUserMenuOpen, setView, setMode,
     openProvider, setOpenProvider, setComposerDraft,
+    setForceProviderMenuOpen, setProviderHighlight,
   } = useAppStore();
   const [tourRect, setTourRect] = useState<{ x: number, y: number, w: number, h: number } | null>(null);
   const typedRef = useRef(false);
+  const claimStartedRef = useRef(false);
+
+  // Ask the server (the source of truth) whether to show the walkthrough. The
+  // ref guard makes this run once even under React Strict Mode's double-invoke;
+  // the database's unique constraint is the real at-most-once guarantee.
+  useEffect(() => {
+    if (claimStartedRef.current) return;
+    claimStartedRef.current = true;
+    void claimWalkthrough().then((show) => {
+      if (show) { setObStep(0); setOnboarding(true); }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // End the tour: `completed` when the user finished it, otherwise `dismissed`.
+  // Both are idempotent server-side and stop future display.
+  const endTour = (completed: boolean) => {
+    setOnboarding(false);
+    void (completed ? completeWalkthrough() : dismissWalkthrough());
+  };
 
   const step = OB_STEPS[obStep];
   const isLast = obStep === OB_STEPS.length - 1;
+  // Not every step defines a tip, so read it defensively.
+  const stepTip = step && 'tip' in step ? (step as { tip?: string }).tip : undefined;
 
   // Keep the underlying UI in the right state for whichever step we're on. This
   // runs on every step change so the highlight target actually exists on screen.
   useEffect(() => {
-    if (!onboarding || !step) return;
+    if (!onboarding || !step) {
+      // Tour ended — release any tour-driven dropdown state.
+      setForceProviderMenuOpen(false);
+      setProviderHighlight(null);
+      return;
+    }
+    // Reset the tour-driven dropdown state by default; the providers step turns
+    // it on below.
+    setForceProviderMenuOpen(false);
+    setProviderHighlight(null);
+
     switch (step.target) {
       case 'menu-settings':
         setUserMenuOpen(true); setSettingsOpen(false);
         break;
       case 'providers':
-        setUserMenuOpen(false); setSettingsOpen(true); setOpenProvider(null);
+        // Open the picker for the user and pre-highlight Groq (as if hovered) so
+        // the "try for free" tip points right at it.
+        // The selected Settings tab is persisted between visits. The tour target
+        // only exists on Models, so restore that tab before measuring it.
+        setUserMenuOpen(false); setSettingsOpen(true); setActiveSettingsTab('models'); setOpenProvider(null);
+        setForceProviderMenuOpen(true); setProviderHighlight('groq');
         break;
       case 'keysetup':
         // Keep whatever provider the user picked in the previous step; only fall
         // back to the first one if somehow none is selected.
-        setUserMenuOpen(false); setSettingsOpen(true);
+        setUserMenuOpen(false); setSettingsOpen(true); setActiveSettingsTab('models');
         if (!openProvider) setOpenProvider(PROVIDERS[0].id);
         break;
       case 'composer':
@@ -55,6 +94,9 @@ export function Spotlight() {
     }
     const scrollTargets = ['keysetup'];
     const selector = `[data-tour="${step.target}"]`;
+    // The provider picker is a dropdown: while its menu is open the cutout should
+    // wrap the trigger AND the popover, so we keep tracking (and unioning) for it.
+    const isDropdownStep = step.target === 'providers';
 
     // A new step's target isn't the previous one — clear so we never show a
     // cutout at a stale position while the new target lays out.
@@ -75,19 +117,40 @@ export function Spotlight() {
           el.scrollIntoView({ block: 'center', behavior: 'auto' });
           scrolled = true;
         }
-        const r = el.getBoundingClientRect();
+        let r = el.getBoundingClientRect();
+        // Union with the open dropdown popover so the cutout wraps both.
+        if (isDropdownStep) {
+          const pop = el.querySelector('[data-tour-popover]');
+          if (pop) {
+            const pr = pop.getBoundingClientRect();
+            const left = Math.min(r.left, pr.left);
+            const top = Math.min(r.top, pr.top);
+            const right = Math.max(r.right, pr.right);
+            const bottom = Math.max(r.bottom, pr.bottom);
+            r = { left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top } as DOMRect;
+          }
+        }
         if (r.width > 0 && r.height > 0) {
           const key = `${Math.round(r.left)},${Math.round(r.top)},${Math.round(r.width)},${Math.round(r.height)}`;
-          stableFrames = key === prev ? stableFrames + 1 : 0;
-          prev = key;
-          // Two consecutive identical frames ⇒ layout has settled.
-          if (stableFrames >= 2) {
+          // Publish the first valid measurement immediately (so nothing flashes at
+          // the wrong spot), then keep tracking live. Targets inside animated
+          // popovers (the account menu, the provider dropdown) move for a few
+          // frames after they mount; continuous tracking + the CSS transition on
+          // the highlight means the cutout glides to the settled position instead
+          // of locking onto a mid-animation frame.
+          if (key !== prev) {
+            prev = key;
             setTourRect({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
-            return;
+            stableFrames = 0;
+          } else {
+            stableFrames += 1;
           }
         }
       }
-      if (frames < MAX_FRAMES) raf = requestAnimationFrame(tick);
+      // Keep tracking until the target has held still for a bit (or we hit the
+      // safety cap); dropdown steps track indefinitely so the cutout follows the
+      // menu opening/closing.
+      if (isDropdownStep || (stableFrames < 8 && frames < MAX_FRAMES)) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
 
@@ -102,27 +165,14 @@ export function Spotlight() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboarding, obStep]);
 
-  // Final step: "type" the starter message into the composer, character by
-  // character, then dismiss the dimming overlay leaving the text in the box.
+  // Final step: just highlight the composer, then end the tour.
   useEffect(() => {
     if (!onboarding || !isLast || typedRef.current) return;
     typedRef.current = true;
 
-    let i = 0;
-    const type = () => {
-      i += 1;
-      setComposerDraft(OB_STARTER_MESSAGE.slice(0, i));
-      if (i < OB_STARTER_MESSAGE.length) {
-        timer = window.setTimeout(type, 26);
-      } else {
-        // Message is fully typed — clear the overlay so the user can press Enter.
-        end = window.setTimeout(() => setOnboarding(false), 850);
-      }
-    };
-    let timer = window.setTimeout(type, 350);
-    let end = 0;
-
-    return () => { clearTimeout(timer); clearTimeout(end); };
+    // Reaching the final step counts as completing the walkthrough.
+    const end = window.setTimeout(() => endTour(true), 850);
+    return () => clearTimeout(end);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboarding, isLast]);
 
@@ -227,19 +277,27 @@ export function Spotlight() {
           <p style={{ margin: '0 0 12px', fontSize: '13.5px', lineHeight: 1.5, color: 'var(--text-dim)' }}>{step.desc}</p>
 
           {/* Persistent "do this right now" instruction box */}
-          <div style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', margin: '0 0 14px', padding: '10px 11px', borderRadius: '10px', backgroundColor: 'var(--accent-soft)', border: '1px solid var(--accent)' }}>
+          <div style={{ display: 'flex', gap: '9px', alignItems: 'flex-start', margin: '0 0 10px', padding: '10px 11px', borderRadius: '10px', backgroundColor: 'var(--accent-soft)', border: '1px solid var(--accent)' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2" style={{ flexShrink: 0, marginTop: '1px' }}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
             <span style={{ fontSize: '12.5px', lineHeight: 1.45, color: 'var(--text)' }}>{step.hint}</span>
           </div>
 
+          {/* Optional extra tip for this step */}
+          {stepTip && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', margin: '0 0 14px', padding: '9px 11px', borderRadius: '10px', backgroundColor: 'var(--surface-2)', border: '1px dashed var(--border-strong)' }}>
+              <span style={{ fontSize: '13px', lineHeight: 1, marginTop: '1px' }}>💡</span>
+              <span style={{ fontSize: '12px', lineHeight: 1.45, color: 'var(--text-dim)' }}>{stepTip}</span>
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={() => setOnboarding(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-faint)', fontSize: '11.5px', cursor: 'pointer', padding: 0 }}>Skip tour</button>
+            <button onClick={() => endTour(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-faint)', fontSize: '11.5px', cursor: 'pointer', padding: 0 }}>Skip tour</button>
             {obStep > 0 && (
               <button onClick={() => setObStep(obStep - 1)} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', fontSize: '11.5px', cursor: 'pointer', padding: 0 }}>Back</button>
             )}
             {isLast && (
               <button
-                onClick={() => setOnboarding(false)}
+                onClick={() => endTour(true)}
                 style={{ marginLeft: 'auto', height: '30px', padding: '0 13px', border: 'none', borderRadius: '8px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '11.5px', fontWeight: 500, cursor: 'pointer' }}
               >
                 Got it

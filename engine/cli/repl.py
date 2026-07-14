@@ -8,22 +8,12 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from dotenv import load_dotenv
-
-# Repo root (…/singularity), so the CLI loads the project .env regardless of the
-# directory it is launched from. A relative "./.env" silently loaded nothing
-# when invoked from elsewhere, leaving SINGULARITY_MODAL_* unset and falling
-# back to the wrong Modal environment.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
 from engine.chat.effort import ChatEffort, get_chat_effort_profile
-from engine.cli.agents import ChatTerminalAgent, TerminalAgent
+from engine.cli.api_client import SingularityAPIClient, SingularityAPIError
 from engine.cli.banner import COMMANDS, LOGO
 from engine.cli.models import TerminalSession
-from engine.cli.settings import GlobalTerminalSettingsStore, TerminalSettings
+from engine.cli.settings import DEFAULT_MODEL_BY_PROVIDER, GlobalTerminalSettingsStore, TerminalSettings
 from engine.cli.ui import TerminalUI
-from engine.llm.groq import GroqProviderError
-from engine.llm.providers import DEFAULT_MODEL_BY_PROVIDER, provider_for
 
 
 class EngineREPL:
@@ -35,14 +25,29 @@ class EngineREPL:
         *,
         settings_store: GlobalTerminalSettingsStore | None = None,
         provider_factory: Callable[[str], object] | None = None,
+        api_client: SingularityAPIClient | None = None,
         ui: TerminalUI | None = None,
     ) -> None:
         self.session = session
         self._settings_store = settings_store or GlobalTerminalSettingsStore()
-        self._provider_factory = provider_factory or provider_for
-        chat = ChatTerminalAgent()
-        self._agents: dict[str, TerminalAgent] = {chat.name: chat}
+        self._provider_factory = provider_factory
+        self._api_client = api_client or SingularityAPIClient(self._settings_store)
+        self._use_hosted_api = os.getenv("SINGULARITY_CLI_BACKEND", "api").lower() != "local"
+        self._api_chat_id: str | None = None
+        self._agents: dict[str, object] = {}
+        if not self._use_hosted_api:
+            from engine.cli.agents import ChatTerminalAgent
+
+            chat = ChatTerminalAgent()
+            self._agents[chat.name] = chat
         self.ui = ui or TerminalUI(session_state=self._session_state)
+
+    def _local_provider(self):
+        if self._provider_factory is not None:
+            return self._provider_factory(self.session.provider)
+        from engine.llm.providers import provider_for
+
+        return provider_for(self.session.provider)
 
     def _session_state(self) -> dict[str, str]:
         return {
@@ -51,6 +56,7 @@ class EngineREPL:
             "model": self.session.model_id,
             "effort": str(self.session.effort),
             "key": "saved" if self.session.api_key else "missing",
+            "backend": "api" if self._use_hosted_api else "local",
         }
 
     async def run(self) -> int:
@@ -61,6 +67,7 @@ class EngineREPL:
             effort=str(self.session.effort),
             key_configured=bool(self.session.api_key),
             modal_enabled=os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1",
+            api_backed=self._use_hosted_api,
             provider=self.session.provider.title(),
         )
         if not self.session.api_key:
@@ -120,11 +127,62 @@ class EngineREPL:
         return False
 
     async def _research_live(self, query: str) -> None:
-        """Run the bounded graph with the selected provider key and Modal retrieval."""
-        from api.config import settings
+        """Run hosted bounded research so end users need no worker or Modal setup."""
+        if not self._use_hosted_api:
+            await self._research_local(query)
+            return
+        self.ui.start_status("Connecting to hosted bounded research…")
+        try:
+            strength = {
+                ChatEffort.INSTANT: 1,
+                ChatEffort.MEDIUM: 2,
+                ChatEffort.HIGH: 3,
+                ChatEffort.ULTRA: 3,
+            }[self.session.effort]
+            credential_id = await self._api_client.ensure_credential(
+                provider=self.session.provider,
+                api_key=self.session.api_key,
+                model_id=self.session.model_id,
+            )
+            run = await self._api_client.create_research_run(
+                query=query,
+                credential_id=credential_id,
+                model_id=self.session.model_id,
+                strength=strength,
+            )
+            async for event in self._api_client.stream_research(str(run["id"])):
+                if event.event == "research.progress":
+                    self.ui.render_research_progress(event.data)
+                elif event.event == "research.phase":
+                    details = event.data.get("details")
+                    if isinstance(details, list) and details and isinstance(details[-1], dict):
+                        self.ui.render_research_progress(details[-1])
+                elif event.event == "research.failed":
+                    raise SingularityAPIError(str(event.data.get("error") or "Research failed"))
+                elif event.event == "research.cancelled":
+                    raise SingularityAPIError("Research was cancelled")
+            report = ""
+            async for event in self._api_client.stream_report(str(run["report_id"])):
+                if event.event == "report.delta":
+                    report += str(event.data.get("delta") or "")
+                elif event.event == "report.completed" and not report:
+                    report = str(event.data.get("content") or "")
+                elif event.event == "report.pending":
+                    raise SingularityAPIError("Research completed but its report is not ready")
+            if not report:
+                raise SingularityAPIError("Research completed without a report")
+        except Exception as exc:
+            self.ui.stop_status()
+            self.ui.error(f"Live research failed: {type(exc).__name__}: {exc}")
+            return
+        self.ui.stop_status()
+        self.ui.answer(report)
+
+    async def _research_local(self, query: str) -> None:
+        """Developer-only direct path retained behind SINGULARITY_CLI_BACKEND=local."""
         from engine.research_workflow.runner import run_research
 
-        self.ui.start_status("Running live bounded LangGraph research…")
+        self.ui.start_status("Running local bounded LangGraph research…")
         try:
             strength = {
                 ChatEffort.INSTANT: 1,
@@ -143,7 +201,7 @@ class EngineREPL:
             )
         except Exception as exc:
             self.ui.stop_status()
-            self.ui.error(f"Live research failed: {type(exc).__name__}: {exc}")
+            self.ui.error(f"Local research failed: {type(exc).__name__}: {exc}")
             self.ui.info("Diagnostics: .artifacts/research/latest-research-diagnostics.jsonl")
             return
         self.ui.stop_status()
@@ -152,9 +210,9 @@ class EngineREPL:
     async def _choose_mode(self) -> None:
         selected = await self.ui.choose(
             title="Select mode",
-            text="Research mode uses your selected provider model and deployed Modal web tools; Chat mode is conversational.",
+            text="Research uses the hosted Singularity workflow; Chat streams through the same API.",
             values=[
-                ("chat", "Chat      Selected provider conversation and optional trusted tools"),
+                ("chat", "Chat      Persistent selected-provider conversation through the API"),
                 ("research", "Research  Live bounded LangGraph workflow with sourced web evidence"),
             ],
             default=self.session.agent_name,
@@ -173,37 +231,56 @@ class EngineREPL:
     async def _choose_model(self) -> None:
         if not self._require_key():
             return
-        provider = self._provider_factory(self.session.provider)
-        self.ui.start_status(f"Loading {provider.display_name} models…")
+        use_direct_provider = not self._use_hosted_api or self._provider_factory is not None
+        display_name = self.session.provider.title()
+        provider = self._local_provider() if use_direct_provider else None
+        if provider is not None:
+            display_name = provider.display_name
+        self.ui.start_status(f"Loading {display_name} models…")
         try:
-            models = await provider.list_models(api_key=self.session.api_key)
-        except GroqProviderError as exc:
+            if provider is not None:
+                models = await provider.list_models(api_key=self.session.api_key)
+                model_ids = [model.id for model in models]
+            else:
+                remote_models = await self._api_client.list_models(
+                    provider=self.session.provider,
+                    api_key=self.session.api_key,
+                    model_id=self.session.model_id,
+                )
+                model_ids = [str(model["id"]) for model in remote_models]
+        except Exception as exc:
             self.ui.stop_status()
-            self.ui.error(f"Could not load models: {exc.message}")
+            self.ui.error(f"Could not load models: {getattr(exc, 'message', str(exc))}")
             return
         self.ui.stop_status()
         selected = await self.ui.choose(
-            title=f"Select {provider.display_name} model",
+            title=f"Select {display_name} model",
             text="Use ↑/↓ to choose a model and Enter to confirm.",
-            values=[(model.id, model.id) for model in models],
-            default=self.session.model_id if any(model.id == self.session.model_id for model in models) else None,
+            values=[(model_id, model_id) for model_id in model_ids],
+            default=self.session.model_id if self.session.model_id in model_ids else None,
         )
         if selected is None:
             return
-        self.ui.start_status("Validating model…")
-        try:
-            model = await provider.retrieve_model(api_key=self.session.api_key, model_id=selected)
-        except GroqProviderError as exc:
+        if provider is not None:
+            self.ui.start_status("Validating model…")
+            try:
+                model = await provider.retrieve_model(api_key=self.session.api_key, model_id=selected)
+            except Exception as exc:
+                self.ui.stop_status()
+                self.ui.error(f"Could not select model: {getattr(exc, 'message', str(exc))}")
+                return
             self.ui.stop_status()
-            self.ui.error(f"Could not select model: {exc.message}")
-            return
-        self.ui.stop_status()
-        if not model.active:
-            self.ui.error(f"Model is inactive: {model.id}")
-            return
-        self.session.model_id = model.id
+            if not model.active:
+                self.ui.error(f"Model is inactive: {model.id}")
+                return
+            self.session.model_id = model.id
+            self.session.model_max_completion_tokens = model.max_completion_tokens
+        else:
+            self.session.model_id = selected
+            self.session.model_max_completion_tokens = None
+        self._api_chat_id = None
         self._save_settings()
-        self.ui.info(f"Model selected: {model.id}")
+        self.ui.info(f"Model selected: {self.session.model_id}")
 
     async def _choose_provider(self) -> None:
         selected = await self.ui.choose(
@@ -221,8 +298,12 @@ class EngineREPL:
         settings = self._settings_store.load()
         self.session.provider = selected
         self.session.model_id = settings.models.get(selected, DEFAULT_MODEL_BY_PROVIDER[selected])
+        # The new provider's model hasn't been retrieved yet, so its live output
+        # ceiling is unknown until the user reselects a model.
+        self.session.model_max_completion_tokens = None
         self.session.api_key = settings.api_keys.get(selected, "")
         self.session.credential_source = "global_config" if self.session.api_key else "none"
+        self._api_chat_id = None
         self._save_settings()
         self.ui.info(f"Provider selected: {selected}; model is {self.session.model_id}.")
 
@@ -325,6 +406,7 @@ class EngineREPL:
                 return
             self.session.api_key = ""
             self.session.credential_source = "none"
+            self._api_chat_id = None
             self._save_settings()
             self.ui.info(f"Saved {self.session.provider.title()} key removed.")
 
@@ -337,19 +419,29 @@ class EngineREPL:
         if not api_key:
             self.ui.error(f"{self.session.provider.title()} API key cannot be empty.")
             return
-        provider = self._provider_factory(self.session.provider)
-        self.ui.start_status(f"Validating {provider.display_name} key…")
+        use_direct_provider = not self._use_hosted_api or self._provider_factory is not None
+        provider = self._local_provider() if use_direct_provider else None
+        display_name = provider.display_name if provider is not None else self.session.provider.title()
+        self.ui.start_status(f"Validating {display_name} key…")
         try:
-            await provider.list_models(api_key=api_key)
-        except GroqProviderError as exc:
+            if provider is not None:
+                await provider.list_models(api_key=api_key)
+            else:
+                await self._api_client.list_models(
+                    provider=self.session.provider,
+                    api_key=api_key,
+                    model_id=self.session.model_id,
+                )
+        except Exception as exc:
             self.ui.stop_status()
-            self.ui.error(f"{provider.display_name} key was not saved: {exc.message}")
+            self.ui.error(f"{display_name} key was not saved: {getattr(exc, 'message', str(exc))}")
             return
         self.ui.stop_status()
         self.session.api_key = api_key
         self.session.credential_source = "global_config"
+        self._api_chat_id = None
         self._save_settings()
-        self.ui.info(f"{provider.display_name} key validated and saved in the global configuration.")
+        self.ui.info(f"{display_name} key validated and saved in the global configuration.")
 
     def _status(self) -> None:
         modal = "enabled" if os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1" else "disabled"
@@ -360,8 +452,10 @@ class EngineREPL:
             ("Model", self.session.model_id),
             ("Effort", str(self.session.effort)),
             ("API key", f"{'configured' if self.session.api_key else 'missing'} ({self.session.credential_source})"),
+            ("Backend", "hosted API" if self._use_hosted_api else "local developer mode"),
+            ("API URL", self._api_client.base_url if self._use_hosted_api else "n/a"),
             ("History turns", str(len(self.session.history))),
-            ("Modal tools", modal),
+            ("Modal tools", "server-managed" if self._use_hosted_api else modal),
             ("LangSmith", langsmith),
             ("Max output tokens", str(self.session.max_output_tokens)),
         ])
@@ -370,6 +464,7 @@ class EngineREPL:
         self.session.history.clear()
         self.session.compacted_summary = None
         self.session.compacted_through = 0
+        self._api_chat_id = None
         self.ui.info("Conversation history reset.")
 
     async def _send(self, message: str) -> None:
@@ -380,6 +475,56 @@ class EngineREPL:
             return
         if not self._require_key():
             return
+        if self._use_hosted_api:
+            await self._send_api(message)
+            return
+        await self._send_local(message)
+
+    async def _send_api(self, message: str) -> None:
+        """Stream one persisted chat turn through the hosted API."""
+        buffered = ""
+        self.ui.start_status("Connecting to Singularity API…")
+        try:
+            if self._api_chat_id is None:
+                credential_id = await self._api_client.ensure_credential(
+                    provider=self.session.provider,
+                    api_key=self.session.api_key,
+                    model_id=self.session.model_id,
+                )
+                self._api_chat_id = await self._api_client.create_chat(
+                    credential_id=credential_id,
+                    model_id=self.session.model_id,
+                )
+            async for event in self._api_client.stream_chat(
+                chat_id=self._api_chat_id,
+                message=message,
+                effort=self.session.effort.value,
+            ):
+                if event.event == "message.accepted":
+                    self.ui.render_lifecycle(kind="model_started", content="")
+                elif event.event == "message.delta":
+                    delta = str(event.data.get("delta") or "")
+                    if delta:
+                        self.ui.stop_status()
+                        buffered += delta
+                        self.ui.stream_delta(delta)
+                elif event.event == "message.completed" and not buffered:
+                    buffered = str(event.data.get("content") or "")
+                elif event.event == "message.error":
+                    raise SingularityAPIError(
+                        str(event.data.get("message") or "The model request failed"),
+                        code=str(event.data.get("code") or "") or None,
+                    )
+            self.ui.stop_status()
+            self.ui.final_answer(buffered)
+        except Exception as exc:
+            self.ui.stop_status()
+            if buffered:
+                self.ui.final_answer(buffered)
+            self.ui.error(f"API request failed: {exc}")
+
+    async def _send_local(self, message: str) -> None:
+        """Developer-only direct provider/Modal path."""
         agent = self._agents[self.session.agent_name]
         buffered = ""
         run_id = uuid4().hex
@@ -404,7 +549,7 @@ class EngineREPL:
             "effort": str(self.session.effort),
         })
         try:
-            async for output in agent.stream(message=message, session=self.session):
+            async for output in agent.stream(message=message, session=self.session):  # type: ignore[attr-defined]
                 if output.kind != "delta":
                     record({
                         "phase": "chat",
@@ -425,7 +570,7 @@ class EngineREPL:
             if buffered:
                 self.ui.final_answer(buffered)
             record({"phase": "chat", "status": "completed"})
-        except (GroqProviderError, TimeoutError, ValueError) as exc:
+        except (TimeoutError, ValueError) as exc:
             record({
                 "phase": "chat",
                 "status": "failed",
@@ -454,11 +599,12 @@ class EngineREPL:
             selected_provider=self.session.provider,
             model=self.session.model_id,
             effort=self.session.effort.value,
+            api_device_token=existing.api_device_token,
+            api_refresh_token=existing.api_refresh_token,
         ))
 
 
 def load_terminal_session(settings_store: GlobalTerminalSettingsStore | None = None) -> TerminalSession:
-    load_dotenv(_REPO_ROOT / ".env")
     settings = (settings_store or GlobalTerminalSettingsStore()).load()
     return TerminalSession(
         api_key=settings.api_keys.get(settings.selected_provider, ""),

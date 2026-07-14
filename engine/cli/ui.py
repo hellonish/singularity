@@ -88,12 +88,13 @@ class TerminalUI:
             prompt_continuation="   · ",
         )
 
-    def banner(self, *, logo: str, agent: str, model: str, effort: str, key_configured: bool, modal_enabled: bool, provider: str = "Groq") -> None:
+    def banner(self, *, logo: str, agent: str, model: str, effort: str, key_configured: bool, modal_enabled: bool, api_backed: bool = False, provider: str = "Groq") -> None:
         self.console.print(logo, style="bold cyan")
         details = Table.grid(padding=(0, 2))
         details.add_row("Agent", agent, "Model", model)
         details.add_row("Effort", effort, f"{provider} key", "configured" if key_configured else "not configured")
-        details.add_row("Tools", "Modal enabled" if modal_enabled else "Local chat only", "Input", "Enter send · Shift+Enter newline")
+        tools = "Server managed" if api_backed else ("Modal enabled" if modal_enabled else "Local chat only")
+        details.add_row("Tools", tools, "Input", "Enter send · Shift+Enter newline")
         self.console.print(
             Panel(
                 details,
@@ -104,14 +105,23 @@ class TerminalUI:
         )
 
     def help(self, commands: list[tuple[str, str]]) -> None:
+        hosted = self._session_state().get("backend") == "api"
+        runtime = (
+            "a streaming client for the hosted Singularity API"
+            if hosted
+            else "a local streaming AI runtime"
+        )
+        persistence = (
+            "The API persists chats and research reports; /reset starts a fresh chat in this process."
+            if hosted
+            else "Conversation history is discarded when the process exits or when /reset is used."
+        )
         self.console.print(Panel(
-            "[bold]Singularity[/bold] is a local, streaming AI chat runtime backed by Groq, DeepSeek, or OpenRouter. "
-            "It keeps terminal conversation state in memory, stores provider keys in a private global configuration "
-            "file, can run validated trusted tools through Modal when enabled, and emits sanitized "
-            "LangSmith traces when configured.\n\n"
+            f"[bold]Singularity[/bold] is {runtime}, backed by Groq, DeepSeek, or OpenRouter. "
+            "It stores provider keys and renewable CLI session state in a private global configuration file. "
+            f"{persistence}\n\n"
             "Type a message and press Enter to send. Use Shift+Enter for a new line. Commands beginning with / "
-            "control the current session. Model and effort choices use arrow keys and Enter. Conversation history "
-            "is discarded when the process exits or when /reset is used.",
+            "control the current session. Model and effort choices use arrow keys and Enter.",
             title="About Singularity",
             border_style="cyan",
         ))

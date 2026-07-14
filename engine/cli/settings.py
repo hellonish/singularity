@@ -5,9 +5,16 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from engine.chat.effort import ChatEffort
-from engine.llm.providers import DEFAULT_MODEL_BY_PROVIDER, ProviderName
+
+ProviderName = Literal["groq", "deepseek", "openrouter"]
+DEFAULT_MODEL_BY_PROVIDER: dict[ProviderName, str] = {
+    "groq": "openai/gpt-oss-20b",
+    "deepseek": "deepseek-v4-flash",
+    "openrouter": "openai/gpt-4.1-mini",
+}
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "singularity" / "terminal.json"
 
@@ -19,6 +26,8 @@ class TerminalSettings:
     selected_provider: ProviderName = "groq"
     model: str = DEFAULT_MODEL_BY_PROVIDER["groq"]
     effort: str = ChatEffort.MEDIUM.value
+    api_device_token: str = ""
+    api_refresh_token: str = ""
 
     @classmethod
     def from_dict(cls, raw: object) -> "TerminalSettings":
@@ -52,6 +61,8 @@ class TerminalSettings:
             selected_provider=provider,
             model=str(models.get(provider) or DEFAULT_MODEL_BY_PROVIDER[provider]),
             effort=effort,
+            api_device_token=str(raw.get("api_device_token") or ""),
+            api_refresh_token=str(raw.get("api_refresh_token") or ""),
         )
 
 

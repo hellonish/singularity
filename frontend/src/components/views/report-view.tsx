@@ -1,317 +1,159 @@
 'use client';
 
-import { useState } from 'react';
+import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
-import { REPORTS, BLOCKS, MODELS } from '@/lib/dummy-data';
+import { useWorkspace } from '@/components/workspace-provider';
+import { Markdown } from '@/components/ui/markdown';
 
 export function ReportView() {
-  const { activeReportId, activeChatId, setActiveChatId, modelId, setModelId } = useAppStore();
-  
-  const [chatCollapsed, setChatCollapsed] = useState(false);
-  const [threadMenuOpen, setThreadMenuOpen] = useState(false);
-  const [rModelMenuOpen, setRModelMenuOpen] = useState(false);
-  const [reportQuery, setReportQuery] = useState('');
+  const { activeReportId, activeChatId, setActiveChatId, chatCollapsed, toggleChatCollapsed } = useAppStore();
+  const { reports, runs, chats, messages, reportContent, runActivity, loadReport, loadMessages, createAndSendChat, sendChat, cancelResearch, activeCredential, availableModels, modelsLoading, streamingChatIds } = useWorkspace();
+  const [query, setQuery] = useState('');
+  const [sending, setSending] = useState(false);
+  // A report-chat draft is deliberately client-only. Clicking New must show a
+  // blank conversation without adding an empty chat to the sidebar/database;
+  // the first submitted message creates the real, report-linked chat.
+  const [draft, setDraft] = useState<{ reportId: string; modelId: string | null } | null>(null);
+  const [openMenu, setOpenMenu] = useState<'model' | 'thread' | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const report = reports.find((item) => item.id === activeReportId);
+  const run = runs.find((item) => item.report_id === activeReportId);
+  const reportChats = chats.filter((item) => item.report_id === activeReportId);
+  const draftChat = Boolean(activeReportId && draft?.reportId === activeReportId);
+  const draftModelId = draftChat ? draft?.modelId ?? null : null;
+  const selectedChat = draftChat ? undefined : reportChats.find((item) => item.id === activeChatId) ?? reportChats[0];
+  const turns = selectedChat ? messages[selectedChat.id] ?? [] : [];
+  const isStreaming = !!selectedChat && streamingChatIds.includes(selectedChat.id);
+  const effectiveDraftModelId = draftModelId
+    ?? activeCredential?.default_model_id
+    ?? availableModels[0]?.id
+    ?? null;
+  const draftModelLabel = modelsLoading
+    ? 'Loading models…'
+    : availableModels.find((model) => model.id === effectiveDraftModelId)?.id
+      ?? effectiveDraftModelId
+      ?? 'Select a model';
 
-  const report = REPORTS.find(r => r.id === activeReportId);
-  const activeChat = report?.chats.find(c => c.id === activeChatId) || report?.chats[0];
-
-  const toggleChatCollapsed = () => setChatCollapsed(!chatCollapsed);
-  const toggleThreadMenu = () => setThreadMenuOpen(!threadMenuOpen);
-  const toggleRModelMenu = () => setRModelMenuOpen(!rModelMenuOpen);
-
-  const handleReportSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reportQuery.trim()) return;
-    console.log('Sending report chat message:', reportQuery);
-    setReportQuery('');
-  };
-
-  const handleReportKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleReportSend(e as unknown as React.FormEvent);
+  useEffect(() => { if (activeReportId) void loadReport(activeReportId); }, [activeReportId, loadReport]);
+  useEffect(() => {
+    if (!draftChat && selectedChat) {
+      setActiveChatId(selectedChat.id);
+      void loadMessages(selectedChat.id);
     }
+  }, [draftChat, selectedChat, setActiveChatId, loadMessages]);
+
+  // Report-context chats use the same SSE stream as regular chats. Keep their
+  // narrower sidebar pinned while a reply is active so the pending state and
+  // every token remain visible after the user sends a question.
+  const lastTurn = turns.at(-1);
+  const followKey = `${isStreaming}:${turns.length}:${lastTurn?.content.length ?? 0}`;
+  useLayoutEffect(() => {
+    if (!isStreaming) return;
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [followKey, isStreaming, selectedChat?.id]);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!query.trim() || !activeReportId || sending) return;
+    setSending(true);
+    try {
+      if (selectedChat) await sendChat(selectedChat.id, query.trim());
+      else {
+        const chat = await createAndSendChat(query.trim(), activeReportId, effectiveDraftModelId ?? undefined);
+        setActiveChatId(chat.id);
+        setDraft(null);
+      }
+      setQuery('');
+    } catch {
+      // The shared error dialog already contains the user-facing failure.
+    } finally { setSending(false); }
   };
 
-  const closeMenus = () => {
-    setThreadMenuOpen(false);
-    setRModelMenuOpen(false);
+  const handleNewChat = () => {
+    if (!activeReportId) return;
+    setDraft({ reportId: activeReportId, modelId: null });
+    setActiveChatId(null);
+    setQuery('');
+    setOpenMenu(null);
   };
 
-  if (!report) return null;
+  const submitOnEnter = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Shift+Enter remains available for multi-line questions. Ignore IME
+    // composition so Enter does not send while a character is being chosen.
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    formRef.current?.requestSubmit();
+  };
 
-  const chatPositionLabel = activeChat ? `${report.chats.indexOf(activeChat) + 1} of ${report.chats.length}` : '';
-  const selectedModel = MODELS.flatMap(g => g.items).find(m => m.id === modelId);
-  const modelName = selectedModel?.name || 'Select model';
-  const modelGroup = MODELS.find(g => g.items.some(m => m.id === modelId));
-  const modelDot = modelGroup?.dot || 'var(--text-faint)';
+  const content = activeReportId ? reportContent[activeReportId] : '';
+  const activity = run ? runActivity[run.id] : undefined;
+  const running = run && !['completed', 'failed', 'cancelled'].includes(run.status);
 
-  const chatMessages = [
-    { who: 'You', text: 'What is the main bottleneck for solid-state batteries?', isUser: true },
-    { who: 'Singularity', text: 'The primary bottleneck is the supply of sulfide solid electrolytes and the manufacturing capacity required to process them at scale in dry-room environments.', isUser: false },
-  ];
-
-  return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-      
-      {/* Report Body */}
-      <div data-screen-label="Report" style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        <article style={{ maxWidth: '720px', margin: '0 auto', padding: '88px 40px 80px' }}>
-          <div style={{ borderBottom: '1px solid var(--border-strong)', paddingBottom: '26px', marginBottom: '34px' }}>
-            <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '14px' }}>Research Report</div>
-            <h1 style={{ margin: '0 0 18px', fontSize: '38px', fontWeight: 300, lineHeight: 1.12, letterSpacing: '-.02em' }}>{report.title}</h1>
-            <div className="sg-mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '11px', color: 'var(--text-dim)' }}>
-              <span>Depth: {report.tier}</span><span>·</span><span>{report.chars}</span><span>·</span><span>v{report.ver}</span><span>·</span><span>{report.time}</span>
-            </div>
-          </div>
-
-          {BLOCKS.map((b, i) => {
-            if (b.type === 'lead') return <p key={i} style={{ fontSize: '21px', fontWeight: 300, lineHeight: 1.6, color: 'var(--text)', margin: '0 0 26px' }}>{b.text}</p>;
-            if (b.type === 'h2') return <h2 key={i} style={{ fontSize: '15px', fontWeight: 500, letterSpacing: '.02em', color: 'var(--text)', margin: '38px 0 14px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>{b.text}</h2>;
-            if (b.type === 'p') return <p key={i} style={{ fontSize: '17px', lineHeight: 1.72, color: 'var(--text)', margin: '0 0 18px' }}>{b.text}</p>;
-            if (b.type === 'callout') return (
-              <div key={i} style={{ display: 'flex', gap: '14px', margin: '24px 0', padding: '18px 20px', backgroundColor: 'var(--accent-soft)', border: '1px solid var(--border)', borderLeft: '3px solid var(--accent)', borderRadius: '12px' }}>
-                <div>
-                  <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '7px' }}>{b.label}</div>
-                  <div style={{ fontSize: '17px', lineHeight: 1.6, fontStyle: 'italic' }}>{b.text}</div>
-                </div>
-              </div>
-            );
-            if (b.type === 'stats' && b.items) return (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', margin: '24px 0' }}>
-                {b.items.map((st: any, idx: number) => (
-                  <div key={idx} style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
-                    <div style={{ fontSize: '28px', fontWeight: 300, letterSpacing: '-.02em', color: 'var(--text)' }}>{st.v}</div>
-                    <div style={{ fontSize: '14px', fontStyle: 'italic', color: 'var(--text-dim)', marginTop: '2px' }}>{st.k}</div>
-                    <div className="sg-mono" style={{ fontSize: '10.5px', color: st.dc, marginTop: '8px' }}>{st.d}</div>
-                  </div>
-                ))}
-              </div>
-            );
-            if (b.type === 'chart') return (
-              <figure key={i} style={{ margin: '26px 0', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '20px 20px 16px' }}>
-                <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '18px' }}>{b.title}</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '14px', height: '150px', paddingBottom: '8px', borderBottom: '1px solid var(--border)' }}>
-                  {b.data?.map((bar, idx) => {
-                    const heightPct = (bar.v / 100) * 100; // max value is ~100
-                    return (
-                      <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%', gap: '8px' }}>
-                        <span className="sg-mono" style={{ fontSize: '12px', color: 'var(--text)' }}>{bar.v}</span>
-                        <div style={{ width: '100%', backgroundColor: 'var(--accent)', borderRadius: '4px 4px 0 0', height: `${heightPct}%` }}></div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'flex', gap: '14px', marginTop: '8px' }}>
-                  {b.data?.map((bar, idx) => (
-                    <span key={idx} className="sg-mono" style={{ flex: 1, textAlign: 'center', fontSize: '11px', color: 'var(--text-dim)' }}>{bar.label}</span>
-                  ))}
-                </div>
-                <figcaption style={{ fontSize: '13.5px', fontStyle: 'italic', color: 'var(--text-dim)', marginTop: '14px' }}>{b.caption}</figcaption>
-              </figure>
-            );
-            if (b.type === 'table' && b.rows) return (
-              <div key={i} style={{ margin: '24px 0', border: '1px solid var(--border-strong)', borderRadius: '12px', overflow: 'hidden' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
-                  <thead>
-                    <tr>
-                      {b.head?.map((h, idx) => (
-                        <th key={idx} style={{ textAlign: 'left', padding: '11px 14px', backgroundColor: 'var(--surface-3)', fontSize: '10px', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 500, color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {b.rows.map((row, idx) => (
-                      <tr key={idx}>
-                        {row.map((cell: any, cIdx: any) => (
-                          <td key={cIdx} style={{ padding: '11px 14px', borderBottom: idx === b.rows!.length - 1 ? 'none' : '1px solid var(--border)', color: 'var(--text)' }}>{cell}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-            if (b.type === 'image') return (
-              <figure key={i} style={{ margin: '26px 0' }}>
-                <div style={{ height: '220px', border: '1px solid var(--border-strong)', borderRadius: '14px', backgroundImage: 'repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 11px, var(--surface) 11px, var(--surface) 22px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span className="sg-mono" style={{ fontSize: '11px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', backgroundColor: 'var(--surface)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border)' }}>{b.caption}</span>
-                </div>
-              </figure>
-            );
-            if (b.type === 'quote') return (
-              <blockquote key={i} style={{ margin: '28px 0', padding: '6px 0 6px 22px', borderLeft: '3px solid var(--accent)', fontSize: '22px', fontWeight: 300, fontStyle: 'italic', lineHeight: 1.5, color: 'var(--text)' }}>
-                {b.text}
-                <footer className="sg-mono" style={{ fontSize: '11px', fontStyle: 'normal', color: 'var(--text-faint)', letterSpacing: '.06em', textTransform: 'uppercase', marginTop: '14px' }}>{b.cite}</footer>
-              </blockquote>
-            );
-            if (b.type === 'refs' && b.items) return (
-              <ul key={i} style={{ listStyle: 'none', margin: '14px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {b.items.map((ref: any, idx: number) => (
-                  <li key={idx} style={{ display: 'flex', gap: '12px', fontSize: '15px', lineHeight: 1.5 }}>
-                    <span className="sg-mono" style={{ flexShrink: 0, fontSize: '11px', padding: '2px 7px', height: 'fit-content', borderRadius: '5px', backgroundColor: 'var(--surface-3)', color: 'var(--accent-2)' }}>{ref.k}</span>
-                    <span>
-                      <span style={{ color: 'var(--text)' }}>{ref.t}</span>{' '}
-                      <a href={ref.href} target="_blank" rel="noopener noreferrer" className="sg-mono" style={{ fontSize: '12px', color: 'var(--accent-2)' }}>{ref.u}</a>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            );
-            return null;
-          })}
-        </article>
+  return <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+    <section style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '100px min(8vw, 96px) 48px' }}>
+      <article style={{ maxWidth: '820px', margin: '0 auto' }}>
+        <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '14px' }}>Research report</div>
+        <h1 style={{ margin: '0 0 14px', fontSize: '36px', fontWeight: 300, fontStyle: 'italic' }}>{report?.title || 'Research report'}</h1>
+        {running && <div style={{ margin: '20px 0', padding: '15px 17px', border: '1px solid var(--border-strong)', borderRadius: '12px', background: 'var(--surface)' }}>
+          <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.1em', color: 'var(--accent-2)', textTransform: 'uppercase' }}>{activity?.phase || run.status}</div>
+          <div style={{ marginTop: '6px', color: 'var(--text-dim)' }}>{activity?.message || 'Research is working…'}</div>
+          <button onClick={() => void cancelResearch(run.id).catch(() => undefined)} style={{ marginTop: '12px', padding: '6px 10px', border: '1px solid var(--border)', background: 'transparent', borderRadius: '7px', cursor: 'pointer', color: 'var(--text-dim)' }}>Cancel research</button>
+        </div>}
+        {run?.status === 'failed' && <div style={{ margin: '20px 0', color: 'var(--color-danger)' }}>{activity?.error || run.error_message || 'Research failed.'}</div>}
+        {content ? <div className="chat-message-content report-content" style={{ fontSize: '17px', lineHeight: 1.72 }}><Markdown>{content}</Markdown></div> : !running && <p style={{ color: 'var(--text-dim)' }}>This report has no completed version yet.</p>}
+      </article>
+    </section>
+    <aside style={{ width: chatCollapsed ? '56px' : '390px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', flexDirection: 'column', minHeight: 0, transition: 'width 0.3s ease', overflow: 'hidden', position: 'relative' }}>
+      {/* Closed State Button */}
+      <div style={{ position: 'absolute', top: '20px', left: '0', width: '56px', display: 'flex', justifyContent: 'center', transition: 'opacity 0.2s ease', opacity: chatCollapsed ? 1 : 0, pointerEvents: chatCollapsed ? 'auto' : 'none', zIndex: 10 }}>
+        <button onClick={toggleChatCollapsed} title="Open chat" style={{ width: '32px', height: '32px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          ‹
+        </button>
       </div>
 
-      {/* Collapsed Chat Rail */}
-      {chatCollapsed && (
-        <button
-          onClick={toggleChatCollapsed}
-          title="Show chat"
-          style={{ width: '56px', flexShrink: 0, border: 'none', borderLeft: '1px solid var(--border)', backgroundColor: 'var(--surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '18px 0 20px', gap: '16px', cursor: 'pointer', color: 'var(--text-dim)' }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-2)', borderRadius: '10px' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="15 18 9 12 15 6" /></svg>
-          </span>
-          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', gap: '10px', paddingTop: '6px', color: 'var(--text-faint)' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-            <span className="sg-mono" style={{ fontSize: '11px', writingMode: 'vertical-rl', textOrientation: 'mixed', letterSpacing: '.16em', textTransform: 'uppercase' }}>{report.chats.length} chats</span>
-          </span>
-        </button>
-      )}
-
-      {/* Expanded Chat Panel */}
-      {!chatCollapsed && (
-        <div style={{ width: '400px', flexShrink: 0, borderLeft: '1px solid var(--border)', backgroundColor: 'var(--surface)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ height: '72px', flexShrink: 0, padding: '0 12px 0 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <button
-              onClick={toggleChatCollapsed}
-              title="Hide chat"
-              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-2)', color: 'var(--text-dim)', borderRadius: '11px', cursor: 'pointer' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="9 18 15 12 9 6" /></svg>
-            </button>
-            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-              <button
-                onClick={toggleThreadMenu}
-                style={{ display: 'flex', alignItems: 'center', gap: '9px', width: '100%', padding: '8px 10px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-2)', borderRadius: '11px', cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="1.8" style={{ flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: 'block', fontSize: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeChat?.title}</span>
-                  <span className="sg-mono" style={{ display: 'block', fontSize: '10px', color: 'var(--text-faint)', marginTop: '1px' }}>{chatPositionLabel}</span>
-                </span>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5, flexShrink: 0 }}><polyline points="6 9 12 15 18 9" /></svg>
+      {/* Open State Content */}
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: '390px', transition: 'opacity 0.2s ease', opacity: chatCollapsed ? 0 : 1, pointerEvents: chatCollapsed ? 'none' : 'auto' }}>
+        <div style={{ padding: '20px 18px 12px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Report chat</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <button onClick={handleNewChat} title="New report chat" style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '28px', padding: '0 10px', border: '1px solid var(--border)', background: draftChat ? 'var(--accent-soft)' : 'var(--surface-2)', borderRadius: '999px', cursor: 'pointer', color: 'var(--text-dim)', fontSize: '11.5px' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                New
               </button>
-              
-              {threadMenuOpen && (
-                <div className="animate-sg-pop" style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '13px', boxShadow: 'var(--shadow)', padding: '6px', zIndex: 50 }}>
-                  <div className="sg-mono" style={{ padding: '7px 9px 5px', fontSize: '9.5px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>{report.chats.length} chats in this research</div>
-                  {report.chats.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => { setActiveChatId(c.id); setThreadMenuOpen(false); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 9px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12.5px', backgroundColor: activeChatId === c.id ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}
-                    >
-                      <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
-                      {activeChatId === c.id && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => { console.log('New chat'); setThreadMenuOpen(false); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '9px', border: 'none', borderTop: '1px solid var(--border)', marginTop: '4px', backgroundColor: 'transparent', color: 'var(--accent-2)', borderRadius: '8px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12.5px' }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>New chat on this report
-                  </button>
-                </div>
-              )}
+              <button onClick={toggleChatCollapsed} title="Close chat" style={{ width: '28px', height: '28px', border: '1px solid var(--border)', background: 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                ›
+              </button>
             </div>
           </div>
-
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 18px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {chatMessages.map((m, i) => (
-              <div key={i} style={{ alignSelf: m.isUser ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-                <div className="sg-mono" style={{ fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '6px', textAlign: m.isUser ? 'right' : 'left' }}>
-                  {m.who}
-                </div>
-                <div style={{ 
-                  padding: m.isUser ? '12px 16px' : '4px 0', 
-                  backgroundColor: m.isUser ? 'var(--surface-3)' : 'transparent',
-                  border: 'none',
-                  borderRadius: '16px',
-                  borderTopRightRadius: m.isUser ? '4px' : '16px',
-                  borderTopLeftRadius: !m.isUser ? '4px' : '16px',
-                  fontSize: '15px',
-                  lineHeight: 1.5,
-                  color: 'var(--text)'
-                }}>
-                  {m.text}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ flexShrink: 0, padding: '12px 16px 16px' }}>
-            <form onSubmit={handleReportSend} style={{ backgroundColor: 'var(--surface-2)', border: '1px solid var(--border-strong)', borderRadius: '16px', position: 'relative' }}>
-              <textarea
-                value={reportQuery}
-                onChange={(e) => setReportQuery(e.target.value)}
-                onKeyDown={handleReportKeyDown}
-                rows={1}
-                placeholder="Ask a follow-up about this report…"
-                style={{ width: '100%', resize: 'none', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontFamily: 'var(--font-serif)', fontSize: '16px', lineHeight: 1.5, maxHeight: '120px', padding: '13px 14px 6px' }}
-              />
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 10px 10px' }}>
-                <div style={{ position: 'relative' }}>
-                  <button
-                    type="button"
-                    onClick={toggleRModelMenu}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '28px', padding: '0 10px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', fontSize: '11.5px' }}
-                  >
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: modelDot }}></span>
-                    {modelName}
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}><polyline points="6 9 12 15 18 9" /></svg>
-                  </button>
-                  {rModelMenuOpen && (
-                    <div className="animate-sg-pop" style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, width: '230px', maxHeight: '280px', overflowY: 'auto', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '13px', boxShadow: 'var(--shadow)', padding: '6px', zIndex: 50 }}>
-                      {MODELS.map((g) => (
-                        <div key={g.group}>
-                          <div className="sg-mono" style={{ padding: '8px 9px 4px', fontSize: '9.5px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: '7px' }}>
-                            <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: g.dot }}></span>
-                            {g.group}
-                          </div>
-                          {g.items.map((mi) => (
-                            <button
-                              key={mi.id}
-                              type="button"
-                              onClick={() => { setModelId(mi.id); setRModelMenuOpen(false); }}
-                              style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 9px', border: 'none', borderRadius: '8px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '12.5px', backgroundColor: modelId === mi.id ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}
-                            >
-                              <span style={{ flex: 1, textAlign: 'left' }}>{mi.name}</span>
-                              {modelId === mi.id && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
-                            </button>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                
-                <button
-                  type="submit"
-                  title="Send"
-                  disabled={!reportQuery.trim()}
-                  style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', height: '28px', borderRadius: '8px', border: 'none', backgroundColor: reportQuery.trim() ? 'var(--accent)' : 'var(--surface-3)', color: reportQuery.trim() ? '#fff' : 'var(--text-faint)', cursor: reportQuery.trim() ? 'pointer' : 'default', transition: 'background-color 0.2s, color 0.2s' }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-                </button>
-              </div>
-              
-              {(threadMenuOpen || rModelMenuOpen) && <div onClick={closeMenus} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>}
-            </form>
-          </div>
+          {(reportChats.length > 1 || draftChat) && <div style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setOpenMenu(openMenu === 'thread' ? null : 'thread')} style={{ display: 'flex', alignItems: 'center', gap: '7px', width: '100%', height: '32px', padding: '0 9px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-2)', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '12px', textAlign: 'left' }}><span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{draftChat ? `New chat · ${draftModelLabel}` : selectedChat?.title || 'Untitled chat'}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg></button>
+            {openMenu === 'thread' && <div className="animate-sg-pop" style={{ position: 'absolute', top: 'calc(100% + 6px)', zIndex: 25, width: '100%', maxHeight: '220px', overflowY: 'auto', padding: '5px', border: '1px solid var(--border-strong)', borderRadius: '10px', background: 'var(--surface)', boxShadow: 'var(--shadow)' }}>
+              {draftChat && <button type="button" onClick={() => setOpenMenu(null)} style={{ display: 'block', width: '100%', padding: '8px', border: 'none', borderRadius: '7px', background: 'var(--accent-soft)', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '12px' }}>New chat · {draftModelLabel}</button>}
+              {reportChats.map((chat) => <button key={chat.id} type="button" onClick={() => { setDraft(null); setActiveChatId(chat.id); setOpenMenu(null); }} style={{ display: 'block', width: '100%', padding: '8px', border: 'none', borderRadius: '7px', background: chat.id === selectedChat?.id ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)', cursor: 'pointer', textAlign: 'left', fontSize: '12px' }}>{chat.title || 'Untitled chat'}</button>)}
+            </div>}
+          </div>}
         </div>
-      )}
-    </div>
-  );
+        <div ref={chatScrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '18px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {!turns.length && <p style={{ color: 'var(--text-faint)', fontSize: '14px' }}>{draftChat ? `New report chat using ${draftModelLabel}. Send your first message to create it.` : 'Ask about this finalized report. The backend retrieves relevant report passages for each answer.'}</p>}
+          {turns.map((message) => <div key={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '88%' }}><div className="sg-mono" style={{ fontSize: '9px', color: 'var(--text-faint)', marginBottom: '5px' }}>{message.role === 'user' ? 'YOU' : 'SINGULARITY'}</div>{message.pending ? <div className="sg-thinking" aria-label="Singularity is thinking"><span /><span /><span /></div> : <div className="chat-message-content" style={{ lineHeight: 1.5, padding: message.role === 'user' ? '10px 12px' : 0, borderRadius: '12px', background: message.role === 'user' ? 'var(--surface-3)' : 'transparent' }}>{message.content ? <Markdown>{message.content}</Markdown> : '…'}</div>}</div>)}
+        </div>
+        <form ref={formRef} onSubmit={submit} style={{ padding: '14px', borderTop: '1px solid var(--border)' }}>
+          <textarea value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={submitOnEnter} placeholder="Ask a follow-up about this report…" rows={2} style={{ width: '100%', resize: 'none', padding: '10px', border: '1px solid var(--border-strong)', borderRadius: '10px', background: 'var(--surface-2)', color: 'var(--text)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px' }}>
+            <div style={{ position: 'relative', minWidth: 0, flex: 1 }}>
+              <button type="button" onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')} style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', height: '32px', padding: '0 9px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-2)', color: 'var(--text-dim)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', textAlign: 'left' }}><span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{draftChat ? draftModelLabel : 'Model locked for this chat'}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg></button>
+              {openMenu === 'model' && <div className="animate-sg-pop" style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, zIndex: 30, width: '250px', maxHeight: '260px', overflowY: 'auto', padding: '6px', border: '1px solid var(--border-strong)', borderRadius: '12px', background: 'var(--surface)', boxShadow: 'var(--shadow)' }}>
+                <div className="sg-mono" style={{ padding: '5px 7px 7px', fontSize: '9.5px', letterSpacing: '.11em', color: 'var(--text-faint)', textTransform: 'uppercase' }}>{draftChat ? 'Model for this new chat' : 'Start a new chat to change model'}</div>
+                {draftChat && (modelsLoading ? <div className="sg-mono" style={{ padding: '10px 7px', fontSize: '11px', color: 'var(--text-faint)' }}>Loading your provider&apos;s models…</div> : availableModels.length ? availableModels.map((model) => <button key={model.id} type="button" onClick={() => { setDraft((current) => current && current.reportId === activeReportId ? { ...current, modelId: model.id } : current); setOpenMenu(null); }} style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '9px 8px', border: 'none', borderRadius: '8px', background: model.id === effectiveDraftModelId ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11.5px', textAlign: 'left' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{model.id}</span></button>) : <div className="sg-mono" style={{ padding: '10px 7px', fontSize: '11px', lineHeight: 1.45, color: 'var(--text-faint)' }}>Add a model provider in Settings first.</div>) }
+              </div>}
+            </div>
+            <button type="submit" disabled={!query.trim() || sending} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '90px', height: '32px', border: 'none', borderRadius: '8px', background: 'var(--accent)', color: '#fff', cursor: sending ? 'default' : 'pointer', fontSize: '12.5px', opacity: !query.trim() || sending ? 0.6 : 1 }}>{sending ? 'Sending…' : 'Send'}</button>
+          </div>
+        </form>
+      </div>
+    </aside>
+  </div>;
 }

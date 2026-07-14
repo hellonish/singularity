@@ -1,11 +1,72 @@
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 from openai import APIStatusError
 
-from engine.llm.groq import GroqProviderError, _classify_groq_error
+from engine.llm.groq import GroqProvider, GroqProviderError, _classify_groq_error
 from engine.llm.openrouter import OpenRouterProvider
 from engine.llm.config import LLMRequestConfig
+
+
+def _raw_response_client(monkeypatch, *, headers=None, raise_exc=None):
+    """Install a fake AsyncOpenAI whose with_raw_response.create returns headers."""
+
+    class RawResponse:
+        def __init__(self):
+            self.headers = headers or {}
+
+    class WithRaw:
+        async def create(self, **kwargs):
+            if raise_exc is not None:
+                raise raise_exc
+            return RawResponse()
+
+    class Completions:
+        with_raw_response = WithRaw()
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = type("Chat", (), {"completions": Completions()})()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    monkeypatch.setattr("engine.llm.groq.AsyncOpenAI", Client)
+
+
+def test_probe_tier_flags_free_from_low_daily_limit(monkeypatch) -> None:
+    _raw_response_client(monkeypatch, headers={"x-ratelimit-limit-requests": "1000"})
+    tier = asyncio.run(GroqProvider().probe_tier(api_key="k", model_id="m"))
+    assert tier == "free"
+
+
+def test_probe_tier_flags_paid_from_high_daily_limit(monkeypatch) -> None:
+    _raw_response_client(monkeypatch, headers={"x-ratelimit-limit-requests": "500000"})
+    tier = asyncio.run(GroqProvider().probe_tier(api_key="k", model_id="m"))
+    assert tier == "paid"
+
+
+def test_probe_tier_unknown_when_header_missing(monkeypatch) -> None:
+    _raw_response_client(monkeypatch, headers={})
+    tier = asyncio.run(GroqProvider().probe_tier(api_key="k", model_id="m"))
+    assert tier == "unknown"
+
+
+def test_probe_tier_unknown_on_probe_error(monkeypatch) -> None:
+    _raw_response_client(monkeypatch, raise_exc=RuntimeError("boom"))
+    tier = asyncio.run(GroqProvider().probe_tier(api_key="k", model_id="m"))
+    assert tier == "unknown"
+
+
+def test_probe_tier_unknown_for_non_groq_provider() -> None:
+    # OpenRouter reuses GroqProvider but has no free-tier research gate.
+    tier = asyncio.run(OpenRouterProvider().probe_tier(api_key="k", model_id="m"))
+    assert tier == "unknown"
 
 
 def test_invalid_tool_generation_has_a_safe_classification() -> None:

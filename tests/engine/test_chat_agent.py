@@ -8,7 +8,7 @@ from engine.chat import ChatAgent, ChatAgentInput, ContextSnapshot
 from engine.chat.budget import CONTEXT_SAFETY_TOKENS, ChatInputTooLarge, budget_chat_prompt
 from engine.chat.context import ContextTurn, SummaryContext
 from engine.llm.config import LLMRequestConfig
-from engine.llm.groq import GroqModel
+from engine.llm.groq import GroqModel, GroqProviderError
 
 
 class _FakeProvider:
@@ -21,6 +21,25 @@ class _FakeProvider:
     async def stream_chat(self, *, api_key: str, config, messages):
         self.messages = messages
         yield "context-aware"
+
+
+class _ToolChoiceRejectProvider(_FakeProvider):
+    """First stream fails as Groq does when GPT-OSS emits an unbid tool call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    async def stream_chat(self, *, api_key: str, config, messages):
+        self.attempts += 1
+        if self.attempts == 1:
+            raise GroqProviderError(
+                code="provider_invalid_model_output",
+                message="Groq returned an unusable model response; retry the request",
+                retryable=True,
+            )
+            yield  # pragma: no cover - keeps this an async generator
+        yield "recovered answer"
 
 
 class _ReasoningOnlyProvider(_FakeProvider):
@@ -37,7 +56,7 @@ class _ReasoningOnlyProvider(_FakeProvider):
 def test_context_is_trimmed_and_total_budget_stays_inside_model_window() -> None:
     model = GroqModel(
         id="arbitrary-groq-model",
-        context_window=1024,
+        context_window=4096,
         max_completion_tokens=256,
         active=True,
     )
@@ -48,7 +67,7 @@ def test_context_is_trimmed_and_total_budget_stays_inside_model_window() -> None
         requested_output_tokens=128,
     )
     assert prompt.context_truncated is True
-    assert prompt.input_token_upper_bound + prompt.max_output_tokens + CONTEXT_SAFETY_TOKENS <= 1024
+    assert prompt.input_token_upper_bound + prompt.max_output_tokens + CONTEXT_SAFETY_TOKENS <= 4096
     assert "Summarize the report." in prompt.messages[-1]["content"]
 
 
@@ -120,6 +139,29 @@ async def test_agent_retries_a_reasoning_only_stream_at_low_effort() -> None:
 
     assert provider.efforts == ["medium", "low"]
     assert events[-1].content == "visible response"
+
+
+@pytest.mark.asyncio
+async def test_agent_retries_once_when_model_emits_an_unbid_tool_call() -> None:
+    provider = _ToolChoiceRejectProvider()
+    events = [
+        event
+        async for event in ChatAgent(provider=provider).stream(
+            ChatAgentInput(context="", message="Find postings."),
+            api_key="test-key",
+            config=LLMRequestConfig(
+                provider="groq",
+                credential_id="cred_1",
+                model_id="openai/gpt-oss-20b",
+                max_output_tokens=256,
+                reasoning_effort="high",
+            ),
+        )
+    ]
+
+    assert provider.attempts == 2
+    assert events[-1].type == "completed"
+    assert events[-1].content == "recovered answer"
 
 
 @pytest.mark.integration

@@ -6,7 +6,7 @@ import hashlib
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
-from _utils.json_parser import extract_object
+from engine.utils.json_parser import extract_object
 
 from .dag import ResearchDAG, ResearchNode, ResearchNodeStatus
 from .document import DocumentSection, ParagraphBlock, ReferenceTag, ResearchDocument, validate_document

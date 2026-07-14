@@ -52,6 +52,70 @@ def test_resolver_uses_search_and_two_fetches_within_four_call_budget():
     assert events[-1]["status"] == "node_completed"
 
 
+def test_test_mode_makes_exactly_one_search_and_one_fetch():
+    """The real-inference test profile: 1 search variant + 1 fetch."""
+
+    class EmptyThenNothing:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, invocation):
+            self.calls.append(invocation.tool_name)
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(
+                    content="search result",
+                    sources=[
+                        {"title": "One", "url": "https://one.example", "snippet": "one"},
+                        {"title": "Two", "url": "https://two.example", "snippet": "two"},
+                    ],
+                )
+            return SimpleNamespace(
+                content="page text",
+                sources=[{"title": "Fetched", "url": invocation.arguments["url"], "snippet": "page"}],
+            )
+
+    executor = EmptyThenNothing()
+
+    async def answerer(node, evidence):
+        return {"answer": "answer", "answered": True}
+
+    result = asyncio.run(
+        BoundedResearchResolver(executor, answerer, max_fetches=1, max_search_variants=1)(
+            ResearchNode(node_id="n1", question="question", section_id="s1", level=0),
+            4,
+        )
+    )
+    # Exactly one search and one fetch — the whole point of test mode.
+    assert executor.calls == ["web_search", "web_fetch"]
+    assert result["tool_calls_used"] == 2
+
+
+def test_test_mode_does_not_reformulate_an_empty_search():
+    """With one variant, an empty search is not retried with new queries."""
+
+    class EmptyExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, invocation):
+            self.calls.append(invocation.tool_name)
+            return SimpleNamespace(content="", sources=[])
+
+    executor = EmptyExecutor()
+
+    async def answerer(node, evidence):  # pragma: no cover - no evidence, never runs
+        raise AssertionError("answerer must not run without evidence")
+
+    result = asyncio.run(
+        BoundedResearchResolver(executor, answerer, max_fetches=1, max_search_variants=1)(
+            ResearchNode(node_id="n1", question="question", section_id="s1", level=0),
+            4,
+        )
+    )
+    assert executor.calls == ["web_search"]
+    assert result["answered"] is False
+
+
 def test_resolver_rejects_non_four_budget():
     async def answerer(node, evidence):
         return {"answer": "answer"}
@@ -160,3 +224,43 @@ def test_resolver_recovers_when_a_transient_dispatch_failure_then_succeeds():
     # The first dispatch failed and was retried transparently within the same
     # logical search call, so the node still resolves.
     assert result["tool_calls_used"] <= 4
+
+
+def test_resolver_skips_one_unreachable_fetch_and_keeps_other_evidence(monkeypatch):
+    """One slow source must not discard a research node with usable evidence."""
+    import engine.research_workflow.resolver as resolver_module
+
+    # Avoid sleeping through dispatch retries in this deterministic unit test;
+    # the behavior under test is the source-level handling after retries end.
+    monkeypatch.setattr(resolver_module, "_MODAL_DISPATCH_ATTEMPTS", 1)
+    events = []
+
+    class OneSlowSourceExecutor:
+        async def execute(self, invocation):
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(
+                    content="search results",
+                    sources=[
+                        {"title": "Slow", "url": "https://slow.example", "snippet": "slow result"},
+                        {"title": "Fast", "url": "https://fast.example", "snippet": "fast result"},
+                    ],
+                )
+            if invocation.arguments["url"] == "https://slow.example":
+                raise TimeoutError()
+            return SimpleNamespace(
+                content="retrieved page",
+                sources=[{"title": "Fast", "url": "https://fast.example", "snippet": "fast page"}],
+            )
+
+    async def answerer(node, evidence):
+        assert any(item["url"] == "https://fast.example" for item in evidence)
+        return {"answer": "answer", "answered": True}
+
+    result = asyncio.run(
+        BoundedResearchResolver(OneSlowSourceExecutor(), answerer, progress_reporter=events.append)(
+            ResearchNode(node_id="n1", question="question", section_id="s1", level=0), 4
+        )
+    )
+
+    assert result["answered"] is True
+    assert any(event["status"] == "source_unavailable" for event in events)

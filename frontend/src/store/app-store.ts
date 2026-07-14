@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { OB_STEPS } from '@/lib/dummy-data';
+import { completeWalkthrough } from '@/lib/walkthrough';
 
 export const ACCENT_COLORS = [
   '#7c5230',
@@ -34,6 +35,10 @@ interface AppState {
   obStep: number;
   provider: string;
   openProvider: string | null;
+  // Onboarding drives the provider dropdown: force it open and pre-highlight an
+  // option (hover-style) so the tour can point the tip at a specific provider.
+  forceProviderMenuOpen: boolean;
+  providerHighlight: string | null;
   composerDraft: string;
   activeReportId: string | null;
   activeChatId: string | null;
@@ -57,6 +62,8 @@ interface AppState {
   obAdvance: (action: string) => void;
   setProvider: (provider: string) => void;
   setOpenProvider: (provider: string | null) => void;
+  setForceProviderMenuOpen: (open: boolean) => void;
+  setProviderHighlight: (id: string | null) => void;
   setComposerDraft: (draft: string) => void;
   setActiveReportId: (id: string | null) => void;
   setActiveChatId: (id: string | null) => void;
@@ -71,16 +78,19 @@ export const useAppStore = create<AppState>()(
   view: 'grid',
   mode: 'chat',
   intensity: 'medium',
-  modelId: 'anthropic-claude-3-5',
+  modelId: 'openai/gpt-oss-20b',
   openMenu: null,
   chatCollapsed: false,
   settingsOpen: false,
   activeSettingsTab: 'models',
   userMenuOpen: false,
-  onboarding: true, // Show spotlight onboarding on first run
+  onboarding: false, // Enabled only after the server grants an at-most-once claim
+
   obStep: 0,
-  provider: 'anthropic',
+  provider: 'groq',
   openProvider: null,
+  forceProviderMenuOpen: false,
+  providerHighlight: null,
   composerDraft: '',
   activeReportId: null,
   activeChatId: null,
@@ -110,11 +120,18 @@ export const useAppStore = create<AppState>()(
     const step = OB_STEPS[state.obStep];
     if (!step || step.advanceOn !== action) return {};
     const next = state.obStep + 1;
-    if (next >= OB_STEPS.length) return { onboarding: false };
+    if (next >= OB_STEPS.length) {
+      // Advancing past the last step completes the walkthrough; tell the server
+      // (idempotent) so it is never shown again on any device.
+      void completeWalkthrough();
+      return { onboarding: false };
+    }
     return { obStep: next };
   }),
   setProvider: (provider) => set({ provider }),
   setOpenProvider: (openProvider) => set({ openProvider }),
+  setForceProviderMenuOpen: (forceProviderMenuOpen) => set({ forceProviderMenuOpen }),
+  setProviderHighlight: (providerHighlight) => set({ providerHighlight }),
   setComposerDraft: (composerDraft) => set({ composerDraft }),
   setActiveReportId: (activeReportId) => set({ activeReportId }),
   setActiveChatId: (activeChatId) => set({ activeChatId }),

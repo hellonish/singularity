@@ -18,8 +18,19 @@ async def get_report(session: AsyncSession, user_id: str, report_id: str) -> Rep
 
 
 async def list_reports(session: AsyncSession, user_id: str) -> list[Report]:
-    result = await session.execute(select(Report).where(Report.user_id == user_id).order_by(Report.created_at.desc()))
+    result = await session.execute(
+        select(Report)
+        .where(Report.user_id == user_id, Report.status != "archived")
+        .order_by(Report.created_at.desc())
+    )
     return list(result.scalars())
+
+
+async def archive_report(session: AsyncSession, report: Report) -> Report:
+    report.status = "archived"
+    await session.commit()
+    await session.refresh(report)
+    return report
 
 
 async def create_report(session: AsyncSession, user: User, body: ReportCreate) -> Report:
@@ -35,6 +46,16 @@ async def list_versions(session: AsyncSession, report: Report) -> list[ReportVer
         select(ReportVersion).where(ReportVersion.report_id == report.id).order_by(ReportVersion.version_number.desc())
     )
     return list(result.scalars())
+
+
+async def get_latest_version(session: AsyncSession, report: Report) -> ReportVersion | None:
+    result = await session.execute(
+        select(ReportVersion)
+        .where(ReportVersion.report_id == report.id)
+        .order_by(ReportVersion.version_number.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_version(session: AsyncSession, report: Report, version_id: str) -> ReportVersion:

@@ -7,7 +7,7 @@ from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from engine.chat import ChatAgent, ChatAgentInput
-from engine.chat.effort import chat_output_budget, get_chat_effort_profile, reasoning_effort_for_model
+from engine.chat.effort import get_chat_effort_profile, provider_output_budget, reasoning_effort_for_model
 from engine.chat.freshness import requests_tool_use, requires_fresh_evidence
 from engine.chat.groq_planner import GroqChatToolPlanner
 from engine.chat.modal_tools import ModalToolExecutor
@@ -108,7 +108,12 @@ class ChatTerminalAgent:
             credential_id="terminal",
             model_id=session.model_id,
             temperature=session.temperature,
-            max_output_tokens=chat_output_budget(session.model_id, session.max_output_tokens),
+            max_output_tokens=provider_output_budget(
+                session.provider,
+                session.model_id,
+                session.max_output_tokens,
+                model_max_completion_tokens=session.model_max_completion_tokens,
+            ),
             reasoning_effort=reasoning_effort_for_model(session.model_id, session.effort),
         )
         provider = self._provider_override or provider_for(session.provider)

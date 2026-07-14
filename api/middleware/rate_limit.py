@@ -75,6 +75,24 @@ def action_for_request(request: Request) -> RateLimitAction | None:
     return None
 
 
+def identity_for_request(request: Request) -> str | None:
+    """Resolve a stable limiter key for header and bearer auth modes."""
+    header_user = request.headers.get("x-user-id")
+    if header_user:
+        return header_user
+    authorization = request.headers.get("authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        return None
+    from api.services.auth import decode_access_token
+
+    try:
+        return decode_access_token(authorization.split(" ", 1)[1].strip())
+    except Exception:
+        # The real auth dependency will return the authoritative 401/503. Do
+        # not replace it with a rate-limit response for an invalid token.
+        return None
+
+
 class ChatReportRateLimitMiddleware:
     """Enforce the chat/message/report creation limits for an identified user."""
 
@@ -103,7 +121,7 @@ class ChatReportRateLimitMiddleware:
 
         request = Request(scope)
         action = action_for_request(request)
-        user_id = request.headers.get("x-user-id")
+        user_id = identity_for_request(request)
         if action is None or not user_id:
             await self.app(scope, receive, send)
             return

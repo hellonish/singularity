@@ -117,7 +117,7 @@ export default function LandingPage() {
       </header>
 
       {/* ===== HERO ===== */}
-      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden' }}>
+      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <canvas ref={waveRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}></canvas>
         <div style={{ position: 'relative', zIndex: 1, maxWidth: 1080, margin: '0 auto', padding: 'clamp(56px,10vw,120px) clamp(20px,5vw,44px) clamp(40px,6vw,72px)', textAlign: 'center' }}>
           <div className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--text-faint)', border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 999, padding: '7px 15px', marginBottom: 30, animation: 'lp-rise .5s ease both' }}>

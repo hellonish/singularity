@@ -26,6 +26,45 @@ def test_credential_is_encrypted_and_never_returned(
     assert secret not in response.text
 
 
+def test_openrouter_credential_can_be_saved(
+    client: TestClient,
+    current_user: dict[str, str],
+) -> None:
+    response = client.post(
+        "/llm/credentials",
+        json={"provider": "openrouter", "api_key": "sk-or-test-not-a-real-key"},
+        headers=current_user,
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["provider"] == "openrouter"
+
+
+def test_selected_credential_is_persisted_per_user(
+    client: TestClient,
+    current_user: dict[str, str],
+) -> None:
+    credential = client.post(
+        "/llm/credentials",
+        json={"provider": "groq", "api_key": "gsk_test_selection"},
+        headers=current_user,
+    )
+    assert credential.status_code == 201, credential.text
+    credential_id = credential.json()["id"]
+
+    selected = client.put(
+        "/llm/selection",
+        json={"credential_id": credential_id},
+        headers=current_user,
+    )
+    assert selected.status_code == 200, selected.text
+    assert selected.json() == {"credential_id": credential_id}
+
+    assert client.get("/llm/selection", headers=current_user).json() == {
+        "credential_id": credential_id
+    }
+
+
 @pytest.mark.integration
 def test_live_groq_byok_credential_discovery_and_completion(
     client: TestClient,

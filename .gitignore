@@ -21,7 +21,10 @@ __pycache__/
 .env.*
 !.env.example
 *.db
+*.db-shm
+*.db-wal
 db.sqlite
+data/objects/
 
 # Git
 .git/

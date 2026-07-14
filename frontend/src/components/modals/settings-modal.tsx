@@ -3,30 +3,49 @@
 import { useState } from 'react';
 import { useAppStore, ACCENT_COLORS, Theme } from '@/store/app-store';
 import { PROVIDERS } from '@/lib/dummy-data';
+import { useWorkspace } from '@/components/workspace-provider';
+import { ProviderCredential } from '@/lib/api';
 
 type Provider = (typeof PROVIDERS)[number];
 
 function ProviderLogo({ p, size = 20 }: { p: Provider; size?: number }) {
+  // The logos are monochrome SVGs. An external SVG loaded via <img> can't be
+  // recolored by CSS, so we use it as a mask and paint it with the theme text
+  // color — black in light mode, white in dark mode.
   return (
     <span
-      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: size, height: size, flexShrink: 0, color: p.dot }}
-    >
-      {/* Pre-bundled monochrome brand mark from /public/logos; tinted via currentColor. */}
-      <img src={p.logo} alt="" width={size} height={size} style={{ width: size, height: size, objectFit: 'contain' }} />
-    </span>
+      role="img"
+      aria-label={p.name}
+      style={{
+        display: 'inline-block', width: size, height: size, flexShrink: 0,
+        backgroundColor: 'var(--text)',
+        WebkitMaskImage: `url(${p.logo})`,
+        maskImage: `url(${p.logo})`,
+        WebkitMaskRepeat: 'no-repeat',
+        maskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskPosition: 'center',
+        WebkitMaskSize: 'contain',
+        maskSize: 'contain',
+      }}
+    />
   );
 }
 
 // Custom provider picker: a dropdown listing every provider with its logo + name.
 // Selecting one opens that provider's setup panel below.
 function ProviderDropdown({
-  value, connectedIds, onSelect,
+  value, connectedIds, onSelect, forceOpen, highlight,
 }: {
   value: string | null;
   connectedIds: Set<string>;
   onSelect: (id: string) => void;
+  forceOpen?: boolean;         // onboarding can force the menu open
+  highlight?: string | null;   // onboarding can pre-highlight an option (hover-style)
 }) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = localOpen || !!forceOpen;
+  const setOpen = setLocalOpen;
   const selected = PROVIDERS.find((p) => p.id === value) || null;
 
   return (
@@ -66,6 +85,7 @@ function ProviderDropdown({
               stays interactive while the tour is highlighting this dropdown. */}
           <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 70 }} />
           <div
+            data-tour-popover
             className="animate-sg-pop"
             style={{
               position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 71,
@@ -75,6 +95,7 @@ function ProviderDropdown({
           >
             {PROVIDERS.map((p) => {
               const active = p.id === value;
+              const highlighted = p.id === highlight;
               return (
                 <button
                   key={p.id}
@@ -82,8 +103,10 @@ function ProviderDropdown({
                   onClick={() => { onSelect(p.id); setOpen(false); }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px',
-                    borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', textAlign: 'left',
-                    backgroundColor: active ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)',
+                    borderRadius: '10px', cursor: 'pointer', textAlign: 'left', color: 'var(--text)',
+                    border: highlighted ? '1px solid var(--accent)' : '1px solid transparent',
+                    backgroundColor: highlighted ? 'var(--accent-soft)' : active ? 'var(--accent-soft)' : 'transparent',
+                    transition: 'background-color .15s, border-color .15s',
                   }}
                 >
                   <ProviderLogo p={p} />
@@ -108,13 +131,17 @@ function ProviderDropdown({
 }
 
 export function SettingsModal() {
-  const { settingsOpen, setSettingsOpen, provider, setProvider, openProvider, setOpenProvider, theme, setTheme, accent, setAccent, activeSettingsTab, setActiveSettingsTab, obAdvance } = useAppStore();
-  const [keys, setKeys] = useState<Record<string, string>>({});
+  const { settingsOpen, setSettingsOpen, openProvider, setOpenProvider, theme, setTheme, accent, setAccent, activeSettingsTab, setActiveSettingsTab, obAdvance, forceProviderMenuOpen, providerHighlight } = useAppStore();
   const [currentKeys, setCurrentKeys] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const { credentials, activeCredential, selectCredential, saveCredential, disableCredential, clearError } = useWorkspace();
 
   if (!settingsOpen) return null;
 
   const detail = PROVIDERS.find((p) => p.id === openProvider) || null;
+  const detailCredential = detail
+    ? credentials.find((credential) => credential.provider === detail.id && credential.status === 'active')
+    : null;
 
   return (
     <div
@@ -167,8 +194,10 @@ export function SettingsModal() {
                 {/* Provider selector */}
                 <ProviderDropdown
                   value={openProvider}
-                  connectedIds={new Set(Object.keys(keys).filter((id) => keys[id]))}
+                  connectedIds={new Set(credentials.filter((credential) => credential.status === 'active').map((credential) => credential.provider))}
                   onSelect={(id) => { setOpenProvider(id); obAdvance('pickProvider'); }}
+                  forceOpen={forceProviderMenuOpen}
+                  highlight={providerHighlight}
                 />
 
                 {/* Selected provider detail */}
@@ -177,11 +206,22 @@ export function SettingsModal() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '6px' }}>
                       <ProviderLogo p={detail} size={22} />
                       <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 400 }}>{detail.name}</h3>
-                      {provider === detail.id ? (
+                      {activeCredential?.provider === detail.id ? (
                         <span className="sg-mono" style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', backgroundColor: 'var(--surface-3)', color: 'var(--text)' }}>Active</span>
-                      ) : (
-                        <button onClick={() => setProvider(detail.id)} style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', border: '1px solid var(--border)', backgroundColor: 'transparent', color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>Set Active</button>
-                      )}
+                      ) : detailCredential ? (
+                        <button
+                          disabled={saving}
+                          onClick={async () => {
+                          setSaving(true); clearError();
+                          try {
+                            await selectCredential(detailCredential.id);
+                          } catch {
+                            // The shared error dialog already contains the user-facing failure.
+                          } finally { setSaving(false); }
+                          }}
+                          style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', border: '1px solid var(--border)', backgroundColor: 'transparent', color: 'var(--text)', cursor: 'pointer', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}
+                        >Set Active</button>
+                      ) : null}
                     </div>
                     <p style={{ margin: '0 0 20px', fontSize: '15px', fontStyle: 'italic', color: 'var(--text-dim)', lineHeight: 1.5 }}>{detail.blurb}</p>
 
@@ -208,12 +248,38 @@ export function SettingsModal() {
                         style={{ flex: 1, height: '42px', padding: '0 13px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--surface)', color: 'var(--text)', borderRadius: '10px', fontSize: '13px', outline: 'none' }}
                       />
                       <button
-                        onClick={() => { setKeys((prev) => ({ ...prev, [detail.id]: currentKeys[detail.id] || '' })); setProvider(detail.id); obAdvance('saveKey'); }}
+                        disabled={saving || !currentKeys[detail.id]?.trim()}
+                        onClick={async () => {
+                          const apiKey = currentKeys[detail.id]?.trim();
+                          if (!apiKey) return;
+                          setSaving(true); clearError();
+                          try {
+                            await saveCredential(detail.id as ProviderCredential['provider'], apiKey);
+                            setCurrentKeys((prev) => ({ ...prev, [detail.id]: '' }));
+                            obAdvance('saveKey');
+                          } catch {
+                            // The shared error dialog already contains the user-facing failure.
+                          } finally { setSaving(false); }
+                        }}
                         style={{ height: '42px', padding: '0 18px', border: 'none', borderRadius: '10px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer' }}
                       >
-                        Save
+                        {saving ? 'Saving…' : 'Save'}
                       </button>
                     </div>
+                    {credentials.some((credential) => credential.provider === detail.id && credential.status === 'active') && (
+                      <button
+                        onClick={() => {
+                          const credential = activeCredential?.provider === detail.id
+                            ? activeCredential
+                            : detailCredential;
+                          if (credential) void disableCredential(credential.id).catch(() => undefined);
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', marginTop: '12px', height: '34px', padding: '0 13px', border: '1px solid var(--border)', borderRadius: '9px', backgroundColor: 'transparent', color: 'var(--color-danger)', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>
+                        Disable key
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div style={{ padding: '28px 20px', border: '1px dashed var(--border-strong)', borderRadius: '16px', textAlign: 'center', fontSize: '13.5px', color: 'var(--text-faint)' }}>

@@ -81,3 +81,25 @@ class RunCaps:
             answer_completion_tokens=answer_tokens,
             section_completion_tokens=section_tokens,
         )
+
+    @classmethod
+    def for_test(cls) -> "RunCaps":
+        """Minimal single-node profile for real-inference smoke testing.
+
+        One node, no QA cycles, and a single web_fetch, so a run makes exactly
+        one search and one fetch (with search variants also capped to 1 by the
+        resolver in test mode). Token budgets stay small to keep the real
+        provider spend low. The fixed per-node tool-call and QA-suggestion caps
+        are unchanged — this only shrinks the run, it does not relax invariants.
+        """
+        return cls(
+            qa_cycles=0,
+            max_nodes=1,
+            max_runtime_seconds=10 * 60,
+            llm_step_timeout_seconds=6 * 60,
+            max_evidence_per_node=3,
+            max_source_chars=12_000,
+            max_fetches=1,
+            answer_completion_tokens=1_200,
+            section_completion_tokens=2_000,
+        )

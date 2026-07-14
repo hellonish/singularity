@@ -9,25 +9,12 @@ from api.config import settings
 from api.models import Chat, User
 from api.schemas import LLMCompletionCreate
 from api.services.llm_credentials import get_credential
+from api.services.llm_errors import provider_error as _groq_error
+from engine.chat.effort import provider_output_budget
 from engine.llm import provider_for, resolve_request_config
+from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import GroqProviderError, GroqModel, LLMCompletion
 from engine.llm.structured import STRICT_STRUCTURED_OUTPUT_MODELS, StructuredOutputError, StructuredOutputSpec
-
-
-def _groq_error(exc: GroqProviderError) -> HTTPException:
-    headers = {"Retry-After": exc.retry_after_seconds} if exc.retry_after_seconds else None
-    http_status = (
-        status.HTTP_429_TOO_MANY_REQUESTS
-        if exc.code == "provider_rate_limited"
-        else status.HTTP_503_SERVICE_UNAVAILABLE
-        if exc.retryable
-        else status.HTTP_422_UNPROCESSABLE_CONTENT
-    )
-    return HTTPException(
-        status_code=http_status,
-        detail={"code": exc.code, "message": exc.message, "retryable": exc.retryable},
-        headers=headers,
-    )
 
 
 async def list_models(
@@ -92,11 +79,27 @@ async def complete(
     provider = provider_for(credential.provider)
     try:
         available_models = await provider.list_models(api_key=api_key)
-        if config.model_id not in {model.id for model in available_models}:
+        selected_model = next((m for m in available_models if m.id == config.model_id), None)
+        if selected_model is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Selected model is not available for this Groq credential",
             )
+        # Clamp the caller-requested budget to the provider/model limit, using the
+        # model's live ceiling when the catalog exposes it (else static fallback).
+        config = LLMRequestConfig(
+            provider=config.provider,
+            credential_id=config.credential_id,
+            model_id=config.model_id,
+            temperature=config.temperature,
+            max_output_tokens=provider_output_budget(
+                config.provider,
+                config.model_id,
+                config.max_output_tokens,
+                model_max_completion_tokens=selected_model.max_completion_tokens,
+            ),
+            reasoning_effort=config.reasoning_effort,
+        )
         completion = await provider.complete(
             api_key=api_key,
             config=config,

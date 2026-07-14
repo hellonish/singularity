@@ -22,6 +22,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
@@ -392,6 +393,46 @@ class ResearchRunEvent(IdMixin, Base):
     __table_args__ = (
         UniqueConstraint("run_id", "sequence", name="research_run_event_sequence"),
         Index("ix_research_run_events_run_sequence", "run_id", "sequence"),
+    )
+
+
+class UserWalkthrough(Base):
+    """One row per user per walkthrough version, granting at-most-once display.
+
+    The walkthrough UI/configuration lives in frontend code because selectors,
+    routes, and component IDs are tied to the deployed frontend. Only user
+    progress is persisted here. The composite primary key is what makes the
+    ``claim`` operation atomic: an ``INSERT ... ON CONFLICT DO NOTHING`` either
+    inserts the sole row (this caller wins the claim) or conflicts (someone —
+    another tab, device, or duplicated request — already claimed it).
+
+    Bumping ``version`` for a substantially changed walkthrough lets existing
+    users see the new one once without deleting old records.
+    """
+
+    __tablename__ = "user_walkthroughs"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    walkthrough_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="claimed")
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    dismissed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "walkthrough_key", "version", name="user_walkthrough"),
+        CheckConstraint(
+            "status IN ('claimed', 'completed', 'dismissed')", name="user_walkthrough_status"
+        ),
+        Index("ix_user_walkthroughs_user_status", "user_id", "status"),
     )
 
 

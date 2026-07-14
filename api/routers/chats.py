@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
 
 from api.dependencies import CurrentUserDep, SessionDep
-from api.config import settings
 from api.schemas import (
     ChatCreate,
     ChatRead,
@@ -18,7 +16,10 @@ from api.schemas import (
     MessageRead,
 )
 from api.services import chats as chat_service
+from api.services.chat_stream import build_stream, generate_chat_title
+from api.services.report_context_errors import ReportContextError
 from api.sse import SSE_HEADERS, encode_sse
+from engine.llm.groq import GroqProviderError
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -83,33 +84,111 @@ async def stream_message(
     session: SessionDep,
     current_user: CurrentUserDep,
 ) -> StreamingResponse:
-    """Stream a deterministic dummy reply through the backend SSE contract."""
+    """Stream a real engine chat reply through the backend SSE contract.
+
+    The user message is persisted, the engine ChatAgent streams live deltas,
+    and the assistant reply is persisted before the stream closes so
+    ``GET /chats/{id}/messages`` returns the full turn. Provider failures are
+    surfaced as a terminal ``message.error`` event rather than a torn stream.
+    """
 
     chat = await chat_service.get_chat(session, current_user.id, chat_id)
-    message = await chat_service.create_message(session, chat, body)
-    chunks = ("This is ", "a dummy streamed ", "chat response.")
+    user_message = await chat_service.create_message(session, chat, body)
+
+    # Resolve the credential and open the engine stream before returning a
+    # StreamingResponse. A missing credential raises HTTPException(422) here, so
+    # the caller receives a normal error response instead of an SSE stream.
+    #
+    # A report-linked chat also loads report context here. If the vector store
+    # is unavailable that raises ReportContextError: rather than answering
+    # without the report (which would be confidently wrong), we open the stream
+    # and emit a single terminal ``message.error`` with a generic load message,
+    # matching how downstream provider failures already surface.
+    try:
+        stream, config = await build_stream(session, chat, user_message)
+    except ReportContextError as exc:
+        # Bind the fields now: ``exc`` is unbound once this except block exits,
+        # and the generator below runs lazily inside the StreamingResponse.
+        error_payload = {
+            "message_id": user_message.id,
+            "code": exc.code,
+            "message": exc.message,
+            "retryable": exc.retryable,
+        }
+
+        async def context_error() -> AsyncIterator[str]:
+            yield encode_sse(
+                event="message.error",
+                event_id=f"{user_message.id}:1",
+                data=error_payload,
+            )
+
+        return StreamingResponse(context_error(), media_type="text/event-stream", headers=SSE_HEADERS)
 
     async def events() -> AsyncIterator[str]:
-        yield encode_sse(
-            event="message.accepted",
-            event_id=f"{message.id}:0",
-            data={"chat_id": chat.id, "message_id": message.id},
-        )
+        index = 0
         content = ""
-        for index, chunk in enumerate(chunks, start=1):
-            if settings.sse_dummy_delay_seconds:
-                await asyncio.sleep(settings.sse_dummy_delay_seconds)
-            content += chunk
+        try:
+            async for event in stream:
+                if event.type == "started":
+                    yield encode_sse(
+                        event="message.accepted",
+                        event_id=f"{user_message.id}:{index}",
+                        data={
+                            "chat_id": chat.id,
+                            "message_id": user_message.id,
+                            "model_id": event.model_id,
+                        },
+                    )
+                elif event.type == "delta":
+                    index += 1
+                    content += event.delta or ""
+                    yield encode_sse(
+                        event="message.delta",
+                        event_id=f"{user_message.id}:{index}",
+                        data={"message_id": user_message.id, "index": index - 1, "delta": event.delta or ""},
+                    )
+                elif event.type == "completed":
+                    index += 1
+                    final = event.content or content
+                    assistant = await chat_service.create_message(
+                        session,
+                        chat,
+                        MessageCreate(content=final, role="assistant", parent_message_id=user_message.id),
+                    )
+                    yield encode_sse(
+                        event="message.completed",
+                        event_id=f"{user_message.id}:{index}",
+                        data={
+                            "message_id": user_message.id,
+                            "assistant_message_id": assistant.id,
+                            "content": final,
+                        },
+                    )
+                    # First completed turn of an untitled chat: name it from the
+                    # exchange. generate_chat_title never raises (it falls back
+                    # to an excerpt of the user message), so a title problem can
+                    # never invalidate the already-delivered reply.
+                    if not chat.title:
+                        title = await generate_chat_title(session, chat, user_message.content, final)
+                        index += 1
+                        yield encode_sse(
+                            event="chat.title",
+                            event_id=f"{user_message.id}:{index}",
+                            data={"chat_id": chat.id, "title": title},
+                        )
+        except GroqProviderError as exc:
+            index += 1
             yield encode_sse(
-                event="message.delta",
-                event_id=f"{message.id}:{index}",
-                data={"message_id": message.id, "index": index - 1, "delta": chunk},
+                event="message.error",
+                event_id=f"{user_message.id}:{index}",
+                data={
+                    "message_id": user_message.id,
+                    "code": exc.code,
+                    "message": exc.message,
+                    "retryable": exc.retryable,
+                },
             )
-        yield encode_sse(
-            event="message.completed",
-            event_id=f"{message.id}:{len(chunks) + 1}",
-            data={"message_id": message.id, "content": content},
-        )
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
