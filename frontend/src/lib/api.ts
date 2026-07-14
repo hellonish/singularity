@@ -167,8 +167,20 @@ export const api = {
     request<Chat>('/chats', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   deleteChat: (chatId: string) => request<Chat>(`/chats/${chatId}`, { method: 'DELETE' }),
   listMessages: (chatId: string) => request<Message[]>(`/chats/${chatId}/messages`),
-  streamMessage: (chatId: string, content: string, onEvent: (event: SSEEvent) => void) =>
-    requestSSE(`/chats/${chatId}/messages/stream`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, role: 'user' }) }, onEvent),
+  streamMessage: (
+    chatId: string,
+    content: string,
+    effort: 'instant' | 'medium' | 'high' | 'ultra',
+    onEvent: (event: SSEEvent) => void,
+  ) => requestSSE(
+    `/chats/${chatId}/messages/stream`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, role: 'user', message_data: { effort } }),
+    },
+    onEvent,
+  ),
   listReports: () => request<Report[]>('/reports'),
   deleteReport: (reportId: string) => request<Report>(`/reports/${reportId}`, { method: 'DELETE' }),
   getReportContent: async (reportId: string) => {

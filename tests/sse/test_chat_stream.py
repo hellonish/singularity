@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from engine.llm.groq import GroqModel, GroqProviderError, LLMCompletion
+from engine.chat.models import ChatStreamEvent
 from tests.sse.helpers import parse_sse
 
 
@@ -57,6 +58,9 @@ def test_chat_stream_emits_real_engine_events_and_persists_the_reply(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Pin tools off: this test covers the pure conversational stream shape,
+    # and .env (loaded by conftest) may enable Modal for the whole run.
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id = _make_chat_with_credential(client, current_user)
     provider = _FakeProvider(["Diffusion ", "transformers ", "explained."])
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: provider)
@@ -88,6 +92,43 @@ def test_chat_stream_emits_real_engine_events_and_persists_the_reply(
         ("user", "Explain diffusion transformers"),
         ("assistant", "Diffusion transformers explained."),
     ]
+
+
+def test_hosted_chat_stream_forwards_shared_runtime_progress(
+    client: TestClient,
+    current_user: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chat_id = _make_chat_with_credential(client, current_user)
+
+    class Runtime:
+        def __init__(self, *, provider):
+            pass
+
+        async def stream(self, request, **kwargs):
+            yield ChatStreamEvent(
+                type="progress",
+                model_id="model",
+                progress_kind="agent_budget",
+                message="selected 4 of 4 agent steps",
+            )
+            yield ChatStreamEvent(type="started", model_id="model")
+            yield ChatStreamEvent(type="delta", model_id="model", delta="grounded")
+            yield ChatStreamEvent(type="completed", model_id="model", content="grounded")
+
+    monkeypatch.setattr("api.services.chat_stream.ChatRuntime", Runtime)
+    monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FakeProvider([]))
+
+    with client.stream(
+        "POST",
+        f"/chats/{chat_id}/messages/stream",
+        json={"content": "Find current sources"},
+        headers=current_user,
+    ) as response:
+        events = parse_sse(response.read().decode())
+
+    assert [event["event"] for event in events][:2] == ["message.progress", "message.accepted"]
+    assert events[0]["data"]["kind"] == "agent_budget"
 
 
 def _make_untitled_chat_with_credential(client: TestClient, headers: dict[str, str]) -> str:
@@ -195,6 +236,30 @@ def test_chat_stream_without_credential_returns_422(
         headers=current_user,
     )
     assert response.status_code == 422, response.text
+
+
+def test_live_request_fails_closed_when_hosted_tools_are_disabled(
+    client: TestClient,
+    current_user: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missed deployment flag must never degrade a live request to model-only chat."""
+    chat_id = _make_chat_with_credential(client, current_user)
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
+    monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FakeProvider(["unsupported"]))
+
+    with client.stream(
+        "POST",
+        f"/chats/{chat_id}/messages/stream",
+        json={"content": "Can you find me Job Postings in past 7 days for New Grad SWE?"},
+        headers=current_user,
+    ) as response:
+        assert response.status_code == 200, response.text
+        events = parse_sse(response.read().decode())
+
+    assert events[-1]["event"] == "message.error"
+    assert events[-1]["data"]["code"] == "tool_evidence_unavailable"
+    assert "Modal tools are disabled" in events[-1]["data"]["message"]
 
 
 def test_chat_stream_surfaces_provider_error_as_terminal_event(

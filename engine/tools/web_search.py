@@ -5,6 +5,7 @@ import asyncio
 import os
 
 from .base import ToolBase, ToolResult
+from engine.chat.retry import PermanentActionError
 
 _TRUSTED = (".gov", ".edu", ".gov.uk", ".gov.au", ".gc.ca", ".europa.eu")
 
@@ -30,16 +31,39 @@ class WebSearchTool(ToolBase):
     description = "Search the public web and return result titles, URLs, dates, and snippets."
     skill_ids = ("general_web_research", "source_discovery")
 
-    async def call(self, query: str, max_results: int = 10, **kwargs) -> ToolResult:
-        try:
-            raw = await asyncio.to_thread(_duckduckgo, query, max_results)
-        except Exception as primary_error:
+    def __init__(self) -> None:
+        # A ToolBase retry reuses the same instance. Once DDGS fails or returns
+        # nothing, every later attempt in this logical action is Tavily-only.
+        self._ddgs_disabled = False
+
+    @property
+    def search_backend(self) -> str:
+        return "tavily" if self._ddgs_disabled else "ddgs"
+
+    async def call(
+        self,
+        query: str,
+        max_results: int = 10,
+        search_backend: str = "auto",
+        **kwargs,
+    ) -> ToolResult:
+        backend = "tavily" if search_backend == "tavily" or self._ddgs_disabled else "ddgs"
+        raw: list[dict]
+        if backend == "ddgs":
+            try:
+                raw = await asyncio.to_thread(_duckduckgo, query, max_results)
+            except Exception:
+                raw = []
+            if not raw:
+                self._ddgs_disabled = True
+                backend = "tavily"
+        if backend == "tavily":
             api_key = os.getenv("TAVILY_API_KEY")
             if not api_key:
-                raise primary_error
+                raise PermanentActionError("Tavily fallback is unavailable because TAVILY_API_KEY is not configured")
             raw = await asyncio.to_thread(_tavily, query, max_results, api_key)
         if not raw:
-            raise ValueError("No search results returned")
+            raise RuntimeError(f"No search results returned by {backend}")
         sources = []
         for item in raw[:max_results]:
             url = item.get("href") or item.get("url", "")
@@ -49,6 +73,7 @@ class WebSearchTool(ToolBase):
                 "snippet": (item.get("body") or item.get("content", ""))[:500],
                 "date": item.get("published") or item.get("date"),
                 "source_type": "web_search",
+                "search_provider": backend,
                 "credibility_base": _credibility(url),
             })
         content = "\n\n".join(

@@ -11,10 +11,10 @@ export const PROVIDERS = [
 ];
 
 export const INTENSITIES = [
-  { id: 'instant', name: 'Instant', bars: 1, desc: 'One quick pass — seconds.' },
-  { id: 'medium', name: 'Medium', bars: 2, desc: 'Balanced multi-source — ~2 min.' },
-  { id: 'high', name: 'High', bars: 3, desc: 'Deep retrieval — ~6 min.' },
-  { id: 'ultra', name: 'Ultra', bars: 4, desc: 'Exhaustive synthesis — ~15 min.' },
+  { id: 'instant', name: 'Instant', bars: 1, desc: 'Up to 4 steps · 2-way tool bursts.' },
+  { id: 'medium', name: 'Medium', bars: 2, desc: 'Up to 10 steps · planned and verified.' },
+  { id: 'high', name: 'High', bars: 3, desc: 'Up to 18 steps · deep validation.' },
+  { id: 'ultra', name: 'Ultra', bars: 4, desc: 'Up to 30 steps · exhaustive checks.' },
 ];
 
 // The user drives each step by interacting with the real UI (clicking Settings,

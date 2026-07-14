@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api import __version__
 from api.config import settings
 from api.database import create_schema, engine
+from api.logging_config import configure_logging
 from api.middleware.rate_limit import ChatReportRateLimitMiddleware
 from api.routers import auth, chats, llm, reports, research, storage, users, walkthroughs
 from api.schemas import HealthRead
@@ -15,6 +16,7 @@ from api.schemas import HealthRead
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    configure_logging()
     if settings.auto_create_schema:
         await create_schema()
     yield

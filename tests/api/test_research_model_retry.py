@@ -79,6 +79,31 @@ def test_non_retryable_failure_is_not_retried() -> None:
     assert calls == [1]
 
 
+def test_deep_strength_sets_high_reasoning_on_structured_completion() -> None:
+    captured: list = []
+
+    class CapturingProvider:
+        async def complete(self, *, config, **kwargs):
+            captured.append(config)
+            return type("Completion", (), {"content": '{"ok":true}'})()
+
+    model = ProviderResearchModel(
+        provider_name="groq",
+        api_key="gsk_test",
+        user_id="user-1",
+        credential_id="cred-1",
+        model_id="openai/gpt-oss-20b",
+        caps=RunCaps.for_strength(3),
+        strength=3,
+    )
+    model._provider = CapturingProvider()
+
+    content = asyncio.run(model.complete("Return JSON only", max_output_tokens=1_200))
+
+    assert content == '{"ok":true}'  # structured JSON still parses at high effort
+    assert captured[0].reasoning_effort == "high"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

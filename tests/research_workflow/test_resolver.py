@@ -116,17 +116,94 @@ def test_test_mode_does_not_reformulate_an_empty_search():
     assert result["answered"] is False
 
 
-def test_resolver_rejects_non_four_budget():
+def test_resolver_rejects_out_of_range_budget():
     async def answerer(node, evidence):
         return {"answer": "answer"}
 
-    with pytest.raises(ValueError, match="four-call"):
-        asyncio.run(
-            BoundedResearchResolver(FakeExecutor(), answerer)(
-                ResearchNode(node_id="n1", question="question", section_id="s1", level=0),
-                3,
+    for bad_budget in (0, 9):
+        with pytest.raises(ValueError, match="between 1 and"):
+            asyncio.run(
+                BoundedResearchResolver(FakeExecutor(), answerer)(
+                    ResearchNode(node_id="n1", question="question", section_id="s1", level=0),
+                    bad_budget,
+                )
             )
+
+
+def test_resolver_routes_domain_questions_to_specialized_tools():
+    """A medical question dispatches pubmed/clinicaltrials before web search."""
+
+    class RoutingExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, invocation):
+            self.calls.append(invocation.tool_name)
+            return SimpleNamespace(
+                content=f"{invocation.tool_name} body",
+                sources=[{
+                    "title": invocation.tool_name,
+                    "url": f"https://{invocation.tool_name}.example",
+                    "snippet": "snippet",
+                    "source_type": invocation.tool_name,
+                }],
+            )
+
+    executor = RoutingExecutor()
+
+    async def answerer(node, evidence):
+        return {"answer": "answer", "answered": True}
+
+    question = "latest clinical trial results for a new drug treating this disease (pubmed)"
+    result = asyncio.run(
+        BoundedResearchResolver(executor, answerer)(
+            ResearchNode(node_id="n1", question=question, section_id="s1", level=0),
+            5,
         )
+    )
+    # Domain discovery tools run first, then the general web pass and a fetch.
+    assert executor.calls[0] == "pubmed"
+    assert "clinicaltrials" in executor.calls
+    assert "web_search" in executor.calls
+    assert result["answered"] is True
+
+
+def test_resolver_falls_back_to_web_when_domain_tool_errors():
+    """A domain tool that returns an error is a soft failure; web still answers."""
+
+    class DomainFailsExecutor:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, invocation):
+            self.calls.append(invocation.tool_name)
+            if invocation.tool_name in {"pubmed", "clinicaltrials"}:
+                return SimpleNamespace(content="", sources=[], error="upstream 503")
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(
+                    content="search result",
+                    sources=[{"title": "One", "url": "https://one.example", "snippet": "one"}],
+                )
+            return SimpleNamespace(
+                content="page text",
+                sources=[{"title": "Fetched", "url": invocation.arguments["url"], "snippet": "page"}],
+            )
+
+    executor = DomainFailsExecutor()
+
+    async def answerer(node, evidence):
+        return {"answer": "answer", "answered": True}
+
+    question = "clinical trial drug disease pubmed evidence"
+    result = asyncio.run(
+        BoundedResearchResolver(executor, answerer)(
+            ResearchNode(node_id="n1", question=question, section_id="s1", level=0),
+            5,
+        )
+    )
+    assert "web_search" in executor.calls
+    assert result["answered"] is True
+    assert all(str(item["url"]).startswith("https://one") for item in result["evidence"])
 
 
 def test_resolver_accepts_a_synchronous_progress_renderer():

@@ -2,8 +2,8 @@ from io import StringIO
 
 from rich.console import Console
 
-from engine.cli.agents import ChatTerminalAgent
 from engine.chat.modal_tools import ChatToolResult
+from engine.chat.runtime import format_tool_context
 from engine.chat.tool_loop import ExecutedToolCall
 from engine.cli.ui import TerminalUI, _highlighted_value
 from prompt_toolkit.widgets import RadioList
@@ -84,9 +84,23 @@ def test_tool_context_includes_bounded_source_references() -> None:
         ),
     )
 
-    context = ChatTerminalAgent._tool_context(calls, max_citations=1)
+    context = format_tool_context(calls, max_citations=1)
 
     assert "Study result" in context
     assert "Study A" in context
     assert "Study B" not in context
     assert "credibility=0.9" in context
+
+
+def test_tool_lifecycle_shows_the_actual_validated_call() -> None:
+    ui, console = _ui()
+
+    ui.render_lifecycle(
+        kind="tool_completed",
+        content='web_search(query="new grad SWE", arguments={"max_results": 8}) — 8 source(s)',
+        elapsed_seconds=0.4,
+    )
+
+    rendered = console.export_text()
+    assert "web_search(query" in rendered
+    assert "8 source(s)" in " ".join(rendered.split())

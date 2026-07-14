@@ -152,8 +152,8 @@ class SingularityAPIClient:
         response = await self._request_device_session(device_token)
         if response.status_code in {400, 404, 405}:
             raise SingularityAPIError(
-                "The hosted API is not running the CLI-compatible auth/routes yet. "
-                "Deploy this checkout's API, or relaunch with SINGULARITY_CLI_BACKEND=local.",
+                "The API backend is not running the CLI-compatible auth/routes. "
+                "Use the default local backend. Deploy this checkout's API to use hosted mode.",
                 status_code=response.status_code,
                 code="api_cli_incompatible",
             )

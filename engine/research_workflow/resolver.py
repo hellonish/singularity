@@ -1,14 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from inspect import isawaitable
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from engine.chat.effort import ChatEffort
-from engine.tools.contracts import ChatToolInvocation
+from engine.chat.skill_router import select_skills
+from engine.tools import TOOL_REGISTRY
+from engine.tools.contracts import TOOL_ARGUMENT_MODELS, ChatToolInvocation
 
+# Discovery tools whose argument model has no required field beyond the standard
+# free-text ``query`` — these can be dispatched by a deterministic router. Tools
+# with a required argument (e.g. web_fetch needs ``url``) are excluded.
+TOOL_ARGUMENT_QUERY_TOOLS = frozenset(
+    tool_name
+    for tool_name, model in TOOL_ARGUMENT_MODELS.items()
+    if not any(field.is_required() for field in model.model_fields.values())
+)
+
+from .caps import RunCaps
 from .dag import ResearchNode
 from .runtime import ResearchInfrastructureError
 
@@ -17,9 +30,73 @@ Answerer = Callable[[ResearchNode, list[dict[str, Any]]], Awaitable[dict[str, An
 
 # How many times a single Modal dispatch is retried on an infrastructure-level
 # error (channel drop, timeout, remote raise) before we treat the backend as
-# down. These retries are transparent to the four-call research budget: they
+# down. These retries are transparent to the per-node research budget: they
 # re-attempt the *same* logical call rather than spending a new one.
 _MODAL_DISPATCH_ATTEMPTS = 3
+
+# Discovery tools are trusted-function search tools that take a free-text
+# ``query`` and return sources. A node routes to at most this many domain tools
+# (beyond the general web search) so its call budget still leaves room to fetch.
+_MAX_DOMAIN_DISCOVERY_TOOLS = 2
+
+# Web tools are the general-purpose fallback that always applies. Everything
+# else surfaced by the skill router is a domain-specific discovery tool the node
+# should prefer when the question matches (pubmed, sec_edgar, arxiv, …).
+_GENERAL_WEB_TOOLS = {"web_search", "web_fetch", "browser_render"}
+# Redact credential-like tokens from tool output before it reaches an LLM
+# prompt, mirroring the chat tool loop's ``_redact_result``.
+_CREDENTIAL_PATTERN = re.compile(
+    r"(?i)(api[_-]?key|apikey|token|authorization)(=|:|%3d)\s*([^&\s'\"]+)"
+)
+
+
+def domain_discovery_tools(question: str, *, limit: int = _MAX_DOMAIN_DISCOVERY_TOOLS) -> list[tuple[str, str]]:
+    """Deterministically route a node question to domain discovery tools.
+
+    Reuses the chat skill router (``select_skills``) to shortlist skills, then
+    keeps their registered *discovery* tools — trusted-function search tools that
+    take a free-text query — excluding the general web tools (which always run as
+    the fallback). Returns ``(skill_id, tool_name)`` pairs in shortlist order.
+    """
+    selected = select_skills(question)
+    routed: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for skill_id in selected.ids:
+        from engine.skills import SKILL_REGISTRY
+
+        try:
+            tools = SKILL_REGISTRY.get(skill_id).config.tools
+        except KeyError:
+            continue
+        for tool_name in tools:
+            if tool_name in _GENERAL_WEB_TOOLS or tool_name in seen:
+                continue
+            try:
+                descriptor = TOOL_REGISTRY.descriptor(tool_name)
+            except KeyError:
+                continue
+            # Only trusted-function search tools take a free-text query; sandbox
+            # tools (code_execution, dataset_analysis) need structured inputs a
+            # deterministic router cannot synthesise, so skip them here.
+            if descriptor.execution_kind != "trusted_function":
+                continue
+            if tool_name not in TOOL_ARGUMENT_QUERY_TOOLS:
+                continue
+            seen.add(tool_name)
+            routed.append((skill_id, tool_name))
+            if len(routed) >= limit:
+                return routed
+    return routed
+
+
+def _redact(value: Any) -> Any:
+    if isinstance(value, str):
+        return _CREDENTIAL_PATTERN.sub(r"\1\2[REDACTED]", value)
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items()}
+    return value
 
 
 class BoundedResearchResolver:
@@ -34,7 +111,7 @@ class BoundedResearchResolver:
         self.executor = executor
         self.answerer = answerer
         self.timeout_seconds = timeout_seconds
-        self.max_fetches = max(0, min(max_fetches, 2))
+        self.max_fetches = max(0, min(max_fetches, RunCaps.MAX_FETCHES_CEILING))
         # How many reformulation attempts web_search may make. Production uses
         # the full set; test mode sets this to 1 so a run makes exactly one
         # real search call.
@@ -48,13 +125,15 @@ class BoundedResearchResolver:
                 await result
 
     async def __call__(self, node: ResearchNode, max_tool_calls: int = 4) -> dict[str, Any]:
-        if max_tool_calls != 4:
-            raise ValueError("research node resolver requires a four-call budget")
+        if not 1 <= max_tool_calls <= RunCaps.MAX_TOOL_CALLS_CEILING:
+            raise ValueError(
+                f"research node resolver budget must be between 1 and {RunCaps.MAX_TOOL_CALLS_CEILING}"
+            )
         calls = 0
         evidence: list[dict[str, Any]] = []
         await self._progress(phase="researching", status="node_started", message=f"Researching: {node.question}", node_id=node.node_id)
 
-        async def invoke(tool_name: str, query: str, arguments: dict[str, Any]) -> Any:
+        async def invoke(tool_name: str, query: str, arguments: dict[str, Any], *, skill_id: str = "general_web_research") -> Any:
             """Dispatch one logical tool call, retrying transparently on
             infrastructure errors. Consumes exactly one unit of the research
             budget regardless of how many Modal-level retries it takes.
@@ -70,7 +149,7 @@ class BoundedResearchResolver:
             calls += 1
             invocation = ChatToolInvocation(
                 run_id=f"research-node:{node.node_id}",
-                skill_id="general_web_research",
+                skill_id=skill_id,
                 tool_name=tool_name,
                 query=query,
                 arguments=arguments,
@@ -140,13 +219,52 @@ class BoundedResearchResolver:
                     )
             return last_result
 
-        search = await search_with_adaptation()
+        async def route_domain_tools() -> list[dict[str, Any]]:
+            """Dispatch the node's shortlisted domain discovery tools.
+
+            Reserves at least one call for the general web fallback and one for a
+            fetch, so domain routing never starves the guaranteed web pass. A
+            domain tool that errors or returns nothing is a soft failure: we skip
+            it and fall through to web search. Only a full-backend outage
+            (ResearchInfrastructureError) is fatal, and that is raised by invoke.
+            """
+            collected: list[dict[str, Any]] = []
+            reserve = 2  # one web_search + one fetch remain available
+            for skill_id, tool_name in domain_discovery_tools(node.question):
+                if calls >= max_tool_calls - reserve:
+                    break
+                await self._progress(
+                    phase="researching", status="tool_routed",
+                    message=f"Routing to domain tool {tool_name}",
+                    node_id=node.node_id, tool_name=tool_name,
+                )
+                result = await invoke(tool_name, node.question, {"max_results": 8}, skill_id=skill_id)
+                if getattr(result, "error", None):
+                    continue
+                records = _evidence_from_result(result, node.question)
+                if records:
+                    collected.extend(records)
+            return collected
+
+        evidence.extend(await route_domain_tools())
+
+        search = await search_with_adaptation() if calls < max_tool_calls else None
         sources = list(getattr(search, "sources", []) or []) if search is not None else []
         if search is not None:
             evidence.extend(_evidence_from_result(search, node.question))
 
-        urls = [str(source.get("url", "")) for source in sources if source.get("url")]
-        urls = list(dict.fromkeys(urls))[:self.max_fetches]
+        # Fetch the most promising URLs from every discovery source (domain +
+        # web), deduplicated, up to the fetch budget.
+        candidate_urls = [
+            str(item.get("url", ""))
+            for item in evidence
+            if str(item.get("url", "")).startswith(("https://", "http://"))
+        ]
+        candidate_urls += [str(source.get("url", "")) for source in sources if source.get("url")]
+        # Never request more fetches than the fetch budget or the remaining
+        # call budget allows; invoke() raises once the call cap is reached.
+        fetch_budget = max(0, min(self.max_fetches, max_tool_calls - calls))
+        urls = list(dict.fromkeys(candidate_urls))[:fetch_budget]
         if urls:
             fetched = await asyncio.gather(
                 *(invoke("web_fetch", node.question, {"url": url, "max_characters": 50_000}) for url in urls),
@@ -172,9 +290,11 @@ class BoundedResearchResolver:
 
         # A research answer is only useful to the writer when it has a
         # citable, extracted source.  Do not turn an empty search result into
-        # a plausible-but-unsupported synthetic answer.
+        # a plausible-but-unsupported synthetic answer. Redact credential-like
+        # tokens from tool output before it reaches an LLM prompt.
         evidence = [
-            item for item in evidence
+            _redact(item)
+            for item in evidence
             if str(item.get("content", "")).strip()
             and str(item.get("url", "")).startswith(("https://", "http://"))
         ]

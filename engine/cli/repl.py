@@ -32,7 +32,10 @@ class EngineREPL:
         self._settings_store = settings_store or GlobalTerminalSettingsStore()
         self._provider_factory = provider_factory
         self._api_client = api_client or SingularityAPIClient(self._settings_store)
-        self._use_hosted_api = os.getenv("SINGULARITY_CLI_BACKEND", "api").lower() != "local"
+        # This checkout is a direct terminal runtime by default.  An API
+        # backend is opt-in because a local .env (including Modal settings)
+        # must never be silently ignored.
+        self._use_hosted_api = os.getenv("SINGULARITY_CLI_BACKEND", "local").lower() == "api"
         self._api_chat_id: str | None = None
         self._agents: dict[str, object] = {}
         if not self._use_hosted_api:
@@ -179,7 +182,7 @@ class EngineREPL:
         self.ui.answer(report)
 
     async def _research_local(self, query: str) -> None:
-        """Developer-only direct path retained behind SINGULARITY_CLI_BACKEND=local."""
+        """Run the direct local research path."""
         from engine.research_workflow.runner import run_research
 
         self.ui.start_status("Running local bounded LangGraph research…")
@@ -229,6 +232,7 @@ class EngineREPL:
         return False
 
     async def _choose_model(self) -> None:
+        from engine.chat.model_capabilities import MODEL_CAPABILITIES
         if not self._require_key():
             return
         use_direct_provider = not self._use_hosted_api or self._provider_factory is not None
@@ -240,14 +244,21 @@ class EngineREPL:
         try:
             if provider is not None:
                 models = await provider.list_models(api_key=self.session.api_key)
-                model_ids = [model.id for model in models]
+                MODEL_CAPABILITIES.remember_available(
+                    f"local:{self.session.provider}", self.session.provider, models
+                )
+                # Only offer models that support structured outputs: every
+                # research stage and the API's strict-output path depend on it.
+                model_ids = [model.id for model in models if model.supports_research]
             else:
                 remote_models = await self._api_client.list_models(
                     provider=self.session.provider,
                     api_key=self.session.api_key,
                     model_id=self.session.model_id,
                 )
-                model_ids = [str(model["id"]) for model in remote_models]
+                model_ids = [
+                    str(model["id"]) for model in remote_models if model.get("supports_research")
+                ]
         except Exception as exc:
             self.ui.stop_status()
             self.ui.error(f"Could not load models: {getattr(exc, 'message', str(exc))}")
@@ -275,6 +286,8 @@ class EngineREPL:
                 return
             self.session.model_id = model.id
             self.session.model_max_completion_tokens = model.max_completion_tokens
+            if model.context_window and model.max_completion_tokens:
+                MODEL_CAPABILITIES.remember(self.session.provider, model)
         else:
             self.session.model_id = selected
             self.session.model_max_completion_tokens = None
@@ -318,8 +331,9 @@ class EngineREPL:
             values=[
                 (
                     profile.effort,
-                    f"{profile.effort.value.title():7}  {profile.max_agent_tool_steps} step(s) · "
-                    f"{profile.max_output_tokens:,} output tokens · {profile.timeout_seconds}s",
+                    f"{profile.effort.value.title():7}  {profile.max_agent_tool_steps} steps · "
+                    f"{profile.max_tool_actions} actions · {profile.max_parallel_actions} parallel · "
+                    f"{profile.max_output_tokens:,} output tokens",
                 )
                 for profile in profiles
             ],
@@ -332,7 +346,8 @@ class EngineREPL:
         profile = get_chat_effort_profile(self.session.effort)
         self.ui.info(
             f"Effort selected: {self.session.effort} "
-            f"(output={profile.max_output_tokens:,}, timeout={profile.timeout_seconds}s)"
+            f"(steps={profile.max_agent_tool_steps}, actions={profile.max_tool_actions}, "
+            f"parallel={profile.max_parallel_actions}, output={profile.max_output_tokens:,})"
         )
 
     async def _choose_research_depth(self) -> None:
@@ -502,6 +517,16 @@ class EngineREPL:
             ):
                 if event.event == "message.accepted":
                     self.ui.render_lifecycle(kind="model_started", content="")
+                elif event.event == "message.progress":
+                    self.ui.render_lifecycle(
+                        kind=str(event.data.get("kind") or "metadata"),
+                        content=str(event.data.get("message") or ""),
+                        elapsed_seconds=(
+                            float(event.data["elapsed_seconds"])
+                            if event.data.get("elapsed_seconds") is not None
+                            else None
+                        ),
+                    )
                 elif event.event == "message.delta":
                     delta = str(event.data.get("delta") or "")
                     if delta:

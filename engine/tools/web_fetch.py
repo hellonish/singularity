@@ -1,6 +1,7 @@
 """Guarded webpage download and main-text extraction."""
 from __future__ import annotations
 
+import asyncio
 from urllib.parse import urljoin
 
 import aiohttp
@@ -115,7 +116,12 @@ class WebFetchTool(ToolBase):
     description = "Download one public webpage and extract its main text and publication metadata."
     skill_ids = ("general_web_research", "source_extraction", "citation_verification")
 
+    def __init__(self) -> None:
+        self._browser_only = False
+
     async def call(self, query: str, url: str, max_characters: int = 50_000, **kwargs) -> ToolResult:
+        if self._browser_only:
+            return await self._render_fallback(query, url, max_characters)
         try:
             html, final_url, content_type = await _download(url)
         except aiohttp.ClientResponseError as exc:
@@ -125,8 +131,16 @@ class WebFetchTool(ToolBase):
             # back to a real headless browser before giving up the source.
             if exc.status not in {403, 429, 451}:
                 raise
+            self._browser_only = True
             return await self._render_fallback(query, url, max_characters)
-        text, metadata = _extract(html, final_url, max_characters)
+        except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+            self._browser_only = True
+            return await self._render_fallback(query, url, max_characters)
+        try:
+            text, metadata = _extract(html, final_url, max_characters)
+        except ValueError:
+            self._browser_only = True
+            return await self._render_fallback(query, final_url, max_characters)
         metadata["content_type"] = content_type
         source = {
             "title": metadata["title"] or final_url,

@@ -10,6 +10,8 @@ import ssl
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
 
+from engine.chat.retry import RetryPolicy, is_retryable_exception
+
 
 ExecutionKind = Literal["trusted_function", "sandbox", "api_only"]
 
@@ -56,6 +58,7 @@ class ToolBase:
     description: str = ""
     skill_ids: ClassVar[tuple[str, ...]] = ()
     execution_kind: ClassVar[ExecutionKind] = "trusted_function"
+    retry_policy: ClassVar[RetryPolicy] = RetryPolicy(max_retries=2)
 
     async def call(self, query: str, **kwargs) -> ToolResult:
         """Single attempt — raises on error. Override this."""
@@ -74,7 +77,13 @@ class ToolBase:
         Each attempt is bounded by `timeout` seconds (default 60s).
         """
         last_error = ""
-        for attempt in range(max_retries + 1):
+        policy = RetryPolicy(
+            max_retries=max_retries,
+            base_delay_seconds=self.retry_policy.base_delay_seconds,
+            max_delay_seconds=self.retry_policy.max_delay_seconds,
+            jitter_ratio=self.retry_policy.jitter_ratio,
+        )
+        for attempt in range(policy.max_retries + 1):
             try:
                 return await asyncio.wait_for(
                     self.call(query, **kwargs),
@@ -82,13 +91,14 @@ class ToolBase:
                 )
             except asyncio.TimeoutError:
                 last_error = f"timed out after {timeout}s"
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
+                if attempt < policy.max_retries:
+                    await asyncio.sleep(policy.delay(attempt))
             except Exception as exc:
                 last_error = str(exc)
-                if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
+                if attempt >= policy.max_retries or not is_retryable_exception(exc):
+                    break
+                await asyncio.sleep(policy.delay(attempt))
 
         return ToolResult.failure(
-            f"[{self.name}] failed after {max_retries + 1} attempt(s): {last_error}"
+            f"[{self.name}] failed after at most {policy.max_retries + 1} attempt(s): {last_error}"
         )

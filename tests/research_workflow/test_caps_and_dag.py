@@ -12,11 +12,32 @@ def node(node_id: str, *, section: str = "s1", depends_on=None, level=0):
     )
 
 
-def test_caps_are_fixed_and_strength_only_changes_run_budget():
-    caps = RunCaps.for_strength(3)
-    assert caps.max_qa_suggestions_per_section == 2
-    assert caps.max_tool_calls_per_node == 4
-    assert RunCaps.for_strength(3).max_tool_calls_per_node == 4
+def test_qa_suggestion_cap_is_fixed_while_depth_scales_with_strength():
+    # QA suggestions stay fixed (a coverage knob), but the per-node tool-call
+    # and fetch budgets grow with strength (depth knobs), bounded by ceilings.
+    assert RunCaps.for_strength(1).max_qa_suggestions_per_section == 2
+    assert RunCaps.for_strength(3).max_qa_suggestions_per_section == 2
+
+    tool_calls = [RunCaps.for_strength(s).max_tool_calls_per_node for s in (1, 2, 3)]
+    fetches = [RunCaps.for_strength(s).max_fetches for s in (1, 2, 3)]
+    assert tool_calls == sorted(tool_calls) and tool_calls[0] < tool_calls[-1]
+    assert fetches == sorted(fetches) and fetches[0] < fetches[-1]
+    assert tool_calls[-1] <= RunCaps.MAX_TOOL_CALLS_CEILING
+    assert fetches[-1] <= RunCaps.MAX_FETCHES_CEILING
+    # Every tier must leave a search call after its fetch budget.
+    assert all(
+        RunCaps.for_strength(s).max_fetches <= RunCaps.for_strength(s).max_tool_calls_per_node - 1
+        for s in (1, 2, 3)
+    )
+
+
+def test_content_budgets_grow_with_strength():
+    quick = RunCaps.for_strength(1)
+    deep = RunCaps.for_strength(3)
+    assert deep.max_nodes > quick.max_nodes
+    assert deep.section_completion_tokens > quick.section_completion_tokens
+    assert deep.subsection_completion_tokens > quick.subsection_completion_tokens
+    assert deep.max_source_chars > quick.max_source_chars
 
 
 def test_quick_research_keeps_a_bounded_decomposition_and_skips_qa():

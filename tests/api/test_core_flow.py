@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from api.config import settings
 from api.routers import research as research_router
 from engine.llm.groq import GroqProvider
+from engine.research_workflow.caps import RunCaps
 
 
 def _stub_tier_probe(monkeypatch, tier: str) -> None:
@@ -78,7 +79,8 @@ def test_research_run_persists_caps_and_queued_event(client: TestClient, current
     payload = response.json()
     assert payload["status"] == "queued"
     assert payload["run_data"]["caps"]["max_qa_suggestions_per_section"] == 2
-    assert payload["run_data"]["caps"]["max_tool_calls_per_node"] == 4
+    # Standard research (strength 2) now gets a strength-scaled per-node budget.
+    assert payload["run_data"]["caps"]["max_tool_calls_per_node"] == RunCaps.for_strength(2).max_tool_calls_per_node
 
     cancelled = client.post(f"/research/runs/{payload['id']}/cancel", headers=current_user)
     assert cancelled.status_code == 200, cancelled.text
@@ -195,5 +197,5 @@ def test_research_test_mode_uses_the_single_node_profile_when_enabled(
     assert run_data["caps"]["max_nodes"] == 1
     assert run_data["caps"]["qa_cycles"] == 0
     assert run_data["caps"]["max_fetches"] == 1
-    # Fixed invariants are untouched.
+    # The smoke profile keeps a 4-call per-node budget regardless of strength.
     assert run_data["caps"]["max_tool_calls_per_node"] == 4

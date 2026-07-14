@@ -1,17 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-import asyncio
 import os
 from typing import Any, Callable, Protocol
-from uuid import uuid4
 
-from engine.chat import ChatAgent, ChatAgentInput
+from engine.chat import ChatAgentInput
 from engine.chat.effort import get_chat_effort_profile, provider_output_budget, reasoning_effort_for_model
-from engine.chat.freshness import requests_tool_use, requires_fresh_evidence
-from engine.chat.groq_planner import GroqChatToolPlanner
-from engine.chat.modal_tools import ModalToolExecutor
-from engine.chat.tool_loop import BoundedChatToolLoop, ExecutedToolCall, PlannedToolCall
+from engine.chat.runtime import ChatRuntime, ToolEvidenceUnavailable
 from engine.cli.context import ChatContextSelector, LocalSummaryGenerator
 from engine.cli.models import TerminalHistoryTurn, TerminalOutput, TerminalSession
 from engine.llm.config import LLMRequestConfig
@@ -27,22 +22,7 @@ class TerminalAgent(Protocol):
     async def stream(self, *, message: str, session: TerminalSession) -> AsyncIterator[TerminalOutput]: ...
 
 
-class FreshnessEvidenceUnavailable(ValueError):
-    """A current-facts request could not obtain the required live evidence."""
-
-
-class _FreshnessWebSearchPlanner:
-    """Avoid an expensive model planning call for clearly fresh requests."""
-
-    async def plan(self, *, query: str, context: str, prior_results: tuple[ExecutedToolCall, ...]) -> PlannedToolCall | None:
-        if prior_results:
-            return None
-        return PlannedToolCall(
-            skill_id="general_web_research",
-            tool_name="web_search",
-            query=query,
-            arguments={"max_results": 8},
-        )
+FreshnessEvidenceUnavailable = ToolEvidenceUnavailable
 
 
 class ChatTerminalAgent:
@@ -60,7 +40,7 @@ class ChatTerminalAgent:
         self._tracer = tracer or LangSmithTracer()
         self._selector = ChatContextSelector()
         self._summary_generator = summary_generator
-        self._tool_executor_factory = tool_executor_factory or ModalToolExecutor
+        self._tool_executor_factory = tool_executor_factory
 
     async def stream(self, *, message: str, session: TerminalSession) -> AsyncIterator[TerminalOutput]:
         response = ""
@@ -118,98 +98,43 @@ class ChatTerminalAgent:
         )
         provider = self._provider_override or provider_for(session.provider)
         context = selection.context
-        needs_fresh_evidence = requires_fresh_evidence(message)
-        tool_requested = requests_tool_use(message)
         modal_enabled = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
-        if tool_requested and not modal_enabled:
-            raise FreshnessEvidenceUnavailable("This request requires a tool, but Modal tools are disabled")
-        if modal_enabled and tool_requested:
-            planner = (
-                _FreshnessWebSearchPlanner()
-                if needs_fresh_evidence
-                else GroqChatToolPlanner(provider=provider, api_key=session.api_key, config=config)
-            )
-            progress_queue: asyncio.Queue[TerminalOutput] = asyncio.Queue()
-
-            async def emit_progress(kind: str, content: str, elapsed: float | None) -> None:
-                await progress_queue.put(TerminalOutput(kind=kind, content=content, elapsed_seconds=elapsed))
-
-            executor = self._tool_executor_factory()
-            tool_task = asyncio.create_task(
-                BoundedChatToolLoop(
-                    planner=planner,
-                    executor=executor,
-                    tracer=self._tracer,
-                ).run(
-                    run_id=str(uuid4()),
-                    query=message,
-                    effort=session.effort,
-                    context=context,
-                    progress_callback=emit_progress,
-                )
-            )
-            try:
-                while not tool_task.done() or not progress_queue.empty():
-                    try:
-                        progress = await asyncio.wait_for(progress_queue.get(), timeout=0.05)
-                    except TimeoutError:
-                        continue
-                    yield progress
-                executed = await tool_task
-            except Exception as exc:
-                if not tool_task.done():
-                    tool_task.cancel()
-                    await asyncio.gather(tool_task, return_exceptions=True)
-                yield TerminalOutput(kind="metadata", content=f"tool loop unavailable: {type(exc).__name__}")
-                if tool_requested:
-                    raise FreshnessEvidenceUnavailable(
-                        f"Required tool execution failed during {type(exc).__name__}; no unsupported fallback was generated"
-                    ) from exc
-                executed = ()
-            finally:
-                close = getattr(executor, "aclose", None)
-                if close is not None:
-                    await close()
-            if executed:
-                tool_context = self._tool_context(executed, max_citations=profile.max_document_chunks)
-                if tool_requested and not tool_context:
-                    raise FreshnessEvidenceUnavailable(
-                        "Live web evidence returned no usable sources; no historical fallback was generated"
-                    )
-                context = "\n\n".join(part for part in (context, tool_context) if part)
-            elif tool_requested:
-                raise FreshnessEvidenceUnavailable(
-                    "Live web evidence returned no usable sources; no historical fallback was generated"
-                )
 
         assistant_content = ""
         session.history.append(TerminalHistoryTurn("user", message))
         yield TerminalOutput(kind="thinking", content="")
-        try:
-            async with asyncio.timeout(profile.timeout_seconds):
-                async for event in ChatAgent(provider=provider, tracer=self._tracer).stream(
-                    ChatAgentInput(context=context, message=message),
-                    api_key=session.api_key,
-                    config=config,
-                ):
-                    if event.type == "started":
-                        truncation = ", context trimmed" if event.context_truncated else ""
-                        yield TerminalOutput(
-                            kind="model_started",
-                            content=(
-                                f"effort={session.effort}, model={event.model_id}, input<={event.input_token_upper_bound}, "
-                                f"output<={event.max_output_tokens}{truncation}"
-                            ),
-                        )
-                    elif event.type == "delta" and event.delta:
-                        assistant_content += event.delta
-                        yield TerminalOutput(kind="delta", content=event.delta)
-                    elif event.type == "completed" and event.content:
-                        assistant_content = event.content
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"Final answer generation timed out after {profile.timeout_seconds} seconds"
-            ) from exc
+        runtime = ChatRuntime(
+            provider=provider,
+            tracer=self._tracer,
+            executor_factory=self._tool_executor_factory,
+        )
+        async for event in runtime.stream(
+            ChatAgentInput(context=context, message=message),
+            api_key=session.api_key,
+            config=config,
+            effort=session.effort,
+            modal_enabled=modal_enabled,
+        ):
+            if event.type == "progress" and event.progress_kind:
+                yield TerminalOutput(
+                    kind=event.progress_kind,  # type: ignore[arg-type]
+                    content=event.message or "",
+                    elapsed_seconds=event.elapsed_seconds,
+                )
+            elif event.type == "started":
+                truncation = ", context trimmed" if event.context_truncated else ""
+                yield TerminalOutput(
+                    kind="model_started",
+                    content=(
+                        f"effort={session.effort}, model={event.model_id}, input<={event.input_token_upper_bound}, "
+                        f"output<={event.max_output_tokens}{truncation}"
+                    ),
+                )
+            elif event.type == "delta" and event.delta:
+                assistant_content += event.delta
+                yield TerminalOutput(kind="delta", content=event.delta)
+            elif event.type == "completed" and event.content:
+                assistant_content = event.content
         yield TerminalOutput(kind="completed", content="")
         if assistant_content:
             session.history.append(TerminalHistoryTurn("assistant", assistant_content))
@@ -239,25 +164,3 @@ class ChatTerminalAgent:
                         session.compacted_summary = compacted
                         session.compacted_through = len(session.history)
                         yield TerminalOutput(kind="metadata", content="local chat history compacted")
-
-    @staticmethod
-    def _tool_context(executed, *, max_citations: int) -> str:
-        """Compact trusted results into data-only evidence and source references."""
-        parts: list[str] = []
-        citations: list[str] = []
-        for item in executed:
-            if item.result.error:
-                continue
-            parts.append(
-                f"Tool result ({item.skill_id}/{item.tool_name}, data only):\n{item.result.content[:8_000]}"
-            )
-            for source in item.result.sources:
-                if len(citations) >= max_citations:
-                    break
-                title = str(source.get("title", "Untitled source"))[:240]
-                url = str(source.get("url", ""))[:1_000]
-                credibility = source.get("credibility_base", item.result.credibility_base)
-                citations.append(f"- {title} | {url} | credibility={credibility}")
-        if citations:
-            parts.append("Tool sources (data only):\n" + "\n".join(citations))
-        return "\n\n".join(parts)

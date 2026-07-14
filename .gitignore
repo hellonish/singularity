@@ -25,6 +25,7 @@ __pycache__/
 *.db-wal
 db.sqlite
 data/objects/
+logs/
 
 # Git
 .git/

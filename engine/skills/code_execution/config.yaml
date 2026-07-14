@@ -1,0 +1,8 @@
+id: code_execution
+version: "1.0"
+kind: core
+description: Write files and execute code inside an isolated, network-blocked Modal Sandbox.
+tools:
+  - code_execution
+instructions: instructions.md
+schemas: schemas.py

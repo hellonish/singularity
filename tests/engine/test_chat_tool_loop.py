@@ -5,7 +5,7 @@ import pytest
 
 from engine.chat.effort import ChatEffort
 from engine.chat.modal_tools import ChatToolResult
-from engine.chat.tool_loop import BoundedChatToolLoop, PlannedToolCall, ToolExecutionTimeout, ToolPlanningTimeout
+from engine.chat.tool_loop import BoundedChatToolLoop, PlannedToolBatch, PlannedToolCall, ToolPlanningTimeout
 
 
 @dataclass
@@ -30,6 +30,7 @@ def test_tool_loop_enforces_profile_tool_type_cap() -> None:
         [
             PlannedToolCall("medical_research", "pubmed", "first", {"max_results": 1}),
             PlannedToolCall("medical_research", "pubmed", "second", {"max_results": 1}),
+            PlannedToolCall("medical_research", "pubmed", "third", {"max_results": 1}),
         ]
     )
     executor = FakeExecutor()
@@ -40,8 +41,8 @@ def test_tool_loop_enforces_profile_tool_type_cap() -> None:
         )
     )
 
-    assert len(results) == 1
-    assert len(executor.invocations) == 1
+    assert len(results) == 2
+    assert len(executor.invocations) == 2
     assert results[0].tool_name == "pubmed"
 
 
@@ -108,7 +109,7 @@ def test_tool_loop_emits_compact_lifecycle_progress() -> None:
     # planning rounds (from the profile's step budget) resolve to no tool.
     assert [event[0] for event in events][:3] == ["tool_planning_start", "tool_start", "tool_completed"]
     assert [event[0] for event in events].count("tool_start") == 1
-    assert events[1][1] == "medical_research/pubmed"
+    assert events[1][1] == 'pubmed(query=\'first\', arguments={})'
     assert events[2][2] is not None
 
 
@@ -125,13 +126,53 @@ def test_tool_loop_identifies_planning_timeout_before_dispatch() -> None:
     assert executor.invocations == []
 
 
-def test_tool_loop_identifies_execution_timeout_after_dispatch() -> None:
+def test_tool_loop_preserves_execution_timeout_as_a_failed_observation() -> None:
     class TimeoutExecutor:
         async def execute(self, invocation):
             raise TimeoutError
 
     planner = FakePlanner([PlannedToolCall("medical_research", "pubmed", "query", {})])
-    with pytest.raises(ToolExecutionTimeout, match="pubmed timed out"):
-        asyncio.run(BoundedChatToolLoop(planner=planner, executor=TimeoutExecutor()).run(
-            run_id="run_1", query="search", effort=ChatEffort.INSTANT, context=""
-        ))
+    results = asyncio.run(BoundedChatToolLoop(planner=planner, executor=TimeoutExecutor()).run(
+        run_id="run_1", query="search", effort=ChatEffort.INSTANT, context=""
+    ))
+    assert len(results) == 1
+    assert "timed out" in str(results[0].result.error)
+
+
+def test_tool_loop_executes_independent_batch_in_parallel_and_routes_second_search_to_tavily() -> None:
+    class BatchPlanner:
+        def __init__(self) -> None:
+            self.used = False
+
+        async def plan(self, **kwargs):
+            if self.used:
+                return None
+            self.used = True
+            return PlannedToolBatch(calls=(
+                PlannedToolCall("general_web_research", "web_search", "one", {"max_results": 1}),
+                PlannedToolCall("general_web_research", "web_search", "two", {"max_results": 1}),
+            ))
+
+    class ParallelExecutor(FakeExecutor):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def execute(self, invocation):
+            self.invocations.append(invocation)
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return ChatToolResult(content="result", sources=[], credibility_base=0.8, error=None)
+
+    executor = ParallelExecutor()
+    results = asyncio.run(BoundedChatToolLoop(planner=BatchPlanner(), executor=executor).run(
+        run_id="run_1", query="latest", effort=ChatEffort.INSTANT, context=""
+    ))
+
+    assert len(results) == 2
+    assert executor.max_active == 2
+    assert executor.invocations[0].arguments.get("search_backend", "auto") == "auto"
+    assert executor.invocations[1].arguments["search_backend"] == "tavily"

@@ -32,22 +32,37 @@ class FakeSandbox:
         self.commands = []
         self.exec = AioCall(self._exec)
         self.terminate = AioCall(lambda: None)
+        self.files = {}
+        self.open = AioCall(self._open)
 
     def _exec(self, *args, **kwargs):
         self.commands.append((args, kwargs))
         return FakeProcess(stdout="repository output")
 
+    def _open(self, path, mode):
+        sandbox = self
+
+        class File:
+            write = AioCall(lambda content: sandbox.files.__setitem__(path, content))
+            close = AioCall(lambda: None)
+
+        return File()
+
 
 def test_repository_inspection_uses_no_secret_limited_network_sandbox() -> None:
     captured = {}
     sandbox = FakeSandbox()
+    app = object()
 
     async def factory(**kwargs):
         captured.update(kwargs)
         return sandbox
 
+    async def app_resolver():
+        return app
+
     result = asyncio.run(
-        ModalSandboxExecutor(sandbox_factory=factory).execute(
+        ModalSandboxExecutor(sandbox_factory=factory, app_resolver=app_resolver).execute(
             ChatToolInvocation(
                 run_id="run_1",
                 skill_id="repository_inspection",
@@ -66,6 +81,10 @@ def test_repository_inspection_uses_no_secret_limited_network_sandbox() -> None:
     assert captured["outbound_domain_allowlist"] == ["github.com"]
     assert "secrets" not in captured
     assert captured["cpu"] == 1.0
+    # The sandbox carries its environment via the associated app; the deprecated
+    # environment_name= argument must no longer be passed to Sandbox.create.
+    assert captured["app"] is app
+    assert "environment_name" not in captured
     assert sandbox.commands[0][0][:3] == ("git", "clone", "--depth")
 
 
@@ -92,3 +111,33 @@ def test_trusted_function_executor_rejects_sandbox_tool_before_function_lookup()
     else:
         raise AssertionError("expected executor boundary rejection")
     assert looked_up is False
+
+
+def test_code_execution_writes_files_and_runs_without_network_or_secrets() -> None:
+    captured = {}
+    sandbox = FakeSandbox()
+
+    async def factory(**kwargs):
+        captured.update(kwargs)
+        return sandbox
+
+    async def app_resolver():
+        return object()
+
+    result = asyncio.run(ModalSandboxExecutor(sandbox_factory=factory, app_resolver=app_resolver).execute(
+        ChatToolInvocation(
+            run_id="run_1",
+            skill_id="code_execution",
+            tool_name="code_execution",
+            query="write and run python",
+            arguments={"files": {"main.py": "print(6 * 7)"}, "command": ["python", "main.py"]},
+            timeout_seconds=60,
+        )
+    ))
+
+    assert result.error is None
+    assert captured["block_network"] is True
+    assert "secrets" not in captured
+    assert "environment_name" not in captured
+    assert sandbox.files["/workspace/main.py"] == "print(6 * 7)"
+    assert sandbox.commands[-1][0] == ("python", "main.py")

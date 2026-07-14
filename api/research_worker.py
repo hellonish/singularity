@@ -9,10 +9,16 @@ import logging
 from datetime import datetime, timezone
 
 from api.config import settings
+from api.logging_config import StepLogger, configure_logging
 from engine.llm.groq import ProviderError
 from engine.research_workflow.runtime import ResearchCancelled, ResearchInfrastructureError
 
 logger = logging.getLogger(__name__)
+
+
+async def startup(_ctx) -> None:
+    """Configure console and file logging before ARQ accepts jobs."""
+    configure_logging()
 
 try:  # Keep API/unit-test imports usable before optional worker dependencies install.
     from arq.connections import RedisSettings
@@ -32,6 +38,8 @@ async def run_research_job(ctx, run_id: str) -> None:
         run = result.scalar_one_or_none()
         if run is None or run.status in {"cancelled", "completed", "failed"}:
             return
+        step_log = StepLogger("research_worker", user_id=run.user_id, run_id=run.id)
+        step_log.step("job", phase="start", inputs={"run_data": run.run_data, "query": run.query})
         run.status = "running"
         run.started_at = run.started_at or datetime.now(timezone.utc)
         await session.commit()
@@ -42,6 +50,7 @@ async def run_research_job(ctx, run_id: str) -> None:
             await execute_research_run(run=run, session=session)
             await append_event(session, run, "research.completed", {"status": run.status})
         except ResearchCancelled:
+            step_log.step("job", phase="cancelled")
             await session.rollback()
             run = await session.get(ResearchRun, run_id)
             if run is None:
@@ -51,6 +60,7 @@ async def run_research_job(ctx, run_id: str) -> None:
             await session.commit()
             await append_event(session, run, "research.cancelled", {"status": run.status})
         except ResearchInfrastructureError as exc:
+            step_log.error("job", exc, reason="infrastructure_unavailable")
             # Backend unreachable — surface a friendly "try later" message
             # rather than a raw exception string, and log the detail.
             logger.warning("research run %s aborted: backend unavailable (%s)", run_id, exc)
@@ -64,6 +74,7 @@ async def run_research_job(ctx, run_id: str) -> None:
             await session.commit()
             await append_event(session, run, "research.failed", {"status": run.status, "error": run.error_message, "reason": "infrastructure_unavailable"})
         except ProviderError as exc:
+            step_log.error("job", exc, code=exc.code)
             # Provider errors are already sanitized by the adapter. Preserve a
             # specific, actionable failure instead of mislabelling a model
             # formatting fault as a progress-recording problem.
@@ -83,6 +94,7 @@ async def run_research_job(ctx, run_id: str) -> None:
                 {"status": run.status, "error": run.error_message, "reason": exc.code},
             )
         except Exception as exc:
+            step_log.error("job", exc)
             logger.exception("research run %s failed", run_id)
             # A flush failure leaves SQLAlchemy in a pending-rollback state.
             # Reset and reload before persisting a terminal event, otherwise a
@@ -96,6 +108,8 @@ async def run_research_job(ctx, run_id: str) -> None:
             run.finished_at = datetime.now(timezone.utc)
             await session.commit()
             await append_event(session, run, "research.failed", {"status": run.status, "error": run.error_message})
+        else:
+            step_log.step("job", phase="end", status="completed")
 
 
 class WorkerSettings:
@@ -103,3 +117,4 @@ class WorkerSettings:
     redis_settings = _REDIS_SETTINGS
     max_jobs = 1
     job_timeout = 4 * 60 * 60
+    on_startup = startup

@@ -11,6 +11,7 @@ from api.schemas import LLMCompletionCreate
 from api.services.llm_credentials import get_credential
 from api.services.llm_errors import provider_error as _groq_error
 from engine.chat.effort import provider_output_budget
+from engine.chat.model_capabilities import MODEL_CAPABILITIES
 from engine.llm import provider_for, resolve_request_config
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import GroqProviderError, GroqModel, LLMCompletion
@@ -25,7 +26,12 @@ async def list_models(
     credential = await get_credential(session, user.id, credential_id)
     api_key = decrypt_secret(credential.encrypted_secret)
     try:
-        return await provider_for(credential.provider).list_models(api_key=api_key)
+        models = await provider_for(credential.provider).list_models(api_key=api_key)
+        MODEL_CAPABILITIES.remember_available(credential.id, credential.provider, models)
+        for model in models:
+            if model.context_window and model.max_completion_tokens:
+                MODEL_CAPABILITIES.remember(credential.provider, model)
+        return models
     except GroqProviderError as exc:
         raise _groq_error(exc) from exc
 
@@ -79,12 +85,15 @@ async def complete(
     provider = provider_for(credential.provider)
     try:
         available_models = await provider.list_models(api_key=api_key)
+        MODEL_CAPABILITIES.remember_available(credential.id, credential.provider, available_models)
         selected_model = next((m for m in available_models if m.id == config.model_id), None)
         if selected_model is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Selected model is not available for this Groq credential",
             )
+        if selected_model.context_window and selected_model.max_completion_tokens:
+            MODEL_CAPABILITIES.remember(config.provider, selected_model)
         # Clamp the caller-requested budget to the provider/model limit, using the
         # model's live ceiling when the catalog exposes it (else static fallback).
         config = LLMRequestConfig(

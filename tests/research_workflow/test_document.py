@@ -2,6 +2,7 @@ import pytest
 
 from engine.research_workflow.document import (
     DocumentSection,
+    HighlightBlock,
     ParagraphBlock,
     ReferenceTag,
     ResearchDocument,
@@ -9,6 +10,33 @@ from engine.research_workflow.document import (
     StatItem,
     validate_document,
 )
+
+
+def test_blocks_tolerate_common_writer_key_deviations():
+    """Writer models emit content/tag/tags/stats and bare-int stat values; the
+    schema must coerce these rather than drop the whole section."""
+    para = ParagraphBlock.model_validate({"kind": "paragraph", "content": "hi", "tag": "S1"})
+    assert para.text == "hi"
+    assert para.reference_ids == ["S1"]  # single string wrapped to a list
+
+    highlight = HighlightBlock.model_validate({"kind": "highlight", "text": "body", "tags": ["S2"]})
+    assert highlight.body == "body"
+    assert highlight.title == "Highlight"  # default when omitted
+    assert highlight.reference_ids == ["S2"]
+
+    stats = StatsBlock.model_validate(
+        {"kind": "stats", "stats": [{"label": "Growth", "value": 4, "tag": "S3"}]}
+    )
+    assert stats.items[0].value == "4"  # int coerced to string
+    assert stats.items[0].reference_ids == ["S3"]
+
+
+def test_canonical_block_field_names_still_validate():
+    para = ParagraphBlock.model_validate(
+        {"kind": "paragraph", "text": "x", "reference_ids": ["S9"]}
+    )
+    assert para.text == "x"
+    assert para.reference_ids == ["S9"]
 
 
 def test_document_section_accepts_model_id_alias_and_normalizes_it():

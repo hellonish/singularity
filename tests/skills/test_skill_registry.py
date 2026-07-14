@@ -24,6 +24,7 @@ EXPECTED_SKILLS = {
     "temporal_reasoning",
     "repository_inspection",
     "dataset_analysis",
+    "code_execution",
     "production_retrieval",
 }
 

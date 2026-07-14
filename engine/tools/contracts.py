@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from engine.chat.effort import ChatEffort, get_chat_effort_profile
 
@@ -17,6 +17,10 @@ class _Arguments(BaseModel):
 
 class SearchArguments(_Arguments):
     max_results: int = Field(default=10, ge=1, le=50)
+
+
+class WebSearchArguments(SearchArguments):
+    search_backend: Literal["auto", "tavily"] = "auto"
 
 
 class ArxivArguments(SearchArguments):
@@ -59,6 +63,27 @@ class DatasetAnalysisArguments(_Arguments):
     python_code: str = Field(min_length=1, max_length=20_000)
 
 
+class CodeExecutionArguments(_Arguments):
+    files: dict[str, str] = Field(min_length=1, max_length=20)
+    command: list[str] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_workspace(self) -> "CodeExecutionArguments":
+        from pathlib import PurePosixPath
+
+        total = 0
+        for raw_path, content in self.files.items():
+            path = PurePosixPath(raw_path)
+            if path.is_absolute() or ".." in path.parts or not path.name:
+                raise ValueError(f"unsafe Sandbox file path: {raw_path}")
+            total += len(content.encode("utf-8"))
+        if total > 500_000:
+            raise ValueError("Sandbox files exceed the 500 KB request limit")
+        if any(len(part) > 1_000 for part in self.command):
+            raise ValueError("Sandbox command arguments must be at most 1,000 characters")
+        return self
+
+
 class TranslationArguments(_Arguments):
     source_lang: str = Field(default="auto", min_length=2, max_length=16)
     target_lang: str = Field(default="en", min_length=2, max_length=16)
@@ -73,7 +98,9 @@ TOOL_ARGUMENT_MODELS: dict[str, type[BaseModel]] = {
     "current_time": CurrentTimeArguments,
     "repository_inspection": RepositoryInspectionArguments,
     "dataset_analysis": DatasetAnalysisArguments,
+    "code_execution": CodeExecutionArguments,
     "translation": TranslationArguments,
+    "web_search": WebSearchArguments,
     **{
         name: SearchArguments
         for name in (
@@ -86,7 +113,6 @@ TOOL_ARGUMENT_MODELS: dict[str, type[BaseModel]] = {
             "sec_edgar",
             "semantic_scholar",
             "standards_fetch",
-            "web_search",
             "youtube_transcript",
         )
     },
@@ -127,6 +153,9 @@ class ValidatedChatToolInvocation:
             "timeout_seconds": self.timeout_seconds,
             "profile_limits": {
                 "max_agent_tool_steps": get_chat_effort_profile(self.effort).max_agent_tool_steps,
+                "max_tool_actions": get_chat_effort_profile(self.effort).max_tool_actions,
+                "max_parallel_actions": get_chat_effort_profile(self.effort).max_parallel_actions,
+                "max_code_repair_cycles": get_chat_effort_profile(self.effort).max_code_repair_cycles,
                 "max_calls_per_tool_type": get_chat_effort_profile(self.effort).max_calls_per_tool_type,
                 "timeout_seconds": self.timeout_seconds,
             },
@@ -148,6 +177,9 @@ def validate_chat_tool_invocation(invocation: ChatToolInvocation) -> ValidatedCh
     profile = get_chat_effort_profile(invocation.effort)
     expected_limits = {
         "max_agent_tool_steps": profile.max_agent_tool_steps,
+        "max_tool_actions": profile.max_tool_actions,
+        "max_parallel_actions": profile.max_parallel_actions,
+        "max_code_repair_cycles": profile.max_code_repair_cycles,
         "max_calls_per_tool_type": profile.max_calls_per_tool_type,
         "timeout_seconds": profile.timeout_seconds,
     }
@@ -190,14 +222,21 @@ def tool_schema_for_skill(skill_id: str) -> list[dict[str, Any]]:
 
 
 def chat_planner_tool_schemas(
-    *, allowed_execution_kinds: tuple[str, ...] = ("trusted_function",)
+    *,
+    allowed_execution_kinds: tuple[str, ...] = ("trusted_function",),
+    skill_ids: tuple[str, ...] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, tuple[str, str]]]:
     """Return unique Groq function schemas and their skill/tool bindings."""
     from engine.skills import SKILL_REGISTRY
 
     schemas: list[dict[str, Any]] = []
     bindings: dict[str, tuple[str, str]] = {}
-    for skill in SKILL_REGISTRY.definitions():
+    definitions = (
+        tuple(SKILL_REGISTRY.get(skill_id) for skill_id in skill_ids)
+        if skill_ids is not None
+        else SKILL_REGISTRY.definitions()
+    )
+    for skill in definitions:
         for tool_name in skill.config.tools:
             if TOOL_REGISTRY.descriptor(tool_name).execution_kind not in allowed_execution_kinds:
                 continue

@@ -23,3 +23,12 @@ class DatasetAnalysisTool(_SandboxOnlyTool):
     name = "dataset_analysis"
     description = "Run generated Python analysis over an explicitly supplied CSV dataset in a network-blocked Modal Sandbox."
     skill_ids = ("dataset_analysis",)
+
+
+class CodeExecutionTool(_SandboxOnlyTool):
+    name = "code_execution"
+    description = (
+        "Write a bounded set of files in an isolated network-blocked Modal Sandbox, "
+        "execute one argv-style command, and return stdout, stderr, and the exit code."
+    )
+    skill_ids = ("code_execution",)

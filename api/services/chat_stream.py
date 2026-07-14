@@ -8,6 +8,7 @@ provider key or model object is persisted.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 
 from fastapi import HTTPException, status
@@ -21,7 +22,7 @@ from api.services.llm_credentials import get_credential
 from api.services.report_context_errors import ReportContextError
 from api.services.retrieval import RetrievalService, TenantVectorStore
 from api.vector_runtime import get_vector_store
-from engine.chat.agent import ChatAgent
+from engine.chat.runtime import ChatRuntime
 from engine.chat.effort import (
     ChatEffort,
     get_chat_effort_profile,
@@ -154,11 +155,9 @@ async def _resolve_config(
         credential_id=config.credential_id,
         model_id=config.model_id,
         temperature=config.temperature,
-        # Clamp the effort budget to what the resolved provider/model allows so
-        # the request never over-allocates output tokens.
-        max_output_tokens=provider_output_budget(
-            config.provider, config.model_id, config.max_output_tokens
-        ),
+        # ChatRuntime resolves live model capabilities before generation and
+        # clamps this effort ceiling against the actual selected model.
+        max_output_tokens=config.max_output_tokens,
         reasoning_effort=reasoning_effort_for_model(config.model_id, effort),
     )
 
@@ -203,8 +202,14 @@ async def build_stream(
     )
 
     api_key = decrypt_secret(credential.encrypted_secret)
-    agent = ChatAgent(provider=provider_for(credential.provider))
-    return agent.stream(agent_input, api_key=api_key, config=config), config
+    runtime = ChatRuntime(provider=provider_for(credential.provider))
+    return runtime.stream(
+        agent_input,
+        api_key=api_key,
+        config=config,
+        effort=effort,
+        modal_enabled=os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1",
+    ), config
 
 
 _TITLE_PROMPT = (

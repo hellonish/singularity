@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from engine.llm.groq import GroqModel, GroqProvider, GroqProviderError
+from engine.llm.model_catalog import known_structured_output_support
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -91,6 +92,19 @@ class OpenRouterProvider(GroqProvider):
             max_completion_tokens = _curated_max_completion_tokens(model_id)
         if not max_completion_tokens and context_window:
             max_completion_tokens = min(4_096, max(64, int(context_window) // 4))
+        # Prefer the offline datastore's curated answer for known models; it is a
+        # zero-cost fast path that does not depend on the catalog reporting
+        # ``supported_parameters`` correctly. Unknown models fall back to live
+        # detection: response_format advertised, minus the unreliable list.
+        curated = known_structured_output_support("openrouter", model_id)
+        supports_research = (
+            curated
+            if curated is not None
+            else (
+                "response_format" in supported_parameters
+                and model_id.lower() not in _RESEARCH_UNRELIABLE_MODELS
+            )
+        )
         return GroqModel(
             id=model_id,
             owned_by=getattr(model, "owned_by", None),
@@ -99,10 +113,7 @@ class OpenRouterProvider(GroqProvider):
             active=True,
             # Research requests response_format=json_object and asks OpenRouter
             # to route only to endpoints that honor every requested parameter.
-            supports_research=(
-                "response_format" in supported_parameters
-                and model_id.lower() not in _RESEARCH_UNRELIABLE_MODELS
-            ),
+            supports_research=supports_research,
         )
 
 

@@ -43,12 +43,10 @@ export function Composer() {
 
   const modeLabel = mode === 'research' ? 'Research' : 'Chat';
   const intensityName = INTENSITIES.find(i => i.id === intensity)?.name || 'Medium';
-  // Research emits structured JSON between its workflow stages, so only offer
-  // models whose live provider catalog supports response_format. Chat retains
-  // the full provider catalog.
-  const selectableModels = mode === 'research'
-    ? availableModels.filter((model) => model.supports_research)
-    : availableModels;
+  // Both chat and research depend on the provider honoring response_format
+  // (structured outputs), so only ever offer models whose live catalog
+  // advertises it.
+  const selectableModels = availableModels.filter((model) => model.supports_research);
   const effectiveModelId = selectableModels.some((model) => model.id === modelId)
     ? modelId
     : selectableModels.find((model) => model.id === activeCredential?.default_model_id)?.id
@@ -78,9 +76,9 @@ export function Composer() {
         // Inside an open chat the composer continues that conversation; a new
         // chat is created only from the home/grid view.
         if (view === 'chat' && activeChatId) {
-          void sendChat(activeChatId, content);
+          void sendChat(activeChatId, content, intensity);
         } else {
-          const chat = await createAndSendChat(content, undefined, selectedModel?.id);
+          const chat = await createAndSendChat(content, undefined, selectedModel?.id, intensity);
           setActiveChatId(chat.id);
           setView('chat');
         }

@@ -52,7 +52,7 @@ class FakeAPIClient:
 
 
 def test_repl_uses_one_hosted_api_chat_for_multiple_turns(capsys, monkeypatch) -> None:
-    monkeypatch.delenv("SINGULARITY_CLI_BACKEND", raising=False)
+    monkeypatch.setenv("SINGULARITY_CLI_BACKEND", "api")
     api = FakeAPIClient()
     repl = EngineREPL(
         TerminalSession(api_key="byok"),
@@ -68,7 +68,7 @@ def test_repl_uses_one_hosted_api_chat_for_multiple_turns(capsys, monkeypatch) -
 
 
 def test_repl_streams_hosted_research_report_without_local_worker(capsys, monkeypatch) -> None:
-    monkeypatch.delenv("SINGULARITY_CLI_BACKEND", raising=False)
+    monkeypatch.setenv("SINGULARITY_CLI_BACKEND", "api")
     repl = EngineREPL(
         TerminalSession(api_key="byok", agent_name="research"),
         settings_store=FakeSettingsStore(),
@@ -78,3 +78,11 @@ def test_repl_streams_hosted_research_report_without_local_worker(capsys, monkey
     asyncio.run(repl._send("research this"))
 
     assert "Hosted report" in capsys.readouterr().out
+
+
+def test_repl_defaults_to_direct_local_execution(monkeypatch) -> None:
+    monkeypatch.delenv("SINGULARITY_CLI_BACKEND", raising=False)
+
+    repl = EngineREPL(TerminalSession(api_key="byok"), settings_store=FakeSettingsStore())
+
+    assert repl._use_hosted_api is False

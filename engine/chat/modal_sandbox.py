@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import modal
 
@@ -22,13 +22,47 @@ dataset_sandbox_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("pandas", "numpy", "matplotlib", "scipy")
 )
+code_sandbox_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("pytest", "ruff")
+)
+
+
+def _sandbox_app_name() -> str:
+    return os.getenv("SINGULARITY_MODAL_SANDBOX_APP", "singularity-chat-sandbox")
 
 
 class ModalSandboxExecutor:
     """No-secret adapter for runtime-generated or user-provided execution."""
 
-    def __init__(self, sandbox_factory: Callable[..., Any] | None = None) -> None:
+    def __init__(
+        self,
+        sandbox_factory: Callable[..., Any] | None = None,
+        app_resolver: Callable[[], Awaitable[Any]] | None = None,
+    ) -> None:
         self._sandbox_factory = sandbox_factory or modal.Sandbox.create.aio
+        self._app_resolver = app_resolver or self._lookup_app
+        self._app: Any | None = None
+        self._app_lock = asyncio.Lock()
+
+    async def _lookup_app(self) -> Any:
+        # A Sandbox is created against an App, and the App carries the
+        # environment. Passing environment_name= to Sandbox.create is deprecated
+        # (Modal derives it from the associated app), so we resolve one app
+        # handle and reuse it for every sandbox this executor spawns.
+        return await modal.App.lookup.aio(
+            _sandbox_app_name(),
+            environment_name=modal_environment_name(),
+            create_if_missing=True,
+        )
+
+    async def _get_app(self) -> Any:
+        if self._app is not None:
+            return self._app
+        async with self._app_lock:
+            if self._app is None:
+                self._app = await self._app_resolver()
+            return self._app
 
     async def execute(self, invocation: ChatToolInvocation) -> ChatToolResult:
         validated = validate_chat_tool_invocation(invocation)
@@ -39,17 +73,19 @@ class ModalSandboxExecutor:
                 return await self._inspect_repository(validated)
             if validated.tool_name == "dataset_analysis":
                 return await self._analyze_dataset(validated)
+            if validated.tool_name == "code_execution":
+                return await self._execute_code(validated)
         raise ValueError(f"Unsupported sandbox tool: {validated.tool_name}")
 
     async def _inspect_repository(self, invocation: ValidatedChatToolInvocation) -> ChatToolResult:
         sandbox = await self._sandbox_factory(
+            app=await self._get_app(),
             image=repository_sandbox_image,
             timeout=invocation.timeout_seconds,
             idle_timeout=60,
             cpu=1.0,
             memory=2048,
             outbound_domain_allowlist=["github.com"],
-            environment_name=modal_environment_name(),
         )
         try:
             arguments = invocation.arguments
@@ -90,13 +126,13 @@ class ModalSandboxExecutor:
 
     async def _analyze_dataset(self, invocation: ValidatedChatToolInvocation) -> ChatToolResult:
         sandbox = await self._sandbox_factory(
+            app=await self._get_app(),
             image=dataset_sandbox_image,
             timeout=invocation.timeout_seconds,
             idle_timeout=60,
             cpu=1.0,
             memory=2048,
             block_network=True,
-            environment_name=modal_environment_name(),
         )
         try:
             dataset_file = await sandbox.open.aio("/tmp/input.csv", "w")
@@ -114,6 +150,38 @@ class ModalSandboxExecutor:
             )
             error = None if return_code == 0 else f"dataset analysis exited with code {return_code}"
             return ChatToolResult(output[:_OUTPUT_LIMIT], [], 1.0 if error is None else 0.0, error)
+        finally:
+            await sandbox.terminate.aio()
+
+    async def _execute_code(self, invocation: ValidatedChatToolInvocation) -> ChatToolResult:
+        sandbox = await self._sandbox_factory(
+            app=await self._get_app(),
+            image=code_sandbox_image,
+            timeout=invocation.timeout_seconds,
+            idle_timeout=60,
+            cpu=2.0,
+            memory=4096,
+            block_network=True,
+        )
+        try:
+            for relative_path, content in invocation.arguments["files"].items():
+                target = f"/workspace/{relative_path}"
+                parent = target.rsplit("/", 1)[0]
+                if parent != "/workspace":
+                    await _exec(sandbox, ["mkdir", "-p", parent], timeout=30)
+                handle = await sandbox.open.aio(target, "w")
+                await handle.write.aio(content)
+                await handle.close.aio()
+            output, return_code = await _exec(
+                sandbox,
+                invocation.arguments["command"],
+                workdir="/workspace",
+                timeout=invocation.timeout_seconds,
+                env={"PYTHONDONTWRITEBYTECODE": "1", "MPLBACKEND": "Agg"},
+            )
+            content = f"exit_code={return_code}\n{output}"[:_OUTPUT_LIMIT]
+            error = None if return_code == 0 else f"code execution exited with code {return_code}"
+            return ChatToolResult(content, [], 1.0 if error is None else 0.0, error)
         finally:
             await sandbox.terminate.aio()
 

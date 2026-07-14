@@ -18,10 +18,13 @@ class ChatAgentInput:
 
 @dataclass(frozen=True)
 class ChatStreamEvent:
-    type: Literal["started", "delta", "completed"]
+    type: Literal["progress", "started", "delta", "completed"]
     model_id: str
     delta: str | None = None
     content: str | None = None
     input_token_upper_bound: int | None = None
     max_output_tokens: int | None = None
     context_truncated: bool = False
+    progress_kind: str | None = None
+    message: str | None = None
+    elapsed_seconds: float | None = None

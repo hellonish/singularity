@@ -6,6 +6,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import StreamingResponse
 
 from api.dependencies import CurrentUserDep, SessionDep
+from api.logging_config import StepLogger
 from api.schemas import (
     ChatCreate,
     ChatRead,
@@ -20,6 +21,7 @@ from api.services.chat_stream import build_stream, generate_chat_title
 from api.services.report_context_errors import ReportContextError
 from api.sse import SSE_HEADERS, encode_sse
 from engine.llm.groq import GroqProviderError
+from engine.chat.runtime import ChatRuntimeLimitExceeded, ToolEvidenceUnavailable
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -94,6 +96,18 @@ async def stream_message(
 
     chat = await chat_service.get_chat(session, current_user.id, chat_id)
     user_message = await chat_service.create_message(session, chat, body)
+    step_log = StepLogger(
+        "chat",
+        user_id=current_user.id,
+        chat_id=chat.id,
+        message_id=user_message.id,
+    )
+    step_log.step(
+        "message_received",
+        phase="start",
+        inputs=body.model_dump(mode="json"),
+        report_id=chat.report_id,
+    )
 
     # Resolve the credential and open the engine stream before returning a
     # StreamingResponse. A missing credential raises HTTPException(422) here, so
@@ -107,6 +121,7 @@ async def stream_message(
     try:
         stream, config = await build_stream(session, chat, user_message)
     except ReportContextError as exc:
+        step_log.error("load_report_context", exc, code=exc.code)
         # Bind the fields now: ``exc`` is unbound once this except block exits,
         # and the generator below runs lazily inside the StreamingResponse.
         error_payload = {
@@ -124,13 +139,45 @@ async def stream_message(
             )
 
         return StreamingResponse(context_error(), media_type="text/event-stream", headers=SSE_HEADERS)
+    except Exception as exc:
+        step_log.error("stream_setup", exc)
+        raise
+
+    step_log.step(
+        "stream_ready",
+        phase="end",
+        provider=config.provider,
+        model_id=config.model_id,
+    )
 
     async def events() -> AsyncIterator[str]:
         index = 0
         content = ""
         try:
             async for event in stream:
-                if event.type == "started":
+                if event.type == "progress":
+                    step_log.step(
+                        "runtime_progress",
+                        outputs={
+                            "kind": event.progress_kind,
+                            "message": event.message,
+                            "elapsed_seconds": event.elapsed_seconds,
+                        },
+                        kind=event.progress_kind,
+                    )
+                    index += 1
+                    yield encode_sse(
+                        event="message.progress",
+                        event_id=f"{user_message.id}:{index}",
+                        data={
+                            "message_id": user_message.id,
+                            "kind": event.progress_kind,
+                            "message": event.message,
+                            "elapsed_seconds": event.elapsed_seconds,
+                        },
+                    )
+                elif event.type == "started":
+                    step_log.step("generation", phase="start", model_id=event.model_id)
                     yield encode_sse(
                         event="message.accepted",
                         event_id=f"{user_message.id}:{index}",
@@ -141,6 +188,7 @@ async def stream_message(
                         },
                     )
                 elif event.type == "delta":
+                    step_log.detail("generation_delta", outputs={"delta": event.delta or ""})
                     index += 1
                     content += event.delta or ""
                     yield encode_sse(
@@ -155,6 +203,12 @@ async def stream_message(
                         session,
                         chat,
                         MessageCreate(content=final, role="assistant", parent_message_id=user_message.id),
+                    )
+                    step_log.step(
+                        "generation",
+                        phase="end",
+                        outputs={"content": final},
+                        assistant_message_id=assistant.id,
                     )
                     yield encode_sse(
                         event="message.completed",
@@ -171,13 +225,15 @@ async def stream_message(
                     # never invalidate the already-delivered reply.
                     if not chat.title:
                         title = await generate_chat_title(session, chat, user_message.content, final)
+                        step_log.step("title_generation", phase="end", outputs={"title": title})
                         index += 1
                         yield encode_sse(
                             event="chat.title",
                             event_id=f"{user_message.id}:{index}",
                             data={"chat_id": chat.id, "title": title},
                         )
-        except GroqProviderError as exc:
+        except (GroqProviderError, ToolEvidenceUnavailable, ChatRuntimeLimitExceeded) as exc:
+            step_log.error("generation", exc, code=exc.code, retryable=exc.retryable)
             index += 1
             yield encode_sse(
                 event="message.error",
@@ -189,6 +245,9 @@ async def stream_message(
                     "retryable": exc.retryable,
                 },
             )
+        except Exception as exc:
+            step_log.error("generation", exc)
+            raise
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 

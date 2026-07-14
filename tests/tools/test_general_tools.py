@@ -9,6 +9,8 @@ from engine.tools.calculator import CalculatorTool, calculate
 from engine.tools.current_time import CurrentTimeTool
 from engine.tools.url_safety import validate_public_url
 from engine.tools.web_fetch import _extract
+from engine.tools.web_search import WebSearchTool
+import engine.tools.web_search as web_search_module
 
 
 @pytest.mark.parametrize(
@@ -70,3 +72,27 @@ def test_url_guard_rejects_private_network_resolution(monkeypatch) -> None:
     )
     with pytest.raises(ValueError, match="Private"):
         asyncio.run(validate_public_url("https://internal.example/path"))
+
+
+def test_web_search_tries_ddgs_once_then_permanently_uses_tavily(monkeypatch) -> None:
+    calls = {"ddgs": 0, "tavily": 0}
+
+    def empty_ddgs(query: str, max_results: int):
+        calls["ddgs"] += 1
+        return []
+
+    def successful_tavily(query: str, max_results: int, api_key: str):
+        calls["tavily"] += 1
+        return [{"title": "Primary", "url": "https://example.com", "content": "Evidence"}]
+
+    monkeypatch.setenv("TAVILY_API_KEY", "test")
+    monkeypatch.setattr(web_search_module, "_duckduckgo", empty_ddgs)
+    monkeypatch.setattr(web_search_module, "_tavily", successful_tavily)
+
+    tool = WebSearchTool()
+    result = asyncio.run(tool.call_with_retry("query", max_retries=2))
+
+    assert result.ok
+    assert calls == {"ddgs": 1, "tavily": 1}
+    assert tool.search_backend == "tavily"
+    assert result.sources[0]["search_provider"] == "tavily"

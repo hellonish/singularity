@@ -48,12 +48,13 @@ class FakeModel:
         raise AssertionError(f"unexpected prompt: {prompt}")
 
 
-def test_terminal_research_uses_low_reasoning_for_gpt_oss_json_completions() -> None:
+def test_terminal_research_uses_low_reasoning_for_quick_gpt_oss_completions() -> None:
     provider = CapturingProvider()
     model = TerminalResearchModel(
         api_key="test-key",
         model_id="openai/gpt-oss-20b",
         caps=RunCaps.for_strength(1),
+        strength=1,
         provider=provider,
     )
 
@@ -62,6 +63,22 @@ def test_terminal_research_uses_low_reasoning_for_gpt_oss_json_completions() -> 
     assert content == '{"ok":true}'
     assert provider.config.reasoning_effort == "low"
     assert provider.config.max_output_tokens == 6_000
+
+
+def test_terminal_research_raises_reasoning_effort_for_deep_gpt_oss_completions() -> None:
+    provider = CapturingProvider()
+    model = TerminalResearchModel(
+        api_key="test-key",
+        model_id="openai/gpt-oss-20b",
+        caps=RunCaps.for_strength(3),
+        strength=3,
+        provider=provider,
+    )
+
+    asyncio.run(model.complete("Return JSON only", max_output_tokens=500))
+
+    # Deep research lets the reasoning model deliberate before it answers.
+    assert provider.config.reasoning_effort == "high"
 
 
 def test_terminal_research_omits_reasoning_effort_for_other_models() -> None:
@@ -190,7 +207,7 @@ def test_writer_keeps_valid_citable_source_references() -> None:
     assert document["sections"][0]["blocks"][0]["reference_ids"] == ["S1234567890"]
 
 
-def test_writer_falls_back_to_completed_cited_evidence_after_provider_failure() -> None:
+def test_writer_falls_back_to_completed_cited_evidence_after_provider_failure(caplog) -> None:
     class FailingModel:
         async def complete(self, prompt: str, *, max_output_tokens: int) -> str:
             raise ProviderError(code="provider_invalid_json_response", message="invalid JSON", retryable=True)
@@ -203,7 +220,24 @@ def test_writer_falls_back_to_completed_cited_evidence_after_provider_failure() 
         source_records=[{"tag": "S1234567890", "name": "Primary", "title": "Primary", "url": "https://example.test/source", "source_type": "web"}],
     ), caps)
 
-    document = asyncio.run(LLMWriter(FailingModel()).write(dag, "What happened?"))
+    with caplog.at_level("WARNING", logger="engine.research_workflow.agents"):
+        document = asyncio.run(LLMWriter(FailingModel()).write(dag, "What happened?"))
 
-    assert document["title"] == "Research report (fallback assembly)"
+    # The reader-facing report is grounded only in the researched evidence and
+    # is free of pipeline machinery: no "fallback assembly" title suffix, no
+    # "writer model failed" limitation. An assistant answering from this report
+    # must not be able to report on the agent's internal behaviour.
+    assert document["title"] == "What happened?"
+    assert document["limitations"] == []
+    report_text = str(document).lower()
+    assert "fallback" not in report_text
+    assert "writer model failed" not in report_text
+    assert "research nodes" not in report_text
     assert document["sections"][0]["blocks"][0]["reference_ids"] == ["S1234567890"]
+    # The degradation must still be observable to operators: a swallowed writer
+    # failure logs why, naming the exception type, so it can be root-caused —
+    # that visibility lives in the logs, never in the report content.
+    assert any(
+        record.levelname == "WARNING" and "ProviderError" in record.getMessage()
+        for record in caplog.records
+    )

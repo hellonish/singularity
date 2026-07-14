@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,6 +26,31 @@ class Settings(BaseSettings):
     auto_create_schema: bool = True
     storage_backend: str = "local"
     storage_root: str = "./data/objects"
+
+    # Supabase Storage exposes an S3-compatible endpoint. When
+    # ``storage_backend`` is "s3" these configure the aioboto3 client. The
+    # endpoint is the project's Storage S3 URL
+    # (https://<project-ref>.supabase.co/storage/v1/s3); credentials are the
+    # S3 access key id and secret generated in the Supabase dashboard under
+    # Storage → S3 access keys. Region matches the project region.
+    s3_bucket: str = Field(default="", validation_alias=AliasChoices("SINGULARITY_S3_BUCKET", "S3_BUCKET"))
+    s3_endpoint_url: str | None = Field(default=None, validation_alias=AliasChoices("SINGULARITY_S3_ENDPOINT_URL", "S3_ENDPOINT_URL"))
+    s3_region: str = Field(default="us-east-1", validation_alias=AliasChoices("SINGULARITY_S3_REGION", "S3_REGION"))
+    s3_access_key_id: str | None = Field(default=None, validation_alias=AliasChoices("SINGULARITY_S3_ACCESS_KEY_ID", "S3_ACCESS_KEY_ID"))
+    s3_secret_access_key: str | None = Field(default=None, validation_alias=AliasChoices("SINGULARITY_S3_SECRET_ACCESS_KEY", "S3_SECRET_ACCESS_KEY"))
+    # File logging. When ``log_file`` is set, application logs are also written
+    # there (in addition to the console). ``log_mode`` controls verbosity of the
+    # step logger used across the chat and research flows:
+    #   "full"  – every step plus its inputs and outputs (verbose; may include
+    #             user content, so treat the file as sensitive).
+    #   "steps" – step boundaries only, no payloads (safe for shared operators).
+    # ``log_level`` is the standard threshold for all logging.
+    log_file: str | None = Field(default="./logs/singularity.log", validation_alias=AliasChoices("SINGULARITY_LOG_FILE", "LOG_FILE"))
+    log_mode: Literal["full", "steps"] = Field(default="steps", validation_alias=AliasChoices("SINGULARITY_LOG_MODE", "LOG_MODE"))
+    log_level: str = Field(default="INFO", validation_alias=AliasChoices("SINGULARITY_LOG_LEVEL", "LOG_LEVEL"))
+    log_max_bytes: int = 10 * 1024 * 1024
+    log_backup_count: int = 5
+
     chat_messages_per_second: int = 3
     chats_per_second: int = 3
     reports_per_second: int = 1

@@ -28,7 +28,7 @@ from .web_fetch import WebFetchTool
 from .calculator import CalculatorTool
 from .current_time import CurrentTimeTool
 from .browser_render import BrowserRenderTool
-from .sandbox_tools import DatasetAnalysisTool, RepositoryInspectionTool
+from .sandbox_tools import CodeExecutionTool, DatasetAnalysisTool, RepositoryInspectionTool
 from .production_retrieval import ProductionRetrievalTool
 from .arxiv_api import ArxivTool
 from .pubmed_api import PubMedTool
@@ -53,6 +53,7 @@ for _tool_class in (
     BrowserRenderTool,
     RepositoryInspectionTool,
     DatasetAnalysisTool,
+    CodeExecutionTool,
     ProductionRetrievalTool,
     ArxivTool,
     PubMedTool,
@@ -79,6 +80,7 @@ __all__ = [
     "BrowserRenderTool",
     "RepositoryInspectionTool",
     "DatasetAnalysisTool",
+    "CodeExecutionTool",
     "ProductionRetrievalTool",
     "ArxivTool",
     "PubMedTool",

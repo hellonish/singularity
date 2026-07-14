@@ -2,16 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from engine.tools.contracts import ChatToolInvocation, validate_chat_tool_invocation
 from engine.tools import TOOL_REGISTRY
-
-logger = logging.getLogger(__name__)
-
 
 def modal_environment_name() -> str:
     """Resolve the Modal environment, defaulting to the account's real one.
@@ -69,16 +65,19 @@ class ModalToolExecutor:
             return self._function
 
     async def aclose(self) -> None:
+        client = self._client
+        # Drop object references before closing the transport.  A Function
+        # handle can otherwise keep the gRPC channel alive past the end of a
+        # short terminal turn and surface an opaque "Unclosed connection".
+        self._client = None
+        self._function = None
         try:
-            if self._client is not None and not self._client.is_closed:
-                await self._client._close.aio()
+            if client is not None and not client.is_closed:
+                await client.__aexit__.aio(None, None, None)
         except Exception:
-            # Cleanup must not replace the real tool/result error. The Modal
-            # SDK already closes process resources on exit; retain a trace.
-            logger.warning("Modal client cleanup failed", exc_info=True)
-        finally:
-            self._client = None
-            self._function = None
+            # Transport teardown is best-effort and must never replace the
+            # actual tool result with an SDK-internal cleanup detail.
+            pass
 
     async def execute(self, invocation: ChatToolInvocation) -> ChatToolResult:
         validated = validate_chat_tool_invocation(invocation)

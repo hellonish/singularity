@@ -17,7 +17,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Box, Frame, RadioList
 from rich.console import Console
 from rich.live import Live
-from rich.markdown import Markdown
+from rich.markdown import Heading, Markdown
 from rich.panel import Panel
 from rich.status import Status
 from rich.table import Table
@@ -31,6 +31,23 @@ COMMAND_WORDS = (
 def _highlighted_value(choices: RadioList):
     """Return the row under the cursor, not the previously checked row."""
     return choices.values[choices._selected_index][0]
+
+
+class _LeftAlignedHeading(Heading):
+    """Keep Markdown headings in the chat flow instead of turning H1 into a panel."""
+
+    def __rich_console__(self, console, options):
+        self.text.justify = "left"
+        if self.tag == "h2":
+            yield Text("")
+        yield self.text
+
+
+class _ChatMarkdown(Markdown):
+    """Rich Markdown tuned for an unframed, left-aligned chat transcript."""
+
+    elements = Markdown.elements.copy()
+    elements["heading_open"] = _LeftAlignedHeading
 
 
 class TerminalUI:
@@ -220,7 +237,7 @@ class TerminalUI:
 
     def answer(self, content: str) -> None:
         """Render a complete, non-streamed answer such as a research report."""
-        self.console.print(Panel(Markdown(content), title="Answer", border_style="green"))
+        self.console.print(_ChatMarkdown(content), justify="left")
 
     def start_status(self, message: str) -> None:
         self.stop_status()
@@ -243,11 +260,7 @@ class TerminalUI:
             self.console.print(text, end="", markup=False, highlight=False)
             return
         self._live_answer_content += text
-        renderable = Panel(
-            Markdown(self._live_answer_content),
-            title="Answer",
-            border_style="green",
-        )
+        renderable = _ChatMarkdown(self._live_answer_content, justify="left")
         if self._live_answer is None:
             self._live_answer = Live(
                 renderable,
@@ -263,7 +276,7 @@ class TerminalUI:
     def final_answer(self, content: str) -> None:
         if self._live_answer is not None:
             self._live_answer.update(
-                Panel(Markdown(content), title="Answer", border_style="green"),
+                _ChatMarkdown(content, justify="left"),
                 refresh=True,
             )
             self._live_answer.stop()
@@ -273,7 +286,7 @@ class TerminalUI:
             self.console.print()
         elif content:
             # Defensive fallback for providers that complete without deltas.
-            self.console.print(Panel(Markdown(content), title="Answer", border_style="green"))
+            self.console.print(_ChatMarkdown(content), justify="left")
 
     def model_rows(self, models, selected_model: str) -> list[tuple[str, str]]:
         return [(model.id, "selected" if model.id == selected_model else "available") for model in models]
@@ -294,7 +307,7 @@ class TerminalUI:
             self.info(f"Completed {content}{suffix}")
         elif kind == "tool_failed":
             self.stop_status()
-            self.warning(f"Tool unavailable: {content}")
+            self.warning(f"Could not complete {content}")
         elif kind == "model_started":
             self.update_status("Thinking…")
         elif kind == "metadata":

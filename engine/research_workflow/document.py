@@ -15,30 +15,64 @@ class ReferenceTag(BaseModel):
     date: str | None = None
 
 
-class ParagraphBlock(BaseModel):
+# Writer models routinely emit reasonable-but-wrong key names for block fields
+# (``content`` for a paragraph's ``text``, ``tag``/``tags`` for
+# ``reference_ids``, ``stats`` for a stats block's ``items``). Accepting those
+# aliases keeps one stray key from dropping an entire section. ``populate_by_name``
+# keeps the canonical field names working alongside the aliases.
+_BLOCK_CONFIG = ConfigDict(populate_by_name=True)
+
+# Common alias spellings for the citation list, shared by every block type.
+_REFERENCE_IDS_ALIASES = AliasChoices("reference_ids", "reference_id", "tags", "tag", "refs", "ref")
+
+
+class _CitedModel(BaseModel):
+    """Base for every model carrying ``reference_ids``: shared config + coercion."""
+
+    model_config = _BLOCK_CONFIG
+    reference_ids: list[str] = Field(default_factory=list, validation_alias=_REFERENCE_IDS_ALIASES)
+
+    @field_validator("reference_ids", mode="before")
+    @classmethod
+    def _wrap_single_reference(cls, value: object) -> object:
+        # A model may cite a single source as a bare string ("tag": "S123") where
+        # the schema expects a list; wrap it so the section survives.
+        if isinstance(value, str):
+            return [value]
+        return value
+
+
+class ParagraphBlock(_CitedModel):
     kind: Literal["paragraph"]
-    text: str
-    reference_ids: list[str] = Field(default_factory=list)
+    text: str = Field(validation_alias=AliasChoices("text", "content", "body"))
 
 
-class HighlightBlock(BaseModel):
+class HighlightBlock(_CitedModel):
     kind: Literal["highlight"]
-    title: str
-    body: str
-    reference_ids: list[str] = Field(default_factory=list)
+    title: str = Field(default="Highlight", validation_alias=AliasChoices("title", "heading", "label"))
+    body: str = Field(validation_alias=AliasChoices("body", "text", "content"))
 
 
-class MathBlock(BaseModel):
+class MathBlock(_CitedModel):
     kind: Literal["math"]
     latex: str = Field(min_length=1)
     display: bool = True
-    reference_ids: list[str] = Field(default_factory=list)
 
 
-class StatItem(BaseModel):
+class StatItem(_CitedModel):
     label: str = Field(min_length=1, max_length=64)
     value: str
-    reference_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def coerce_value_to_string(cls, value: object) -> object:
+        # Models frequently emit a bare number for a stat value; the schema is a
+        # string so a "4" and a "4%" render identically. Coerce rather than reject.
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return format(value, "g") if isinstance(value, float) else str(value)
+        return value
 
     @field_validator("label")
     @classmethod
@@ -50,29 +84,31 @@ class StatItem(BaseModel):
 
 
 class StatsBlock(BaseModel):
+    model_config = _BLOCK_CONFIG
     kind: Literal["stats"]
-    items: list[StatItem] = Field(min_length=1, max_length=2)
+    items: list[StatItem] = Field(
+        min_length=1, max_length=2, validation_alias=AliasChoices("items", "stats", "values")
+    )
 
 
-class ChartPoint(BaseModel):
+class ChartPoint(_CitedModel):
     label: str
     value: float
-    reference_ids: list[str] = Field(default_factory=list)
 
 
 class ChartBlock(BaseModel):
+    model_config = _BLOCK_CONFIG
     kind: Literal["chart"]
     chart_type: Literal["bar", "pie", "line", "area", "scatter"]
     title: str
     unit: str = ""
-    points: list[ChartPoint] = Field(min_length=1)
+    points: list[ChartPoint] = Field(min_length=1, validation_alias=AliasChoices("points", "data"))
 
 
-class TableBlock(BaseModel):
+class TableBlock(_CitedModel):
     kind: Literal["table"]
     columns: list[str] = Field(min_length=1)
     rows: list[list[str]] = Field(default_factory=list)
-    reference_ids: list[str] = Field(default_factory=list)
 
 
 DocumentBlock = Annotated[

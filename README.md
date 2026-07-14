@@ -29,6 +29,47 @@ of mode.
 Browser clients are enabled by configuring `SINGULARITY_CORS_ALLOW_ORIGINS`
 (comma-separated). It is empty by default, leaving CORS off.
 
+## Application logs
+
+The API and research worker emit ordinary console logs plus a rotating file log.
+Every chat turn and research run includes stable `user_id`, `chat_id`, `run_id`,
+and message/report identifiers where available, so one flow can be followed with
+`grep`. Configure the detail level in `.env.production` (or `.env` locally):
+
+```dotenv
+# Step boundaries and identifiers; user/model payloads are omitted.
+SINGULARITY_LOG_MODE=steps
+
+# Or: steps plus complete inputs, outputs, research payloads, and chat deltas.
+# SINGULARITY_LOG_MODE=full
+```
+
+`full` mode contains user prompts, model responses, and retrieved research
+content. Restrict access to it and choose a retention policy appropriate for
+production data. Files rotate at 10 MB with five backups by default; override
+`SINGULARITY_LOG_MAX_BYTES` and `SINGULARITY_LOG_BACKUP_COUNT` when needed.
+
+Production Compose stores `/app/logs/api.log` and `/app/logs/worker.log` in the
+named `application_logs` volume, so the files survive container replacement.
+The quickest live view uses container stdout and works without entering a
+container:
+
+```bash
+docker compose -f docker-compose.prod.yml logs -f --tail=200 api worker
+```
+
+To inspect or filter the persistent files directly:
+
+```bash
+docker compose -f docker-compose.prod.yml exec api tail -f /app/logs/api.log
+docker compose -f docker-compose.prod.yml exec worker tail -f /app/logs/worker.log
+docker compose -f docker-compose.prod.yml exec worker grep 'run_id="RUN_ID"' /app/logs/worker.log
+```
+
+`docker compose down` keeps the named volume; `docker compose down -v` deletes
+it. For centralized production retention, ship container stdout to the host's
+logging driver or a log platform and keep the file volume as the local fallback.
+
 ## Data model
 
 ```text
@@ -192,19 +233,26 @@ Use `curl -N` to disable client-side buffering and watch events arrive:
 curl -N -X POST "http://localhost:8000/chats/$CHAT_ID/messages/stream" \
   -H 'Content-Type: application/json' \
   -H "X-User-ID: $USER_ID" \
-  -d '{"content":"Show me a streamed response"}'
+  -d '{"content":"Show me a streamed response","message_data":{"effort":"high"}}'
 
 curl -N "http://localhost:8000/reports/$REPORT_ID/stream" \
   -H "X-User-ID: $USER_ID"
 ```
 
-The chat stream runs the real engine `ChatAgent`, so the chat must have an
+The chat stream runs the shared bounded `ChatRuntime` and its final `ChatAgent`
+generation stage, so the chat must have an
 active BYOK credential (create one with `POST /llm/credentials` and pass its id
 as `provider_credential_id` when creating the chat); without one the stream
 endpoint returns `422`. The report stream replays the latest stored report
 version, emitting a single `report.pending` event when a report has no version
 yet. `SINGULARITY_SSE_DUMMY_DELAY_SECONDS` (default `0.15`) still paces the
 per-chunk delay for the report replay.
+
+Chat effort is a hard ceiling, not a requirement to spend every step. Instant,
+Medium, High, and Ultra allow at most 4/10/18/30 agent steps, 6/16/36/72 logical
+tool actions, 2/4/8/12 concurrent actions, and 4,096/12,288/24,576/49,152 output
+tokens respectively. The runtime selects a smaller task-sized step budget and
+stops early when it has enough verified evidence.
 
 ## Terminal engine
 
@@ -222,9 +270,8 @@ singularity
 For repository development, `python -m engine.cli` remains equivalent. On first
 launch, use `/key`, choose **Set or replace key**, and enter the selected
 provider key in the hidden prompt. That is the only end-user setup. The CLI
-automatically creates a renewable device API session, synchronizes the BYOK
-credential over TLS, and saves its local device/session state alongside the key
-in the private global configuration.
+saves the selected provider/model/effort alongside the key in the private
+global configuration.
 
 Inside the REPL, plain text streams a chat response. `/provider`, `/models`,
 `/effort`, and `/key` open arrow-key selectors; `/status`, `/reset`, `/clear`,
@@ -232,15 +279,11 @@ Inside the REPL, plain text streams a chat response. `/provider`, `/models`,
 `medium` effort. Groq, DeepSeek, and OpenRouter are supported. Provider keys,
 the selected provider/model/effort, and renewable device-session state are persisted globally in
 `~/.config/singularity/terminal.json` with private user-only permissions; it is
-never written to the repository. Chat and research are persisted by the API.
-The default hosted endpoint is `https://singularity.hellonish.dev/api`; developers
-may override it with `SINGULARITY_API_URL`. Direct provider/Modal execution is
-retained only for repository development via
-`SINGULARITY_CLI_BACKEND=local`; shipped users do not configure Modal.
-If the default hosted endpoint is unavailable or does not expose CLI device
-authentication, the CLI falls back to `http://127.0.0.1:8000`. This fallback
-applies only to the implicit default; an explicit `SINGULARITY_API_URL` is
-never overridden.
+never written to the repository. By default, chat and research execute directly
+from this checkout, and `python -m engine.cli` loads `.env` for its Modal tool
+configuration. Set `SINGULARITY_CLI_BACKEND=api` only when you intentionally
+operate a separately deployed API backend; that mode uses
+`SINGULARITY_API_URL` (or its configured default) and owns persisted chats.
 
 The hosted API resolves the encrypted credential and model for each request,
 retrieves the model's live context/output limits, preserves the user message,
@@ -303,11 +346,22 @@ and extracts one public HTTP page; `browser_render` is the JavaScript fallback.
 URL-reading operations reject private, local, reserved, link-local, embedded-
 credential, non-HTTP, and nonstandard-port targets.
 
-Repository inspection and generated dataset analysis are deliberately excluded
-from the trusted Function and local CLI planner. They use separate no-secret
+General web discovery attempts DDGS once per agent run. An exception, empty
+result, or blocked response permanently routes later attempts in that run to
+Tavily. Configure `TAVILY_API_KEY` in the Modal tool-provider secret so the
+fallback is always available. Independent searches and fetches execute in
+bounded parallel bursts; completed evidence is retained when another action
+fails.
+
+Repository inspection, generated dataset analysis, and general code execution
+are deliberately excluded from the trusted Function. The skill router may
+select them, but the execution router sends them only to separate no-secret
 Modal Sandbox adapters: repository inspection permits only public GitHub clone
 traffic and predefined inspection operations, while dataset analysis has
-networking blocked and receives only a CSV plus generated Python. Production
+networking blocked and receives only a CSV plus generated Python. Code execution
+writes a bounded file set and runs one argv-style command in a network-blocked
+ephemeral workspace; nonzero exits are observations the planner may repair and
+rerun within the effort cap. Production
 vector retrieval is also excluded from CLI and Modal; it executes through the
 authenticated API `RetrievalService` after relational ownership checks.
 

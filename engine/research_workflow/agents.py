@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
@@ -11,6 +12,8 @@ from engine.utils.json_parser import extract_object
 from .dag import ResearchDAG, ResearchNode, ResearchNodeStatus
 from .document import DocumentSection, ParagraphBlock, ReferenceTag, ResearchDocument, validate_document
 from engine.llm.groq import ProviderError
+
+logger = logging.getLogger(__name__)
 
 
 # Reasoning tokens share the completion limit with visible JSON. A 500-token
@@ -45,6 +48,25 @@ def _json(text: str) -> dict[str, Any]:
     return value
 
 
+# Exact per-block field contract. Writer models otherwise guess key names
+# (``content`` for ``text``, ``tag`` for ``reference_ids``, ``stats`` for
+# ``items``), which fails Pydantic validation and drops whole sections. The
+# schema tolerates those aliases as a safety net, but naming the fields here
+# prevents the deviations at the source.
+_BLOCK_SCHEMA_SPEC = (
+    "Every block is an object with a `kind` field and these EXACT fields:\n"
+    "- paragraph: {\"kind\":\"paragraph\", \"text\": string, \"reference_ids\": [tag]}\n"
+    "- highlight: {\"kind\":\"highlight\", \"title\": string, \"body\": string, \"reference_ids\": [tag]}\n"
+    "- stats: {\"kind\":\"stats\", \"items\": [{\"label\": string, \"value\": string, \"reference_ids\": [tag]}]} "
+    "(1-2 items; label <=2 words; value MUST be a string, e.g. \"4%\" not 4)\n"
+    "- chart: {\"kind\":\"chart\", \"chart_type\": one of bar|pie|line|area|scatter, \"title\": string, "
+    "\"unit\": string, \"points\": [{\"label\": string, \"value\": number, \"reference_ids\": [tag]}]}\n"
+    "- table: {\"kind\":\"table\", \"columns\": [string], \"rows\": [[string]], \"reference_ids\": [tag]}\n"
+    "- math: {\"kind\":\"math\", \"latex\": string, \"display\": bool, \"reference_ids\": [tag]}\n"
+    "Use the field name `reference_ids` (a list of tag strings) for citations — never `tag`, `tags`, or `content`."
+)
+
+
 class LLMPlanner:
     _PERSPECTIVES = ("coverage", "evidence-risk", "narrative")
 
@@ -70,7 +92,7 @@ class LLMPlanner:
                 "Return JSON only: {\"perspective\": string, \"nodes\": "
                 "[{\"question\": string, \"rationale\": string, \"section_id\": string, "
                 "\"level\": integer, \"acceptance_criteria\": [string], \"expected_evidence\": [string]}]}. "
-                "Produce at most 3 independent nodes with no dependencies. Treat any dates, recency windows, "
+                "Produce 3 to 5 independent nodes with no dependencies. Treat any dates, recency windows, "
                 "companies, and topics in the objective as hard constraints; do not replace them with broader or older periods. "
                 f"Perspective: {perspective}. Research objective: {query}",
                 max_output_tokens=1_200,
@@ -111,8 +133,13 @@ class DirectResearchPlanner:
 class LLMLead:
     async def merge(self, query: str, proposals: list[dict[str, Any]], caps) -> ResearchDAG:
         dag = ResearchDAG()
+        # Admit more nodes per perspective on deeper tiers so a Deep report has
+        # more sections. The DAG's own node cap (caps.max_nodes) remains the hard
+        # bound; add_node raises once it is reached, so this only widens intake.
+        proposal_count = max(1, len(proposals))
+        per_perspective = max(3, -(-caps.max_nodes // proposal_count))
         for proposal in proposals:
-            for raw in proposal.get("nodes", [])[:3]:
+            for raw in proposal.get("nodes", [])[:per_perspective]:
                 question = str(raw.get("question", "")).strip()
                 if not question:
                     continue
@@ -228,6 +255,7 @@ class LLMWriter:
 
     async def write(self, dag: ResearchDAG, query: str, caps=None) -> dict[str, Any]:
         section_tokens = getattr(caps, "section_completion_tokens", 2_000)
+        subsection_tokens = getattr(caps, "subsection_completion_tokens", 1_500)
         max_parallel = getattr(caps, "max_parallel_research_calls", 6)
         nodes = list(dag.nodes.values())
         facts = [
@@ -242,6 +270,7 @@ class LLMWriter:
         title = str(outline.get("title") or "Research report")[:200]
         plan = [entry for entry in outline.get("sections", []) if isinstance(entry, dict)]
         if not plan:
+            logger.warning("research writer outline produced no sections; using single-call writer")
             return await self._write_single_call(dag, query, section_tokens)
 
         known_refs = self._known_refs(dag)
@@ -266,12 +295,17 @@ class LLMWriter:
                     section_title=str(entry.get("title") or "Section"),
                     facts=section_facts,
                     allowed_tags=allowed_tags,
-                    max_output_tokens=section_tokens,
+                    max_output_tokens=section_tokens + subsection_tokens,
                 )
 
         written = await asyncio.gather(*(write_section(entry) for entry in plan))
         sections = [section for section in written if section is not None]
         if not sections:
+            logger.warning(
+                "research writer produced no valid sections from a %d-section outline; "
+                "using single-call writer",
+                len(plan),
+            )
             return await self._write_single_call(dag, query, section_tokens)
 
         document = ResearchDocument(
@@ -284,10 +318,14 @@ class LLMWriter:
         self._backfill_references(document, known_refs)
         try:
             return validate_document(document).model_dump(mode="json")
-        except ValueError:
+        except ValueError as exc:
             # A section body may cite a tag the outline did not surface, or omit
             # references entirely; fall back to a directly-assembled cited report
             # rather than failing the whole run.
+            logger.warning(
+                "research writer document failed validation (%s); using fallback assembly",
+                exc,
+            )
             return _fallback_document(dag, query)
 
     async def _outline(self, query: str, facts: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -301,7 +339,14 @@ class LLMWriter:
                 max_output_tokens=1_200,
             )
             return _json(response)
-        except (ProviderError, TimeoutError, ValueError):
+        except (ProviderError, TimeoutError, ValueError) as exc:
+            # Falling back to the single-call writer. Log why so a degraded run
+            # can be root-caused instead of silently producing a fallback report.
+            logger.warning(
+                "research writer outline pass failed (%s); using single-call writer",
+                type(exc).__name__,
+                exc_info=exc,
+            )
             return None
 
     async def _section_body(
@@ -317,11 +362,17 @@ class LLMWriter:
         try:
             response = await self.model.complete(
                 "Return JSON only: a single ResearchDocumentV1 section object "
-                "{\"section_id\": string, \"title\": string, \"blocks\": [block]}. "
-                "Each block is a paragraph, highlight, math, stats, chart, or table with a `kind` field. "
+                "{\"section_id\": string, \"title\": string, \"blocks\": [block], \"children\": [section]}. "
+                f"{_BLOCK_SCHEMA_SPEC} "
+                "Decompose the section into 2 to 4 nested subsections under `children`; each child is itself a "
+                "section object with its own `section_id`, `title`, `blocks`, and optionally its own `children` "
+                "(sub-subsections) for a Sections -> Subsections -> Subsubsections hierarchy. Every child section_id "
+                "must be unique within this section. Put an introductory paragraph in the top-level `blocks` and the "
+                "detailed analysis in the children. "
                 "Every factual paragraph, stat, chart point, highlight, or math block must reference an existing tag "
                 f"from this allowed set: {allowed_tags}. Use at most two stat items per stats block and labels of at most two words. "
-                "Write a thorough, well-supported section; do not invent citations or tags outside the allowed set. "
+                "Write thorough, well-supported prose — several paragraphs per subsection; do not invent citations or "
+                "tags outside the allowed set. "
                 f"Research query: {query}\nSection id: {section_id}\nSection title: {section_title}\n"
                 f"Verified node records for this section: {facts}",
                 max_output_tokens=max_output_tokens,
@@ -330,7 +381,13 @@ class LLMWriter:
             payload.setdefault("section_id", section_id)
             payload.setdefault("title", section_title)
             return DocumentSection.model_validate(payload)
-        except (ProviderError, TimeoutError, ValueError):
+        except (ProviderError, TimeoutError, ValueError) as exc:
+            logger.warning(
+                "research writer section %r failed (%s); dropping section",
+                section_id,
+                type(exc).__name__,
+                exc_info=exc,
+            )
             return None
 
     async def _write_single_call(self, dag: ResearchDAG, query: str, max_output_tokens: int) -> dict[str, Any]:
@@ -340,18 +397,29 @@ class LLMWriter:
             response = await self.model.complete(
                 "Return a JSON ResearchDocumentV1 object only. Use schema_version research-document-v1; include title, query, "
                 "sections, references, and limitations. Every section object MUST contain `section_id` (never `id`), `title`, "
-                "and `blocks`. Every factual paragraph, stat, chart point, highlight, or math block "
+                "and `blocks`. "
+                f"{_BLOCK_SCHEMA_SPEC} "
+                "Every factual paragraph, stat, chart point, highlight, or math block "
                 "must reference an existing tag. Use at most two stat items per stats block and labels of at most two words. "
                 f"Research query: {query}\nVerified node records: {facts}",
                 max_output_tokens=max(max_output_tokens, 3_000),
             )
             document = ResearchDocument.model_validate(_json(response))
-        except (ProviderError, TimeoutError, ValueError):
+        except (ProviderError, TimeoutError, ValueError) as exc:
+            logger.warning(
+                "research single-call writer completion failed (%s); using fallback assembly",
+                type(exc).__name__,
+                exc_info=exc,
+            )
             return _fallback_document(dag, query)
         self._backfill_references(document, self._known_refs(dag))
         try:
             return validate_document(document).model_dump(mode="json")
-        except ValueError:
+        except ValueError as exc:
+            logger.warning(
+                "research single-call writer produced an invalid document (%s); using fallback assembly",
+                exc,
+            )
             return _fallback_document(dag, query)
 
     @staticmethod
@@ -403,11 +471,16 @@ def _fallback_document(dag: ResearchDAG, query: str) -> dict[str, Any]:
                 title=node.question[:160],
                 blocks=[ParagraphBlock(kind="paragraph", text=node.answer, reference_ids=tags)],
             ))
+    # The report the reader sees must be grounded only in the researched
+    # evidence — never in how the pipeline produced it. Internal degradation
+    # (e.g. a failed writer pass) is recorded in the logs, not surfaced here as a
+    # title suffix or a limitation, so the assistant answering from this report
+    # is not misled into reporting on the agent's machinery.
     document = ResearchDocument(
-        title="Research report (fallback assembly)",
+        title=query[:200] if query.strip() else "Research report",
         query=query,
         sections=sections,
         references=list(references.values()),
-        limitations=["The writer model failed, so this report was assembled directly from completed cited research nodes."],
+        limitations=[],
     )
     return validate_document(document).model_dump(mode="json")

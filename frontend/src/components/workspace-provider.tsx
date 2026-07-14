@@ -61,8 +61,8 @@ interface WorkspaceData {
   loadMessages: (chatId: string) => Promise<void>;
   loadReport: (reportId: string) => Promise<void>;
   createChat: (reportId?: string, modelId?: string) => Promise<Chat>;
-  createAndSendChat: (content: string, reportId?: string, modelId?: string) => Promise<Chat>;
-  sendChat: (chatId: string, content: string) => Promise<void>;
+  createAndSendChat: (content: string, reportId?: string, modelId?: string, effort?: 'instant' | 'medium' | 'high' | 'ultra') => Promise<Chat>;
+  sendChat: (chatId: string, content: string, effort?: 'instant' | 'medium' | 'high' | 'ultra') => Promise<void>;
   deleteChat: (chatId: string) => Promise<void>;
   deleteReport: (reportId: string) => Promise<void>;
   startResearch: (query: string, strength: number, modelId?: string) => Promise<ResearchRun>;
@@ -191,7 +191,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const sendChat = useCallback(async (chatId: string, content: string) => {
+  const sendChat = useCallback(async (
+    chatId: string,
+    content: string,
+    effort: 'instant' | 'medium' | 'high' | 'ultra' = 'medium',
+  ) => {
     const placeholderId = `streaming-${Date.now()}`;
     const userId = `sending-${Date.now()}`;
     streamingChats.current.add(chatId);
@@ -211,7 +215,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      await api.streamMessage(chatId, content, (event: SSEEvent) => {
+      await api.streamMessage(chatId, content, effort, (event: SSEEvent) => {
         if (event.event === 'message.delta') {
           const delta = typeof event.data.delta === 'string' ? event.data.delta : '';
           setMessages((current) => ({ ...current, [chatId]: (current[chatId] ?? []).map((message) =>
@@ -293,11 +297,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   }, [requireCredential]);
 
-  const createAndSendChat = useCallback(async (content: string, reportId?: string, modelId?: string) => {
+  const createAndSendChat = useCallback(async (
+    content: string,
+    reportId?: string,
+    modelId?: string,
+    effort: 'instant' | 'medium' | 'high' | 'ultra' = 'medium',
+  ) => {
     const chat = await createChat(reportId, modelId);
     // Stream in the background so the caller can open the chat view and watch
     // the reply arrive token by token; sendChat reports its own errors.
-    void sendChat(chat.id, content);
+    void sendChat(chat.id, content, effort);
     return chat;
   }, [createChat, sendChat]);
 

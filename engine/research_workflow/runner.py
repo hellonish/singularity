@@ -16,7 +16,7 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from engine.chat.effort import ChatEffort, reasoning_effort_for_model
+from engine.chat.effort import reasoning_effort_for_strength
 from engine.chat.modal_tools import ModalToolExecutor
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import ProviderError
@@ -47,6 +47,7 @@ class TerminalResearchModel:
         api_key: str,
         model_id: str,
         caps: RunCaps,
+        strength: int = 2,
         provider_name: str = "groq",
         provider: LLMProvider | None = None,
     ) -> None:
@@ -55,6 +56,7 @@ class TerminalResearchModel:
         self._provider_name = provider_name
         self._provider = provider or provider_for(provider_name)
         self._step_timeout_seconds = caps.llm_step_timeout_seconds
+        self._strength = strength
 
     async def complete(self, prompt: str, *, max_output_tokens: int) -> str:
         effective_output_tokens = research_completion_budget(
@@ -86,8 +88,8 @@ class TerminalResearchModel:
                         # tokens). GPT-OSS can otherwise spend the entire completion
                         # budget on hidden reasoning. The helper returns None for
                         # providers/models that do not support this option.
-                        reasoning_effort=reasoning_effort_for_model(
-                            self._model_id, ChatEffort.INSTANT
+                        reasoning_effort=reasoning_effort_for_strength(
+                            self._model_id, self._strength
                         ),
                     ),
                     message=prompt,
@@ -153,6 +155,7 @@ async def run_research(
         provider_name=provider_name,
         model_id=model_id,
         caps=caps,
+        strength=strength,
         provider=provider,
     )
     answerer = LLMAnswerer(model, caps)

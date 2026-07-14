@@ -27,8 +27,8 @@ def test_effort_command_uses_interactive_selection(capsys) -> None:
     asyncio.run(repl._choose_effort())
 
     assert repl.session.effort is ChatEffort.ULTRA
-    assert repl.session.max_output_tokens == 3_000
-    assert "timeout=420s" in capsys.readouterr().out
+    assert repl.session.max_output_tokens == 49_152
+    assert "steps=30, actions=72, parallel=12" in capsys.readouterr().out
 
 
 def test_cancelled_effort_selection_preserves_current_effort() -> None:
@@ -68,11 +68,11 @@ def test_effort_command_shows_research_depths_in_research_mode(capsys) -> None:
     assert "6m per model step" in selection["values"][0][1]
     assert "20m run max" in selection["values"][0][1]
     assert "Standard" in selection["values"][1][1]
-    assert "8 nodes" in selection["values"][1][1]
+    assert "10 nodes" in selection["values"][1][1]
     assert "7m 30s per model step" in selection["values"][1][1]
     assert "30m run max" in selection["values"][1][1]
     assert "Deep" in selection["values"][2][1]
-    assert "12 nodes" in selection["values"][2][1]
+    assert "16 nodes" in selection["values"][2][1]
     assert "10m per model step" in selection["values"][2][1]
     assert "60m run max" in selection["values"][2][1]
     assert repl.session.effort is ChatEffort.HIGH

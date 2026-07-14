@@ -33,8 +33,10 @@ WORKDIR /app
 # Copy application code
 COPY . .
 
-# Create blob storage directory
-RUN mkdir -p /app/blob_storage && chown -R appuser:appuser /app
+# Create writable runtime directories before named volumes are mounted. Docker
+# copies this ownership into a fresh volume, allowing the non-root process to
+# create and rotate its log files.
+RUN mkdir -p /app/blob_storage /app/logs && chown -R appuser:appuser /app
 
 USER appuser
 

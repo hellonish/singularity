@@ -120,6 +120,9 @@ services:
       - ENVIRONMENT=production
       - SINGULARITY_AUTO_CREATE_SCHEMA=false
       - SINGULARITY_RESEARCH_WORKER_ENABLED=true
+      - SINGULARITY_LOG_FILE=/app/logs/api.log
+    volumes:
+      - application_logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -153,6 +156,9 @@ services:
       - ENVIRONMENT=production
       - SINGULARITY_AUTO_CREATE_SCHEMA=false
       - SINGULARITY_RESEARCH_WORKER_ENABLED=true
+      - SINGULARITY_LOG_FILE=/app/logs/worker.log
+    volumes:
+      - application_logs:/app/logs
     command: arq api.research_worker.WorkerSettings
     deploy:
       resources:
@@ -195,3 +201,4 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
+  application_logs:
