@@ -15,7 +15,12 @@ def create_checkpointer(database_url: str):
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("install langgraph-checkpoint-postgres for PostgreSQL checkpoints") from exc
-        checkpoint_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        # The runtime uses asyncpg, which accepts ``ssl=require``. The LangGraph
+        # checkpointer connects through psycopg, whose equivalent option is
+        # ``sslmode=require`` (psycopg rejects the ``ssl`` query parameter).
+        checkpoint_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1).replace(
+            "ssl=require", "sslmode=require"
+        )
         return AsyncPostgresSaver.from_conn_string(checkpoint_url)
     try:
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
