@@ -17,7 +17,14 @@ target_metadata = Base.metadata
 
 def _migration_url() -> str:
     url = settings.database_url
-    return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1).replace("sqlite+aiosqlite://", "sqlite://", 1)
+    if url.startswith("postgresql+asyncpg://"):
+        # The runtime uses asyncpg, which accepts ``ssl=require``. Alembic
+        # runs synchronously through psycopg/libpq, whose equivalent option is
+        # ``sslmode=require``.
+        return url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1).replace(
+            "ssl=require", "sslmode=require"
+        )
+    return url.replace("sqlite+aiosqlite://", "sqlite://", 1)
 
 
 def run_migrations_offline() -> None:
