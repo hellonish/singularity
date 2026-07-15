@@ -33,7 +33,7 @@ export function TopChrome() {
   };
 
   return (
-    <header style={{ position: 'absolute', top: 0, left: 0, right: rightOffset, zIndex: 25, display: 'flex', alignItems: 'center', gap: '8px', height: '72px', padding: '0 18px', pointerEvents: 'none' }}>
+    <header style={{ position: 'absolute', top: 0, left: 0, right: rightOffset, zIndex: 25, display: 'flex', alignItems: 'center', gap: '8px', height: view === 'run' ? '58px' : '72px', padding: '0 18px', pointerEvents: 'none' }}>
       {view === 'report' && (
         <button
           onClick={handleBackToGrid}

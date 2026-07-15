@@ -20,7 +20,7 @@ function relativeTime(value: string): string {
 
 export function GridView() {
   const { reports, runs, loading } = useWorkspace();
-  const { setView, setActiveReportId } = useAppStore();
+  const { setView, setActiveReportId, setActiveRunId } = useAppStore();
   const { user } = useAuthSession();
 
   const [greetingMessage, setGreetingMessage] = useState<{ prefix: string; suffix: string } | null>(null);
@@ -68,11 +68,21 @@ export function GridView() {
       messages = night;
     }
 
-    setGreetingMessage(messages[Math.floor(Math.random() * messages.length)]);
+    const frame = window.requestAnimationFrame(() => {
+      setGreetingMessage(messages[Math.floor(Math.random() * messages.length)]);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [firstName]);
 
-  const handleOpenReport = (id: string) => {
-    setActiveReportId(id);
+  const handleOpenProject = (reportId: string, runId?: string) => {
+    const run = runId ? runs.find((item) => item.id === runId) : undefined;
+    setActiveReportId(reportId);
+    if (run && ['queued', 'running'].includes(run.status)) {
+      setActiveRunId(run.id);
+      setView('run');
+      return;
+    }
+    setActiveRunId(null);
     setView('report');
   };
 
@@ -94,7 +104,7 @@ export function GridView() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(268px, 1fr))', gap: '16px' }}>
               {reports.map((report) => {
                 const run = runs.find((item) => item.report_id === report.id);
-                return <button key={report.id} onClick={() => handleOpenReport(report.id)} className="animate-sg-rise" style={{ position: 'relative', cursor: 'pointer', textAlign: 'left', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px 18px 15px', boxShadow: 'var(--shadow-sm)', color: 'var(--text)' }}>
+                return <button key={report.id} onClick={() => handleOpenProject(report.id, run?.id)} className="animate-sg-rise" style={{ position: 'relative', cursor: 'pointer', textAlign: 'left', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px 18px 15px', boxShadow: 'var(--shadow-sm)', color: 'var(--text)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                     <span className="sg-mono" style={{ marginLeft: 'auto', fontSize: '10px', padding: '2px 7px', borderRadius: '5px', backgroundColor: report.status === 'ready' ? 'var(--accent-soft)' : 'var(--surface-3)', color: 'var(--accent-2)' }}>{run?.status ?? report.status}</span>
                   </div>

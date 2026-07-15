@@ -207,7 +207,7 @@ function ReportReadyCard({ title, sources, onOpen }: { title: string; sources: n
 
 /* ---- Main view ------------------------------------------------------------*/
 export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
-  const { activeRunId, setView, setActiveReportId } = useAppStore();
+  const { activeRunId, setView, setActiveReportId, setActiveRunId } = useAppStore();
   const { runs, runProgress, cancelResearch } = useWorkspace();
   const feedRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -226,6 +226,16 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
     const tick = setInterval(() => setElapsed((Date.now() - anchor) / 1000), 250);
     return () => clearInterval(tick);
   }, [running, startedAtMs]);
+
+  // Keep the progress view attached only while work is active. Once the
+  // selected run reaches a user-visible terminal state, continue into its
+  // report automatically (including the report's failure state).
+  useEffect(() => {
+    if (!run?.report_id || !['completed', 'failed'].includes(run.status)) return;
+    setActiveReportId(run.report_id);
+    setActiveRunId(null);
+    setView('report');
+  }, [run?.report_id, run?.status, setActiveReportId, setActiveRunId, setView]);
 
   // A finished run shows its fixed wall-clock duration, derived during render.
   const finalElapsed = finished && run?.finished_at && run.started_at
@@ -257,7 +267,7 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
       {/* top chrome */}
-      <header style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '14px', height: '58px', padding: '0 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
+      <header style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '14px', height: '58px', padding: '0 72px 0 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11px', letterSpacing: '.04em', color: 'var(--text-faint)' }}>
           {Icon.search} Deep research run
         </span>
