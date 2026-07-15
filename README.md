@@ -521,6 +521,173 @@ flowchart TD
     class Start,Answer terminal;
 ```
 
+### Proposed chat workflow (unified agent loop redesign)
+
+The current pipeline splits every turn into a fixed sequence — deterministic
+route → separate planner model → pre-answer tool loop → separate answer model.
+That split has four structural costs: the planner emits **one tool call per
+planning round-trip** (so real parallelism only exists in the hardcoded
+discovery seed), the planner and answerer see **different lossy views** of the
+evidence (1,200-char vs 8,000-char truncations), keyword phrase lists gate both
+skill exposure and mandatory retrieval (**fail-closed on tool outages**), and
+every phase runs serially.
+
+The redesign replaces the planner/answerer split with **one native
+tool-calling agent loop**: the same model that answers decides which tools to
+call, receives full (budgeted) results as native `role: "tool"` messages, can
+emit many tool calls in a single turn, and streams the final answer from the
+same loop. Effort profiles, execution routing, redaction, and citation
+handling are kept as guardrails; heuristics are demoted from gates to hints.
+
+#### Components and methods
+
+| Component | Replaces | Responsibility |
+| --- | --- | --- |
+| `engine/chat/agent_loop.py` — `UnifiedChatAgentLoop.run()` | `ChatRuntime.stream()` + `BoundedChatToolLoop.run()` + `ChatAgent.stream()` | Owns the whole turn: message-list state, bounded iteration, tool dispatch, final answer streaming. |
+| `LLMProvider.stream_with_tools()` | `plan_tool_call()` + `stream_chat()` | One provider call per model turn that yields either streamed tool-call deltas (`tool_calls[]`, natively parallel) or streamed answer text. |
+| `TurnSetup.gather()` | serial routing → budget → capability lookup | Runs model-capability resolution, heuristic routing, and the speculative discovery seed concurrently via `asyncio.gather` before the first model turn. |
+| `SkillCatalog.compact()` + `load_skill(skill_id)` meta-tool | `select_skills()` 3-skill keyword shortlist | System prompt lists a one-line summary of **every** skill; the model calls `load_skill` to pull full instructions on demand (progressive disclosure). Keyword rules survive only as ranking hints. |
+| `route_chat_request()` (advisory mode) | mandatory fail-closed routing | A freshness match seeds the discovery burst and adds a "time-sensitive" hint; it never fails the turn. Hard failure remains only for explicit, unsimulatable tool commands ("run this code") with tools disabled. |
+| `ToolMessage` error taxonomy | `_web_fetch_fallback()` URL regex | Tool failures return typed tool messages (`retryable_infra` / `permanent` / `empty_result`) so the model chooses retry, alternate tool, or explicit disclosure. |
+| `MessageBudgeter.fit()` | `budget_chat_prompt()` + `format_tool_context()` string merge | Budgets the full message list (history + tool messages) per model turn; oldest tool payloads compact first, citations never dropped. `format_tool_context` is retained as fallback for providers without native tool calling. |
+| Turn checkpoint store | none | Persists executed tool results per message so a dropped SSE connection resumes without re-paying tool calls. |
+| Effort profiles (`effort.py`), `RoutedChatToolExecutor`, redaction, URL-dedup citations | unchanged | Step/action/parallelism/timeout ceilings, trusted-function vs sandbox routing with retries, credential redaction, untrusted-data framing. |
+
+Adaptive step budgeting by keyword (`choose_agent_step_budget`) is removed:
+the loop starts each turn with the full effort ceiling available and the model
+stops when it has enough evidence — the caps *are* the budget.
+
+#### Unified pipeline
+
+```mermaid
+flowchart TD
+    Start([User message + history]) --> Setup
+
+    subgraph Setup["TurnSetup.gather() — concurrent"]
+        direction LR
+        CapsR["resolve model capabilities<br/>(context window, output limit)"]
+        HintR["route_chat_request()<br/>→ advisory hint only"]
+        SeedR["speculative discovery seed<br/>(fires immediately on freshness match)"]
+    end
+
+    Setup --> Compose["Compose message list:<br/>system prompt + skill catalog<br/>+ history + seed tool messages"]
+    Compose --> ModelTurn
+
+    subgraph Loop["UnifiedChatAgentLoop — bounded by effort profile"]
+        direction TB
+        ModelTurn["Model turn:<br/>stream_with_tools(messages, schemas)"] --> Kind{"output kind?"}
+        Kind -->|"tool_calls[] (N per turn)"| Validate["validate + apply caps:<br/>max_tool_actions, per-tool caps,<br/>code repair cap, DDGS→Tavily"]
+        Validate --> Exec["Execute batch in parallel<br/>(action + sandbox semaphores,<br/>trusted fn / sandbox routing)"]
+        Exec --> Append["Append role:'tool' messages<br/>(typed errors included, redacted)"]
+        Append --> Budget2["MessageBudgeter.fit()<br/>compact oldest tool payloads"]
+        Budget2 --> StepCheck{"steps / actions /<br/>deadline margin left?"}
+        StepCheck -->|yes| ModelTurn
+        StepCheck -->|"deadline margin hit"| Force["cancel outstanding tools;<br/>force final answer from<br/>evidence gathered so far"]
+        Kind -->|"text deltas"| Answer
+        Force --> Answer
+    end
+
+    Answer([Streamed answer + citations])
+
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class Start,Answer terminal;
+```
+
+#### Flow types
+
+Every request archetype travels the same loop; only the entry state and the
+model's tool decisions differ.
+
+**1. Conversational turn** (no heuristic match, model plans no tools):
+
+```mermaid
+flowchart LR
+    U([Message]) --> S["TurnSetup (no seed)"] --> M["Model turn 1"] -->|"text deltas only"| A([Answer])
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class U,A terminal;
+```
+
+One model call total — strictly cheaper than today's planner-then-answerer
+two-call minimum.
+
+**2. Fresh-evidence turn** (freshness heuristic matched):
+
+```mermaid
+flowchart LR
+    U([Message]) --> S["TurnSetup:<br/>seed burst runs during setup"] --> M1["Model turn 1<br/>sees seed results + hint"]
+    M1 -->|"parallel tool_calls:<br/>fetch top sources"| E["parallel execute"] --> M2["Model turn 2"]
+    M2 -->|"evidence sufficient"| A([Cited answer])
+    M2 -.->|"gap found → more calls"| E
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class U,A terminal;
+```
+
+The seed's "zero planning cost" property is preserved; follow-up fetches now
+batch in one model turn instead of one per planning round-trip.
+
+**3. Explicit tool turn** ("run this code", "search arxiv for …"):
+
+```mermaid
+flowchart LR
+    U([Message]) --> M1["Model turn 1:<br/>load_skill(code_execution)<br/>+ code_execution call"] --> E["sandbox execute"]
+    E -->|"nonzero exit (typed)"| M2["Model turn 2:<br/>repair + rerun<br/>(≤ repair cap)"] --> E
+    E -->|success| A([Answer with results])
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class U,A terminal;
+```
+
+Skill selection is the model's choice from the full catalog — no keyword gate
+required to reach arXiv, SEC, or sandbox tools.
+
+**4. Degraded turn** (time-sensitive, but tools fail or are disabled):
+
+```mermaid
+flowchart LR
+    U([Message]) --> M1["Model turn 1"] -->|tool_calls| E["execute → typed failures<br/>(retryable_infra)"]
+    E --> M2["Model turn 2:<br/>retry / alternate tool"] -->|"still failing"| A(["Answer with explicit disclosure:<br/>'live data unavailable; as of training…'"])
+    M2 -.->|recovered| A2([Cited answer])
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class U,A,A2 terminal;
+```
+
+Replaces today's `ToolEvidenceUnavailable` dead end. The only remaining hard
+failure is an explicit tool command with Modal disabled.
+
+**5. Deadline soft-landing** (long turn approaching the effort time cap):
+
+```mermaid
+flowchart LR
+    U([Message]) --> L["loop iterations…"] --> D{"deadline − margin?"}
+    D -->|hit| F["cancel outstanding tools;<br/>final forced answer turn"] --> A([Best-effort answer<br/>from gathered evidence])
+    D -->|ok| L
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class U,A terminal;
+```
+
+Replaces raising `ChatRuntimeLimitExceeded` after real work has already been
+paid for.
+
+#### Rollout
+
+1. **Phase 1 — unify the loop**: `agent_loop.py`, `stream_with_tools()`
+   provider extension; retire `GroqChatToolPlanner` / `SeededChatToolPlanner`;
+   fold `ChatAgent` retry logic (pre-first-delta retry, empty-stream low-effort
+   retry) into the loop's answer stage.
+2. **Phase 2 — parallelism**: native multi-call batches; concurrent
+   `TurnSetup`; SSE progress events map 1:1 onto loop iterations.
+3. **Phase 3 — generalization**: full skill catalog + `load_skill`
+   progressive disclosure; heuristics demoted to advisory; keyword step
+   budgeting removed.
+4. **Phase 4 — hardening**: typed tool errors with model-driven recovery,
+   turn checkpointing, deadline soft-landing, and an eval fixture suite of
+   request archetypes (conversational / freshness / code / multi-source /
+   follow-up / tool-outage) asserting routing and degradation behavior.
+
+The legacy pipeline stays available behind
+`SINGULARITY_CHAT_LOOP=unified|legacy` until the eval suite passes on Groq,
+DeepSeek, and OpenRouter — the main risk is provider variance in streamed
+tool-call deltas.
+
 ### Research workflow
 
 Research is a LangGraph state machine (`engine/research_workflow/langgraph_runtime.py`)
