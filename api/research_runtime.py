@@ -22,6 +22,7 @@ from api.services.research import RunEventPublisher
 from api.storage.factory import get_object_store
 from engine.chat.effort import reasoning_effort_for_strength
 from engine.chat.modal_tools import ModalToolExecutor
+from engine.entity_resolution import EntityScope, lightweight_chat_scope
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import ProviderError
 from engine.llm.structured import StructuredOutputSpec
@@ -252,6 +253,17 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         test_mode=test_mode,
     )
     search_variants = 1 if test_mode else 3
+    research_brief = dict(run.run_data.get("research_brief") or {})
+    entity_scope = EntityScope.model_validate(research_brief.get("entity_scope") or {})
+    if not research_brief:
+        # Compatibility callers may still create a run directly. They cannot
+        # bypass the identity boundary: a zero-call conservative scope is used,
+        # and an ambiguous target fails before any web tool is dispatched.
+        entity_scope = lightweight_chat_scope(run.query)
+        if not entity_scope.resolved:
+            raise ValueError(
+                "Research target entity is ambiguous. Prepare the run in Ask or Auto mode first."
+            )
     model = ProviderResearchModel(
         provider_name=credential.provider,
         api_key=decrypt_secret(credential.encrypted_secret),
@@ -286,6 +298,7 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         max_fetches=caps.max_fetches,
         max_search_variants=search_variants,
         progress_reporter=publish_progress,
+        entity_scope=entity_scope,
     )
 
     async def resolver(node, max_tool_calls: int) -> dict[str, Any]:
@@ -390,6 +403,7 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
                         caps=caps,
                         on_update=publish,
                         on_progress=publish_progress,
+                        research_brief=research_brief,
                     )
                 )
     finally:

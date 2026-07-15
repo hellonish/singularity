@@ -128,18 +128,32 @@ def test_model_answers_directly_after_seed_evidence() -> None:
     executor = _RecordingExecutor()
     loop_agent = UnifiedChatAgentLoop(provider=provider, executor_factory=lambda: executor)
 
-    events = asyncio.run(_collect(loop_agent, "What's the latest on RISC-V?", modal_enabled=True))
+    events = asyncio.run(_collect(loop_agent, "What's the latest on RISC-V instruction set architecture?", modal_enabled=True))
 
-    # Seed burst: one DDGS-default search, one Tavily follow-up.
-    assert [call.tool_name for call in executor.invocations] == ["web_search", "web_search"]
+    # Lightweight Chat spends one discovery call before the model decides if a
+    # fetch or refinement is needed.
+    assert [call.tool_name for call in executor.invocations] == ["web_search"]
     assert executor.invocations[0].arguments.get("search_backend", "auto") == "auto"
-    assert executor.invocations[1].arguments["search_backend"] == "tavily"
     assert executor.closed is True
     assert any(event.progress_kind == "tool_completed" for event in events if event.type == "progress")
     assert events[-1].content == "Grounded answer."
     # The model turn saw the seed evidence as native tool messages.
     turn = provider.tool_turn_messages[0]
     assert any(message.get("role") == "tool" and "example.test" in message["content"] for message in turn)
+
+
+def test_ambiguous_named_entity_asks_before_any_search_or_model_call() -> None:
+    provider = _BaseProvider()
+    executor = _RecordingExecutor()
+    loop_agent = UnifiedChatAgentLoop(provider=provider, executor_factory=lambda: executor)
+
+    events = asyncio.run(_collect(loop_agent, "Search for Apple", modal_enabled=True))
+
+    assert executor.invocations == []
+    assert provider.tool_turn_messages == []
+    assert provider.chat_messages == []
+    assert [event.type for event in events] == ["started", "completed"]
+    assert "Which Apple do you mean?" in (events[-1].content or "")
 
 
 def test_parallel_tool_batch_executes_and_feeds_next_turn() -> None:

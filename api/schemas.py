@@ -159,10 +159,43 @@ class ResearchRunCreate(BaseModel):
     run_data: dict[str, Any] = Field(default_factory=dict)
 
 
+class ResearchPreparationCreate(BaseModel):
+    query: str = Field(min_length=10, max_length=10_000)
+    provider_credential_id: str
+    model_id: Optional[str] = Field(default=None, max_length=255)
+    strength: int = Field(default=2, ge=1, le=3)
+    approval_mode: Literal["ask", "auto"] = "ask"
+    audience: str = Field(default="practitioner", min_length=1, max_length=64)
+    output_language: str = Field(default="en", min_length=2, max_length=12)
+
+
+class ResearchPreparationAnswerCreate(BaseModel):
+    question_id: str = Field(min_length=1, max_length=80)
+    answer: str = Field(min_length=1, max_length=4_000)
+
+
+class ResearchPreparationRead(APIModel):
+    id: str
+    user_id: str
+    query: str
+    approval_mode: str
+    status: str
+    model_id: Optional[str]
+    strength: int
+    current_question_index: int
+    plan_data: dict[str, Any]
+    answers: dict[str, Any]
+    final_brief: dict[str, Any]
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+
 class ResearchRunRead(APIModel):
     id: str
     user_id: str
     report_id: Optional[str]
+    preparation_id: Optional[str]
     query: str
     status: str
     engine_version: Optional[str]
@@ -170,6 +203,11 @@ class ResearchRunRead(APIModel):
     finished_at: Optional[datetime]
     error_message: Optional[str]
     run_data: dict[str, Any]
+
+
+class ResearchPreparationResult(BaseModel):
+    preparation: ResearchPreparationRead
+    run: Optional[ResearchRunRead] = None
 
 
 class ResearchRunEventRead(APIModel):

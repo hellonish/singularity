@@ -89,12 +89,50 @@ export interface Report {
 export interface ResearchRun {
   id: string;
   report_id: string | null;
+  preparation_id: string | null;
   query: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
   run_data: Record<string, unknown>;
+}
+
+export interface ClarificationQuestion {
+  question_id: string;
+  text: string;
+  reason: string;
+}
+
+export interface ResearchBrief {
+  refined_objective: string;
+  plan_points: string[];
+  questions: ClarificationQuestion[];
+  must_haves: string[];
+  deliverable: string;
+  assumptions: string[];
+  entity_scope: Record<string, unknown>;
+}
+
+export interface ResearchPreparation {
+  id: string;
+  query: string;
+  approval_mode: 'ask' | 'auto';
+  status: 'draft' | 'awaiting_input' | 'ready' | 'started' | 'cancelled' | 'failed';
+  model_id: string | null;
+  strength: number;
+  current_question_index: number;
+  plan_data: Partial<ResearchBrief> & Record<string, unknown>;
+  answers: Record<string, string>;
+  final_brief: Partial<ResearchBrief> & Record<string, unknown>;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResearchPreparationResult {
+  preparation: ResearchPreparation;
+  run: ResearchRun | null;
 }
 
 /** The six pipeline phases shown in the Research Run rail, in order. */
@@ -116,6 +154,7 @@ export type RunFeedItem =
   | { id: string; kind: 'phase'; label: string }
   | { id: string; kind: 'thought'; text: string }
   | { id: string; kind: 'scope'; objective: string; mustHaves: string[]; deliverable: string }
+  | { id: string; kind: 'research_plan'; points: string[] }
   | { id: string; kind: 'agent_dispatch'; nodeId: string; question: string }
   | { id: string; kind: 'tool_call'; tool: string; nodeId?: string; status: string; query?: string; sourceCount?: number; elapsedSeconds?: number; running: boolean; failed: boolean }
   | { id: string; kind: 'source_added'; title: string; url: string; sourceType: string }
@@ -160,6 +199,7 @@ export interface ResearchProgressPayload {
   objective?: string;
   must_haves?: string[];
   deliverable?: string;
+  plan_points?: string[];
   section_title?: string;
   error?: string;
   cycle?: number;
@@ -333,6 +373,15 @@ export const api = {
     request<ResearchRun>('/research/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   cancelRun: (runId: string) => request<ResearchRun>(`/research/runs/${runId}/cancel`, { method: 'POST' }),
   getRun: (runId: string) => request<ResearchRun>(`/research/runs/${runId}`),
+  createPreparation: (body: { query: string; approval_mode: 'ask' | 'auto'; provider_credential_id: string; model_id?: string; strength: number }) =>
+    request<ResearchPreparationResult>('/research/preparations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  getPreparation: (preparationId: string) => request<ResearchPreparation>(`/research/preparations/${preparationId}`),
+  answerPreparation: (preparationId: string, questionId: string, answer: string) =>
+    request<ResearchPreparation>(`/research/preparations/${preparationId}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: questionId, answer }) }),
+  startPreparation: (preparationId: string) =>
+    request<ResearchRun>(`/research/preparations/${preparationId}/start`, { method: 'POST' }),
+  cancelPreparation: (preparationId: string) =>
+    request<ResearchPreparation>(`/research/preparations/${preparationId}`, { method: 'DELETE' }),
   listCredentials: () => request<ProviderCredential[]>('/llm/credentials'),
   getCredentialSelection: () => request<ProviderCredentialSelection>('/llm/selection'),
   setCredentialSelection: (credentialId: string | null) =>

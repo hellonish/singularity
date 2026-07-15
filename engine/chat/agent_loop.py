@@ -32,6 +32,14 @@ from engine.chat.model_capabilities import MODEL_CAPABILITIES, ModelCapabilityRe
 from engine.chat.models import ChatAgentInput, ChatStreamEvent
 from engine.chat.prompt import build_runtime_system_prompt
 from engine.chat.retry import RetryPolicy
+from engine.entity_resolution import (
+    EntityScope,
+    SourceEntityDecision,
+    clarification_for_scope,
+    classify_source,
+    lightweight_chat_scope,
+    scope_search_query,
+)
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import GroqProviderError, LLMStreamEvent, LLMToolCall
 from engine.llm.providers import LLMProvider
@@ -45,9 +53,15 @@ from engine.tools.contracts import (
 
 TOOL_RESULT_MAX_CHARS = 8_000
 
-_SEED_FOLLOW_UP = " official primary sources"
 _SEED_SKILL_ID = "general_web_research"
 _SEED_FUNCTION_NAME = f"{_SEED_SKILL_ID}__web_search"
+
+_ENTITY_RETRIEVAL_TOOLS = frozenset({
+    "arxiv", "browser_render", "clinicaltrials", "courtlistener", "dataset_hub",
+    "github", "google_books", "pdf_reader", "pubmed", "sec_edgar",
+    "semantic_scholar", "standards_fetch", "web_fetch", "web_search",
+    "youtube_transcript",
+})
 
 _RETRYABLE_ERROR_MARKERS = (
     "timed out", "timeout", "connection", "unavailable", "temporar", "rate limit", "cancelled",
@@ -150,6 +164,39 @@ def redact_tool_result(result: ChatToolResult) -> ChatToolResult:
     )
 
 
+def gate_tool_result(result: ChatToolResult, scope: EntityScope) -> ChatToolResult:
+    """Drop namesake sources and rebuild mixed search text from admitted snippets."""
+    if result.error or not result.sources or not scope.entities:
+        return result
+    admitted: list[dict[str, Any]] = []
+    for source in result.sources:
+        candidate = dict(source)
+        if len(result.sources) == 1:
+            candidate.setdefault("content", result.content)
+        verdict = classify_source(candidate, scope)
+        if verdict.decision == SourceEntityDecision.ALIGNED:
+            candidate["entity_match"] = verdict.model_dump(mode="json")
+            admitted.append(candidate)
+    if not admitted:
+        return ChatToolResult(
+            content="",
+            sources=[],
+            credibility_base=0.0,
+            error="No retrieved source matched the resolved target entity.",
+        )
+    content = (
+        result.content
+        if len(result.sources) == 1 and len(admitted) == 1
+        else "\n\n".join(str(item.get("snippet") or "") for item in admitted if item.get("snippet"))
+    )
+    return ChatToolResult(
+        content=content,
+        sources=admitted,
+        credibility_base=result.credibility_base,
+        error=None,
+    )
+
+
 def _rejection(reason: str) -> str:
     return json.dumps({"error_kind": "permanent", "detail": reason})
 
@@ -229,11 +276,21 @@ class UnifiedChatAgentLoop:
         deadline = loop.time() + profile.run_timeout_seconds
         timeout_message = f"Agent run exceeded the {profile.run_timeout_seconds}-second {effort} cap"
         route = route_chat_request(request.message, context=request.context)
+        entity_scope = lightweight_chat_scope(route.tool_query, context=request.context)
 
         # The only remaining hard tool failure: an explicit, unsimulatable tool
         # command with tools off. Time-sensitive turns degrade with disclosure.
         if route.reason == "explicit_tool_request" and not modal_enabled:
             raise ToolEvidenceUnavailable("This request requires a tool, but Modal tools are disabled")
+
+        if route.tool_requested and not entity_scope.resolved:
+            yield ChatStreamEvent(type="started", model_id=config.model_id)
+            yield ChatStreamEvent(
+                type="completed",
+                model_id=config.model_id,
+                content=clarification_for_scope(entity_scope),
+            )
+            return
 
         run_id = str(uuid4())
         executor = self._executor_factory() if modal_enabled else None
@@ -245,7 +302,7 @@ class UnifiedChatAgentLoop:
             model_id=config.model_id,
         ))
         seed_task = (
-            asyncio.create_task(self._run_seed(executor, route.tool_query, effort, profile, run_id))
+            asyncio.create_task(self._run_seed(executor, route.tool_query, effort, profile, run_id, entity_scope))
             if tools_enabled and route.needs_fresh_evidence
             else None
         )
@@ -391,6 +448,7 @@ class UnifiedChatAgentLoop:
                     config=config,
                     deadline=deadline,
                     margin=margin,
+                    entity_scope=entity_scope,
                 ):
                     if event is None:
                         cancelled = True
@@ -499,8 +557,9 @@ class UnifiedChatAgentLoop:
         effort: ChatEffort,
         profile: ChatEffortProfile,
         run_id: str,
+        entity_scope: EntityScope,
     ) -> list[tuple[str, str, dict[str, Any], ChatToolResult]]:
-        """Speculative two-query discovery burst, concurrent with turn setup.
+        """Run one speculative discovery call concurrently with turn setup.
 
         Failures are absorbed: they arrive as typed error tool messages the
         model can react to, never as a failed turn.
@@ -533,11 +592,10 @@ class UnifiedChatAgentLoop:
                 )
             return call_id, seed_query, arguments, redact_tool_result(result)
 
-        # One DDGS attempt per agent run: the second seed goes straight to Tavily.
-        return list(await asyncio.gather(
-            one("seed_0", query, {"max_results": 8}),
-            one("seed_1", f"{query}{_SEED_FOLLOW_UP}", {"max_results": 8, "search_backend": "tavily"}),
-        ))
+        scoped_query = scope_search_query(query, entity_scope)
+        result = await one("seed_0", scoped_query, {"max_results": 8})
+        call_id, seed_query, arguments, tool_result = result
+        return [(call_id, seed_query, arguments, gate_tool_result(tool_result, entity_scope))]
 
     async def _merge_seed_results(
         self,
@@ -696,6 +754,7 @@ class UnifiedChatAgentLoop:
         config: LLMRequestConfig,
         deadline: float,
         margin: float,
+        entity_scope: EntityScope,
     ) -> AsyncIterator[ChatStreamEvent | None]:
         """Execute one tool batch, forwarding live progress events.
 
@@ -725,6 +784,7 @@ class UnifiedChatAgentLoop:
             state=state,
             messages=messages,
             emit=emit,
+            entity_scope=entity_scope,
         ))
         try:
             while not batch_task.done() or not progress_queue.empty():
@@ -757,13 +817,19 @@ class UnifiedChatAgentLoop:
         state: _LoopState,
         messages: list[dict[str, Any]],
         emit: Callable[..., Any],
+        entity_scope: EntityScope,
     ) -> None:
         immediate: dict[str, str] = {}
         pending: list[tuple[LLMToolCall, ChatToolInvocation]] = []
         for call in calls:
             invocation, content = self._plan_call(call, bindings, run_id, effort, profile, state)
             if invocation is not None:
-                pending.append((call, invocation))
+                if invocation.tool_name in _ENTITY_RETRIEVAL_TOOLS and not entity_scope.resolved:
+                    immediate[call.id] = _rejection(
+                        "Target entity is ambiguous. Do not search; ask the user for one identifying detail."
+                    )
+                else:
+                    pending.append((call, invocation))
             else:
                 immediate[call.id] = content or _rejection("call produced no result")
 
@@ -772,6 +838,10 @@ class UnifiedChatAgentLoop:
 
         async def execute_one(call: LLMToolCall, invocation: ChatToolInvocation) -> tuple[str, str]:
             async with semaphore:
+                if invocation.tool_name in _ENTITY_RETRIEVAL_TOOLS:
+                    invocation = invocation.model_copy(
+                        update={"query": scope_search_query(invocation.query, entity_scope)}
+                    )
                 started_at = asyncio.get_running_loop().time()
                 label = _format_tool_label(invocation)
                 await emit("tool_start", label, None)
@@ -811,8 +881,13 @@ class UnifiedChatAgentLoop:
                     label if result.error else f"{label} — {len(result.sources)} source(s)",
                     elapsed,
                 )
+                gated = (
+                    gate_tool_result(result, entity_scope)
+                    if invocation.tool_name in _ENTITY_RETRIEVAL_TOOLS
+                    else result
+                )
                 return call.id, tool_message_content(
-                    redact_tool_result(result), max_sources=profile.max_document_chunks
+                    redact_tool_result(gated), max_sources=profile.max_document_chunks
                 )
 
         results = dict(await asyncio.gather(

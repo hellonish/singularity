@@ -22,6 +22,7 @@ class ResearchGraphState(TypedDict, total=False):
     events: Annotated[list[dict[str, Any]], operator.add]
     report: dict[str, Any]
     stop_reason: str | None
+    research_brief: dict[str, Any]
 
 
 def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkpointer=None, progress_reporter: Callable[[dict[str, Any]], Awaitable[None]] | None = None):
@@ -46,7 +47,17 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
 
     async def polish(state: ResearchGraphState):
         await progress("planning", "started", "Clarifying research objective")
-        polished = await planner.polish_prompt(state["query"])
+        brief = state.get("research_brief") or {}
+        polished = (
+            {
+                "query": brief.get("refined_objective") or state["query"],
+                "must_haves": brief.get("must_haves") or [],
+                "deliverable": brief.get("deliverable") or "",
+                "plan_points": brief.get("plan_points") or [],
+            }
+            if brief
+            else await planner.polish_prompt(state["query"])
+        )
         await progress("planning", "completed", "Research objective ready")
         # Surface the polished objective as a scope card: objective + the
         # must-have deliverables the run committed to before spending budget.
@@ -57,6 +68,14 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
             "planning", "completed", "Research scope defined",
             kind="scope", objective=objective, must_haves=must_haves, deliverable=deliverable,
         )
+        if polished.get("plan_points"):
+            await progress(
+                "planning",
+                "completed",
+                "Approved research plan",
+                kind="research_plan",
+                plan_points=polished["plan_points"],
+            )
         return {
             "original_query": state["query"],
             "query": polished.get("query", state["query"]),

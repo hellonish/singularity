@@ -133,6 +133,15 @@ function FeedItem({ item }: { item: RunFeedItem }) {
           </div>
         </div>
       );
+    case 'research_plan':
+      return (
+        <div style={{ border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: '13px', padding: '15px 17px' }}>
+          <div className="sg-mono" style={{ ...MONO, fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '11px' }}>Research plan</div>
+          <ol style={{ margin: 0, paddingLeft: '21px', display: 'grid', gap: '8px', fontSize: '14.5px', lineHeight: 1.5 }}>
+            {item.points.map((point) => <li key={point}>{point}</li>)}
+          </ol>
+        </div>
+      );
     case 'agent_dispatch':
       return (
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '10px', alignSelf: 'flex-start', padding: '8px 13px', border: '1px solid var(--border-strong)', background: 'var(--surface)', borderRadius: '10px' }}>

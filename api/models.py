@@ -76,6 +76,9 @@ class User(IdMixin, TimestampMixin, Base):
     research_runs: Mapped[list["ResearchRun"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    research_preparations: Mapped[list["ResearchPreparation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     llm_credentials: Mapped[list["LLMProviderCredential"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -354,6 +357,9 @@ class ResearchRun(IdMixin, TimestampMixin, Base):
     report_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("reports.id", ondelete="SET NULL"), index=True
     )
+    preparation_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("research_preparations.id", ondelete="SET NULL"), unique=True, index=True
+    )
     query: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
     engine_version: Mapped[Optional[str]] = mapped_column(String(128))
@@ -364,6 +370,7 @@ class ResearchRun(IdMixin, TimestampMixin, Base):
 
     user: Mapped[User] = relationship(back_populates="research_runs")
     report: Mapped[Optional[Report]] = relationship(back_populates="research_runs")
+    preparation: Mapped[Optional["ResearchPreparation"]] = relationship(back_populates="run")
     events: Mapped[list["ResearchRunEvent"]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="ResearchRunEvent.sequence"
     )
@@ -374,6 +381,42 @@ class ResearchRun(IdMixin, TimestampMixin, Base):
             name="research_run_status",
         ),
         Index("ix_research_runs_user_created", "user_id", "created_at"),
+    )
+
+
+class ResearchPreparation(IdMixin, TimestampMixin, Base):
+    """Durable intake state that exists before a paid research run starts."""
+
+    __tablename__ = "research_preparations"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_credential_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("llm_provider_credentials.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_mode: Mapped[str] = mapped_column(String(12), nullable=False, default="ask")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    model_id: Mapped[Optional[str]] = mapped_column(String(255))
+    strength: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    current_question_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    plan_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    answers: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    final_brief: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    user: Mapped[User] = relationship(back_populates="research_preparations")
+    run: Mapped[Optional[ResearchRun]] = relationship(back_populates="preparation", uselist=False)
+
+    __table_args__ = (
+        CheckConstraint("approval_mode IN ('ask', 'auto')", name="research_preparation_mode"),
+        CheckConstraint(
+            "status IN ('draft', 'awaiting_input', 'ready', 'started', 'cancelled', 'failed')",
+            name="research_preparation_status",
+        ),
+        CheckConstraint("strength >= 1 AND strength <= 3", name="research_preparation_strength"),
+        Index("ix_research_preparations_user_created", "user_id", "created_at"),
     )
 
 

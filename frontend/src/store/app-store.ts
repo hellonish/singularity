@@ -13,10 +13,11 @@ export const ACCENT_COLORS = [
 ];
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ViewMode = 'grid' | 'chat' | 'report' | 'run';
+export type ViewMode = 'grid' | 'chat' | 'report' | 'prepare' | 'run';
 export type SearchMode = 'research' | 'chat';
+export type ResearchApprovalMode = 'ask' | 'auto';
 export type Intensity = 'instant' | 'medium' | 'high' | 'ultra';
-export type MenuType = 'mode' | 'effort' | 'model' | 'thread' | 'rmodel' | null;
+export type MenuType = 'mode' | 'approval' | 'effort' | 'model' | 'thread' | 'rmodel' | null;
 
 interface AppState {
   theme: Theme;
@@ -43,6 +44,8 @@ interface AppState {
   activeReportId: string | null;
   activeChatId: string | null;
   activeRunId: string | null;
+  activePreparationId: string | null;
+  researchApprovalMode: ResearchApprovalMode;
 
   setTheme: (theme: Theme) => void;
   setAccent: (accent: string) => void;
@@ -69,6 +72,8 @@ interface AppState {
   setActiveReportId: (id: string | null) => void;
   setActiveChatId: (id: string | null) => void;
   setActiveRunId: (id: string | null) => void;
+  setActivePreparationId: (id: string | null) => void;
+  setResearchApprovalMode: (mode: ResearchApprovalMode) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -97,6 +102,8 @@ export const useAppStore = create<AppState>()(
   activeReportId: null,
   activeChatId: null,
   activeRunId: null,
+  activePreparationId: null,
+  researchApprovalMode: 'ask',
 
   setTheme: (theme) => {
     set({ theme });
@@ -139,10 +146,12 @@ export const useAppStore = create<AppState>()(
   setActiveReportId: (activeReportId) => set({ activeReportId }),
   setActiveChatId: (activeChatId) => set({ activeChatId }),
   setActiveRunId: (activeRunId) => set({ activeRunId }),
+  setActivePreparationId: (activePreparationId) => set({ activePreparationId }),
+  setResearchApprovalMode: (researchApprovalMode) => set({ researchApprovalMode }),
     }),
     {
       name: 'singularity-storage',
-      partialize: (state) => ({ theme: state.theme, accent: state.accent, settingsOpen: state.settingsOpen, activeSettingsTab: state.activeSettingsTab }), // Persist theme, accent, and settings
+      partialize: (state) => ({ theme: state.theme, accent: state.accent, settingsOpen: state.settingsOpen, activeSettingsTab: state.activeSettingsTab, researchApprovalMode: state.researchApprovalMode, activePreparationId: state.activePreparationId }),
     }
   )
 );

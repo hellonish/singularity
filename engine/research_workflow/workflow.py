@@ -54,6 +54,7 @@ class ResearchWorkflow:
         caps: RunCaps,
         on_update: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
         on_progress: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+        research_brief: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         config = {"configurable": {"thread_id": run_id}}
         initial = {
@@ -63,6 +64,7 @@ class ResearchWorkflow:
             "cycle": 0,
             "events": [],
             "qa_reviews": [],
+            "research_brief": research_brief or {},
         }
         self._progress_callback = on_progress
         try:

@@ -76,6 +76,9 @@ export function reduceProgress(prev: RunProgress, payload: ResearchProgressPaylo
     case 'scope':
       push({ id: nextId(), kind: 'scope', objective: String(payload.objective || ''), mustHaves: (payload.must_haves || []).map(String), deliverable: String(payload.deliverable || '') });
       break;
+    case 'research_plan':
+      push({ id: nextId(), kind: 'research_plan', points: (payload.plan_points || []).map(String).slice(0, 5) });
+      break;
     case 'agent_dispatch':
       push({ id: nextId(), kind: 'agent_dispatch', nodeId: String(payload.node_id || ''), question: String(payload.question || payload.message || '') });
       break;

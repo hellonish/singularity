@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, AvailableModel, Chat, humanizeProgress, Message, ProviderCredential, Report, ResearchProgressPayload, ResearchRun, RunProgress, requestSSE, SSEEvent } from '@/lib/api';
+import { api, ApiError, AvailableModel, Chat, humanizeProgress, Message, ProviderCredential, Report, ResearchPreparation, ResearchPreparationResult, ResearchProgressPayload, ResearchRun, RunProgress, requestSSE, SSEEvent } from '@/lib/api';
 import { emptyRunProgress, reduceProgress } from '@/lib/research-feed';
 
 type RunActivity = { phase?: string; status?: string; message?: string; error?: string };
@@ -47,6 +47,7 @@ interface WorkspaceData {
   chats: Chat[];
   reports: Report[];
   runs: ResearchRun[];
+  preparations: Record<string, ResearchPreparation>;
   credentials: ProviderCredential[];
   availableModels: AvailableModel[];
   modelsLoading: boolean;
@@ -69,6 +70,11 @@ interface WorkspaceData {
   deleteChat: (chatId: string) => Promise<void>;
   deleteReport: (reportId: string) => Promise<void>;
   startResearch: (query: string, strength: number, modelId?: string) => Promise<ResearchRun>;
+  prepareResearch: (query: string, strength: number, approvalMode: 'ask' | 'auto', modelId?: string) => Promise<ResearchPreparationResult>;
+  loadResearchPreparation: (preparationId: string) => Promise<ResearchPreparation>;
+  answerResearchPreparation: (preparationId: string, questionId: string, answer: string) => Promise<ResearchPreparation>;
+  startPreparedResearch: (preparationId: string) => Promise<ResearchRun>;
+  cancelResearchPreparation: (preparationId: string) => Promise<void>;
   cancelResearch: (runId: string) => Promise<void>;
   selectCredential: (credentialId: string | null) => Promise<void>;
   saveCredential: (provider: ProviderCredential['provider'], apiKey: string) => Promise<ProviderCredential>;
@@ -89,6 +95,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [chats, setChats] = useState<Chat[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [runs, setRuns] = useState<ResearchRun[]>([]);
+  const [preparations, setPreparations] = useState<Record<string, ResearchPreparation>>({});
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [selectedCredentialId, setSelectedCredentialId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
@@ -419,6 +426,70 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     }
   }, [requireCredential, streamResearch]);
 
+  const registerRun = useCallback((run: ResearchRun, title: string) => {
+    setRuns((current) => current.some((item) => item.id === run.id) ? current : [run, ...current]);
+    setReports((current) => run.report_id && !current.some((item) => item.id === run.report_id)
+      ? [{ id: run.report_id, title: shortTitle(title), status: 'processing', source: 'research', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...current]
+      : current);
+    void streamResearch(run);
+  }, [streamResearch]);
+
+  const prepareResearch = useCallback(async (query: string, strength: number, approvalMode: 'ask' | 'auto', modelId?: string) => {
+    const credential = requireCredential();
+    try {
+      const result = await api.createPreparation({ query, approval_mode: approvalMode, provider_credential_id: credential.id, model_id: modelId ?? credential.default_model_id ?? undefined, strength });
+      setPreparations((current) => ({ ...current, [result.preparation.id]: result.preparation }));
+      if (result.run) registerRun(result.run, query);
+      return result;
+    } catch (cause) {
+      const message = researchErrorMessage(cause);
+      setError(message);
+      throw new Error(message);
+    }
+  }, [registerRun, requireCredential]);
+
+  const answerResearchPreparation = useCallback(async (preparationId: string, questionId: string, answer: string) => {
+    try {
+      const preparation = await api.answerPreparation(preparationId, questionId, answer);
+      setPreparations((current) => ({ ...current, [preparation.id]: preparation }));
+      return preparation;
+    } catch (cause) {
+      setError(userErrorMessage(cause, 'Could not save this research answer.'));
+      throw cause;
+    }
+  }, []);
+
+  const loadResearchPreparation = useCallback(async (preparationId: string) => {
+    const preparation = await api.getPreparation(preparationId);
+    setPreparations((current) => ({ ...current, [preparation.id]: preparation }));
+    return preparation;
+  }, []);
+
+  const startPreparedResearch = useCallback(async (preparationId: string) => {
+    try {
+      const run = await api.startPreparation(preparationId);
+      const preparation = preparations[preparationId];
+      registerRun(run, preparation?.query ?? run.query);
+      setPreparations((current) => current[preparationId]
+        ? { ...current, [preparationId]: { ...current[preparationId], status: 'started' } }
+        : current);
+      return run;
+    } catch (cause) {
+      setError(userErrorMessage(cause, 'Could not start this research run.'));
+      throw cause;
+    }
+  }, [preparations, registerRun]);
+
+  const cancelResearchPreparation = useCallback(async (preparationId: string) => {
+    try {
+      const preparation = await api.cancelPreparation(preparationId);
+      setPreparations((current) => ({ ...current, [preparation.id]: preparation }));
+    } catch (cause) {
+      setError(userErrorMessage(cause, 'Could not cancel this research plan.'));
+      throw cause;
+    }
+  }, []);
+
   // Resume progress streams for any run that is still active but has no live
   // stream — e.g. after a page reload, or a run started in another tab. Without
   // this, the Research Run view would sit empty for an in-flight run.
@@ -497,10 +568,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<WorkspaceData>(() => ({
-    chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential,
-    refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential,
+    chats, reports, runs, preparations, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential,
+    refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, prepareResearch, loadResearchPreparation, answerResearchPreparation, startPreparedResearch, cancelResearchPreparation, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential,
     clearError,
-  }), [chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
+  }), [chats, reports, runs, preparations, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, prepareResearch, loadResearchPreparation, answerResearchPreparation, startPreparedResearch, cancelResearchPreparation, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

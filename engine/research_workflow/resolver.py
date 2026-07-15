@@ -8,6 +8,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from engine.chat.effort import ChatEffort
+from engine.entity_resolution import (
+    EntityScope,
+    SourceEntityDecision,
+    classify_source,
+    scope_search_query,
+)
 from engine.research_workflow.skill_router import select_skills
 from engine.tools import TOOL_REGISTRY
 from engine.tools.contracts import TOOL_ARGUMENT_MODELS, ChatToolInvocation
@@ -108,7 +114,7 @@ class BoundedResearchResolver:
     in a tool invocation.
     """
 
-    def __init__(self, executor, answerer: Answerer, *, timeout_seconds: int = 60, max_fetches: int = 2, max_search_variants: int = 3, progress_reporter=None):
+    def __init__(self, executor, answerer: Answerer, *, timeout_seconds: int = 60, max_fetches: int = 2, max_search_variants: int = 3, progress_reporter=None, entity_scope: EntityScope | dict[str, Any] | None = None):
         self.executor = executor
         self.answerer = answerer
         self.timeout_seconds = timeout_seconds
@@ -118,6 +124,7 @@ class BoundedResearchResolver:
         # real search call.
         self.max_search_variants = max(1, min(max_search_variants, 3))
         self.progress_reporter = progress_reporter
+        self.entity_scope = EntityScope.model_validate(entity_scope or {})
 
     # Resolver statuses that describe a single tool invocation's lifecycle. The
     # UI renders these as a tool chip / web_search card; the remaining statuses
@@ -148,7 +155,26 @@ class BoundedResearchResolver:
             )
         calls = 0
         evidence: list[dict[str, Any]] = []
+        scoped_question = scope_search_query(node.question, self.entity_scope)
         await self._progress(phase="researching", status="node_started", message=f"Researching: {node.question}", node_id=node.node_id)
+
+        async def admit(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            admitted: list[dict[str, Any]] = []
+            for record in records:
+                verdict = classify_source(record, self.entity_scope)
+                if verdict.decision == SourceEntityDecision.ALIGNED:
+                    record["entity_match"] = verdict.model_dump(mode="json")
+                    admitted.append(record)
+                    continue
+                await self._progress(
+                    phase="researching",
+                    status="source_entity_rejected",
+                    message="Rejected a source that did not match the target entity",
+                    node_id=node.node_id,
+                    url=str(record.get("url") or ""),
+                    reason=verdict.reason,
+                )
+            return admitted
 
         async def invoke(tool_name: str, query: str, arguments: dict[str, Any], *, skill_id: str = "general_web_research") -> Any:
             """Dispatch one logical tool call, retrying transparently on
@@ -210,9 +236,9 @@ class BoundedResearchResolver:
             adapts around with a reworded query.
             """
             variants = [
-                (node.question, {"max_results": 8}),
-                (f"{node.question} primary source", {"max_results": 5}),
-                (f"{node.question} report OR study OR data", {"max_results": 5}),
+                (scoped_question, {"max_results": 8}),
+                (f"{scoped_question} primary source", {"max_results": 5}),
+                (f"{scoped_question} report OR study OR data", {"max_results": 5}),
             ][: self.max_search_variants]
             last_result = None
             for query, arguments in variants:
@@ -255,10 +281,10 @@ class BoundedResearchResolver:
                     message=f"Routing to domain tool {tool_name}",
                     node_id=node.node_id, tool_name=tool_name,
                 )
-                result = await invoke(tool_name, node.question, {"max_results": 8}, skill_id=skill_id)
+                result = await invoke(tool_name, scoped_question, {"max_results": 8}, skill_id=skill_id)
                 if getattr(result, "error", None):
                     continue
-                records = _evidence_from_result(result, node.question)
+                records = await admit(_evidence_from_result(result, scoped_question))
                 if records:
                     collected.extend(records)
             return collected
@@ -268,7 +294,7 @@ class BoundedResearchResolver:
         search = await search_with_adaptation() if calls < max_tool_calls else None
         sources = list(getattr(search, "sources", []) or []) if search is not None else []
         if search is not None:
-            evidence.extend(_evidence_from_result(search, node.question))
+            evidence.extend(await admit(_evidence_from_result(search, scoped_question)))
 
         # Fetch the most promising URLs from every discovery source (domain +
         # web), deduplicated, up to the fetch budget.
@@ -277,14 +303,13 @@ class BoundedResearchResolver:
             for item in evidence
             if str(item.get("url", "")).startswith(("https://", "http://"))
         ]
-        candidate_urls += [str(source.get("url", "")) for source in sources if source.get("url")]
         # Never request more fetches than the fetch budget or the remaining
         # call budget allows; invoke() raises once the call cap is reached.
         fetch_budget = max(0, min(self.max_fetches, max_tool_calls - calls))
         urls = list(dict.fromkeys(candidate_urls))[:fetch_budget]
         if urls:
             fetched = await asyncio.gather(
-                *(invoke("web_fetch", node.question, {"url": url, "max_characters": 50_000}) for url in urls),
+                *(invoke("web_fetch", scoped_question, {"url": url, "max_characters": 50_000}) for url in urls),
                 return_exceptions=True,
             )
             for item in fetched:
@@ -303,7 +328,7 @@ class BoundedResearchResolver:
                     )
                     continue
                 if not isinstance(item, Exception):
-                    evidence.extend(_evidence_from_result(item, node.question))
+                    evidence.extend(await admit(_evidence_from_result(item, scoped_question)))
 
         # A research answer is only useful to the writer when it has a
         # citable, extracted source.  Do not turn an empty search result into

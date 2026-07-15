@@ -36,8 +36,8 @@ class LiveSearchExecutor:
     async def execute(self, invocation):
         self.invocations.append(invocation)
         return ChatToolResult(
-            content="Current source summary",
-            sources=[{"title": "Current source", "url": "https://example.test/current", "credibility_base": 0.8}],
+            content=f"Current source summary for {invocation.query}",
+            sources=[{"title": f"Current source for {invocation.query}", "url": "https://example.test/current", "credibility_base": 0.8}],
             credibility_base=0.8,
             error=self.error,
         )
@@ -58,9 +58,8 @@ def test_current_events_chat_dispatches_search_and_injects_sources(monkeypatch) 
 
     outputs = asyncio.run(_collect(agent, "What's going on with Anthropic and OpenAI?"))
 
-    assert [call.tool_name for call in executor.invocations] == ["web_search", "web_search"]
+    assert [call.tool_name for call in executor.invocations] == ["web_search"]
     assert executor.invocations[0].arguments.get("search_backend", "auto") == "auto"
-    assert executor.invocations[1].arguments["search_backend"] == "tavily"
     assert executor.closed is True
     assert any(output.kind == "tool_completed" for output in outputs)
     assert provider.tool_turn_messages, "answer model never ran"
@@ -114,7 +113,7 @@ def test_job_search_and_retry_follow_up_dispatch_fresh_searches(monkeypatch) -> 
     asyncio.run(_collect_with_session(agent, request, session))
     retry_outputs = asyncio.run(_collect_with_session(agent, "Can you try now?", session))
 
-    assert [call.query for call in executor.invocations] == [request, f"{request} official primary sources"] * 2
+    assert [call.query for call in executor.invocations] == [request, request]
     assert any(output.kind == "routing" for output in retry_outputs)
     assert request in str(provider.tool_turn_messages[-1])
 

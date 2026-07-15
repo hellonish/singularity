@@ -6,8 +6,8 @@ import { INTENSITIES, PROVIDERS } from '@/lib/dummy-data';
 import { useWorkspace } from '@/components/workspace-provider';
 
 export function Composer() {
-  const { mode, intensity, modelId, view, activeChatId, openMenu, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setActiveRunId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
-  const { createAndSendChat, sendChat, startResearch, activeCredential, availableModels, modelsLoading, setDefaultModel, clearError, streamingChatIds } = useWorkspace();
+  const { mode, intensity, modelId, view, activeChatId, openMenu, researchApprovalMode, setResearchApprovalMode, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setActiveRunId, setActivePreparationId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
+  const { createAndSendChat, sendChat, prepareResearch, activeCredential, availableModels, modelsLoading, setDefaultModel, clearError, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
   // Switching to Research abandons the open chat, so confirm first when one is active.
@@ -58,7 +58,7 @@ export function Composer() {
     ? PROVIDERS.find((provider) => provider.id === activeCredential.provider)?.dot || 'var(--text-faint)'
     : 'var(--text-faint)';
 
-  const toggleMenu = (menu: 'mode' | 'effort' | 'model') => {
+  const toggleMenu = (menu: 'mode' | 'approval' | 'effort' | 'model') => {
     setOpenMenu(openMenu === menu ? null : menu);
   };
 
@@ -84,12 +84,15 @@ export function Composer() {
         }
       } else {
         const strength = intensity === 'instant' ? 1 : intensity === 'medium' ? 2 : 3;
-        const run = await startResearch(content, strength, selectedModel?.id);
-        // Open the live Research Run view; the report is linked but not yet
-        // written, so the run view drives progress and links out on completion.
-        setActiveRunId(run.id);
-        if (run.report_id) setActiveReportId(run.report_id);
-        setView('run');
+        const result = await prepareResearch(content, strength, researchApprovalMode, selectedModel?.id);
+        setActivePreparationId(result.preparation.id);
+        if (result.run) {
+          setActiveRunId(result.run.id);
+          if (result.run.report_id) setActiveReportId(result.run.report_id);
+          setView('run');
+        } else {
+          setView('prepare');
+        }
       }
       setQuery('');
       setComposerDraft('');
@@ -160,6 +163,32 @@ export function Composer() {
               </div>
             )}
           </div>
+
+          {mode === 'research' && (
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => toggleMenu('approval')}
+                style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 11px', border: '1px solid var(--border)', backgroundColor: 'var(--surface-2)', borderRadius: '10px', cursor: 'pointer', color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              >
+                {researchApprovalMode === 'ask' ? 'Ask for approval' : 'Auto mode'}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              {openMenu === 'approval' && (
+                <div className="animate-sg-pop" style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, width: '260px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '14px', boxShadow: 'var(--shadow)', padding: '8px', zIndex: 50 }}>
+                  {([
+                    ['ask', 'Ask for approval', 'Show the plan and ask only essential questions before searching.'],
+                    ['auto', 'Auto mode', 'Resolve the likely entity and begin research immediately.'],
+                  ] as const).map(([id, label, description]) => (
+                    <button key={id} type="button" onClick={() => { setResearchApprovalMode(id); setOpenMenu(null); }} style={{ display: 'block', width: '100%', padding: '10px', border: 'none', borderRadius: '10px', textAlign: 'left', cursor: 'pointer', color: 'var(--text)', background: researchApprovalMode === id ? 'var(--accent-soft)' : 'transparent' }}>
+                      <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 600 }}>{label}</span>
+                      <span style={{ display: 'block', marginTop: '3px', fontSize: '11.5px', lineHeight: 1.4, color: 'var(--text-dim)' }}>{description}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Effort Chip */}
           <div style={{ position: 'relative' }}>

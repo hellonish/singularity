@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
 from api.credential_crypto import decrypt_secret
-from api.models import LLMProviderCredential, Report, ResearchRun, ResearchRunEvent, User
-from api.schemas import ResearchRunCreate
+from api.models import LLMProviderCredential, Report, ResearchPreparation, ResearchRun, ResearchRunEvent, User
+from api.schemas import ResearchPreparationCreate, ResearchRunCreate
 from api.services.llm_credentials import get_credential, list_credentials
 from engine.llm.providers import provider_for
 from engine.research_workflow.caps import RunCaps
@@ -123,6 +123,145 @@ async def list_runs(session: AsyncSession, user_id: str) -> list[ResearchRun]:
     return list(result.scalars())
 
 
+async def get_preparation(
+    session: AsyncSession, user_id: str, preparation_id: str
+) -> ResearchPreparation:
+    preparation = await session.scalar(
+        select(ResearchPreparation).where(
+            ResearchPreparation.id == preparation_id,
+            ResearchPreparation.user_id == user_id,
+        )
+    )
+    if preparation is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Research preparation not found")
+    return preparation
+
+
+async def create_preparation(
+    session: AsyncSession, user: User, body: ResearchPreparationCreate
+) -> ResearchPreparation:
+    credential = await get_credential(session, user.id, body.provider_credential_id)
+    await _guard_research_provider_tier(session, user.id, credential, body.model_id)
+    preparation = ResearchPreparation(
+        user_id=user.id,
+        provider_credential_id=body.provider_credential_id,
+        query=body.query,
+        approval_mode=body.approval_mode,
+        model_id=body.model_id,
+        strength=body.strength,
+        plan_data={
+            "audience": body.audience,
+            "output_language": body.output_language,
+            "provider_tier_checked": True,
+        },
+    )
+    session.add(preparation)
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation
+
+
+async def store_preparation_brief(
+    session: AsyncSession,
+    preparation: ResearchPreparation,
+    *,
+    plan_data: dict,
+    final: bool,
+) -> ResearchPreparation:
+    if preparation.status in {"started", "cancelled"}:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research preparation is no longer editable")
+    if final:
+        preparation.final_brief = plan_data
+        preparation.status = "ready"
+    else:
+        preparation.plan_data = {**preparation.plan_data, **plan_data}
+        questions = list(plan_data.get("questions", []))
+        preparation.status = "awaiting_input" if questions else "ready"
+        if not questions:
+            preparation.final_brief = plan_data
+    preparation.error_message = None
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation
+
+
+async def record_preparation_answer(
+    session: AsyncSession,
+    preparation: ResearchPreparation,
+    *,
+    question_id: str,
+    answer: str,
+) -> tuple[ResearchPreparation, bool]:
+    if preparation.status != "awaiting_input":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research preparation is not awaiting input")
+    questions = list(preparation.plan_data.get("questions", []))
+    index = preparation.current_question_index
+    if index >= len(questions) or str(questions[index].get("question_id")) != question_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Answer the current research question first")
+    preparation.answers = {**preparation.answers, question_id: answer.strip()}
+    preparation.current_question_index = index + 1
+    complete = preparation.current_question_index >= len(questions)
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation, complete
+
+
+async def fail_preparation(
+    session: AsyncSession, preparation: ResearchPreparation, message: str
+) -> ResearchPreparation:
+    preparation.status = "failed"
+    preparation.error_message = message
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation
+
+
+async def cancel_preparation(session: AsyncSession, preparation: ResearchPreparation) -> ResearchPreparation:
+    if preparation.status == "started":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research has already started")
+    preparation.status = "cancelled"
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation
+
+
+async def start_preparation(
+    session: AsyncSession, user: User, preparation: ResearchPreparation
+) -> ResearchRun:
+    existing = await session.scalar(
+        select(ResearchRun).where(ResearchRun.preparation_id == preparation.id)
+    )
+    if existing is not None:
+        return existing
+    if preparation.status != "ready" or not preparation.final_brief:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research preparation is not ready")
+    run = await create_run(
+        session,
+        user,
+        ResearchRunCreate(
+            query=str(preparation.final_brief.get("refined_objective") or preparation.query),
+            title=preparation.query[:500],
+            provider_credential_id=preparation.provider_credential_id,
+            model_id=preparation.model_id,
+            strength=preparation.strength,
+            audience=str(preparation.plan_data.get("audience") or "practitioner"),
+            output_language=str(preparation.plan_data.get("output_language") or "en"),
+            run_data={
+                "preparation_id": preparation.id,
+                "approval_mode": preparation.approval_mode,
+                "research_brief": preparation.final_brief,
+                "preparation_answers": preparation.answers,
+                "provider_tier_checked": True,
+            },
+        ),
+    )
+    run.preparation_id = preparation.id
+    preparation.status = "started"
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
 async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate) -> ResearchRun:
     if not body.provider_credential_id:
         raise HTTPException(
@@ -137,7 +276,7 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
             detail="research test mode is not enabled on this server",
         )
     credential = await get_credential(session, user.id, body.provider_credential_id)
-    if not (body.test_mode and settings.research_test_mode):
+    if not (body.test_mode and settings.research_test_mode) and not body.run_data.get("provider_tier_checked"):
         # Skip the tier probe in test mode: it runs a single minimal node that
         # a free key can complete, and the probe would spend a real call.
         await _guard_research_provider_tier(session, user.id, credential, body.model_id)
@@ -157,6 +296,7 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
     run = ResearchRun(
         user_id=user.id,
         report_id=report_id,
+        preparation_id=body.run_data.get("preparation_id"),
         query=body.query,
         engine_version=body.engine_version,
         run_data={

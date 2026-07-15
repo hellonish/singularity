@@ -6,6 +6,7 @@ import pytest
 from engine.research_workflow.dag import ResearchNode
 from engine.research_workflow.resolver import BoundedResearchResolver
 from engine.research_workflow.runtime import ResearchInfrastructureError
+from engine.entity_resolution import EntityRef, EntityResolutionStatus, EntityScope
 
 
 class FakeExecutor:
@@ -114,6 +115,47 @@ def test_test_mode_does_not_reformulate_an_empty_search():
     )
     assert executor.calls == ["web_search"]
     assert result["answered"] is False
+
+
+def test_resolver_rejects_namesake_before_fetch_and_persistence():
+    class NamesakeExecutor:
+        def __init__(self):
+            self.urls = []
+
+        async def execute(self, invocation):
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(content="results", sources=[
+                    {"title": "Acme technology platform", "url": "https://right.example", "snippet": "Acme technology update"},
+                    {"title": "Acme plumbing company", "url": "https://wrong.example", "snippet": "Acme plumbing update"},
+                ])
+            self.urls.append(invocation.arguments["url"])
+            return SimpleNamespace(
+                content="Acme technology primary source",
+                sources=[{"title": "Acme technology", "url": invocation.arguments["url"], "snippet": "Acme technology"}],
+            )
+
+    executor = NamesakeExecutor()
+    received = []
+
+    async def answerer(node, evidence):
+        received.extend(evidence)
+        return {"answer": "answer", "answered": True}
+
+    scope = EntityScope(
+        status=EntityResolutionStatus.RESOLVED,
+        entities=[EntityRef(
+            entity_id="acme-tech", mention="Acme", canonical_name="Acme",
+            entity_type="company", anchors=["technology"], confidence=0.9,
+        )],
+        resolution_mode="ask",
+    )
+    result = asyncio.run(BoundedResearchResolver(
+        executor, answerer, max_fetches=2, entity_scope=scope,
+    )(ResearchNode(node_id="n1", question="latest results", section_id="s1", level=0), 4))
+
+    assert executor.urls == ["https://right.example"]
+    assert {item["url"] for item in received} == {"https://right.example"}
+    assert {item["url"] for item in result["evidence"]} == {"https://right.example"}
 
 
 def test_resolver_rejects_out_of_range_budget():
