@@ -1,4 +1,4 @@
-"""Compact, deterministic skill shortlisting before model tool planning."""
+"""Compact, deterministic skill shortlisting for research node resolution."""
 from __future__ import annotations
 
 from dataclasses import dataclass

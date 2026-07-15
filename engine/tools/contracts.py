@@ -198,29 +198,6 @@ def validate_chat_tool_invocation(invocation: ChatToolInvocation) -> ValidatedCh
     )
 
 
-def tool_schema_for_skill(skill_id: str) -> list[dict[str, Any]]:
-    """OpenAI-compatible tool schemas limited to one registered skill."""
-    from engine.skills import SKILL_REGISTRY
-
-    skill = SKILL_REGISTRY.get(skill_id)
-    schemas = []
-    for name in skill.config.tools:
-        model = TOOL_ARGUMENT_MODELS.get(name)
-        if model is None:
-            continue
-        schemas.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": TOOL_REGISTRY.descriptor(name).description,
-                    "parameters": model.model_json_schema(),
-                },
-            }
-        )
-    return schemas
-
-
 def chat_planner_tool_schemas(
     *,
     allowed_execution_kinds: tuple[str, ...] = ("trusted_function",),

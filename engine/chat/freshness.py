@@ -1,11 +1,11 @@
-"""Deterministic heuristics for requests that require live public evidence.
+"""Deterministic, advisory heuristics for requests that want live evidence.
 
-This runs before the answer model. A positive match makes retrieval
-*mandatory* (the runtime fails closed if no evidence is collected) and seeds
-an immediate discovery burst. A miss is advisory, not a gate: the runtime
-still gives the model planner a chance to decide, with the route passed along
-as a hint, so unanticipated phrasings degrade to model judgment instead of
-silently skipping retrieval.
+This runs before the agent loop starts. A freshness match seeds an immediate
+speculative discovery burst and adds a time-sensitive hint to the system
+prompt; it never gates or fails the turn. The single fail-closed case left is
+an explicit tool request while tools are disabled — everything else degrades
+to the model's own judgment (answer directly, or disclose that live data was
+unavailable).
 """
 from __future__ import annotations
 
@@ -110,12 +110,3 @@ def _latest_live_user_request(context: str) -> str | None:
         if route.needs_fresh_evidence:
             return turn
     return None
-
-
-def requires_fresh_evidence(message: str, *, context: str = "") -> bool:
-    return route_chat_request(message, context=context).needs_fresh_evidence
-
-
-def requests_tool_use(message: str, *, context: str = "") -> bool:
-    """Avoid LLM tool planning for ordinary conversational turns."""
-    return route_chat_request(message, context=context).tool_requested

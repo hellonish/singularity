@@ -5,8 +5,8 @@ import os
 from typing import Any, Callable, Protocol
 
 from engine.chat import ChatAgentInput
+from engine.chat.agent_loop import ToolEvidenceUnavailable, UnifiedChatAgentLoop
 from engine.chat.effort import get_chat_effort_profile, provider_output_budget, reasoning_effort_for_model
-from engine.chat.runtime import ChatRuntime, ToolEvidenceUnavailable
 from engine.cli.context import ChatContextSelector, LocalSummaryGenerator
 from engine.cli.models import TerminalHistoryTurn, TerminalOutput, TerminalSession
 from engine.llm.config import LLMRequestConfig
@@ -103,7 +103,7 @@ class ChatTerminalAgent:
         assistant_content = ""
         session.history.append(TerminalHistoryTurn("user", message))
         yield TerminalOutput(kind="thinking", content="")
-        runtime = ChatRuntime(
+        runtime = UnifiedChatAgentLoop(
             provider=provider,
             tracer=self._tracer,
             executor_factory=self._tool_executor_factory,

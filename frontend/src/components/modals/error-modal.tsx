@@ -38,8 +38,8 @@ export function ErrorDialog({ error, onDismiss }: ErrorDialogProps) {
         style={{ width: 'min(560px, 100%)', maxHeight: 'min(72vh, 620px)', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--surface)', borderRadius: '18px', boxShadow: 'var(--shadow)', overflow: 'hidden' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '11px', padding: '18px 20px', borderBottom: '1px solid var(--border)' }}>
-          <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', width: '25px', height: '25px', borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--color-danger) 18%, transparent)', color: 'var(--color-danger)', fontWeight: 700 }}>!</span>
-          <div id="workspace-error-title" style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>Something went wrong</div>
+          <span aria-hidden="true" style={{ display: 'grid', placeItems: 'center', width: '25px', height: '25px', borderRadius: '50%', backgroundColor: 'color-mix(in srgb, var(--color-danger) 18%, transparent)', color: 'var(--color-danger)', fontWeight: 500 }}>!</span>
+          <div id="workspace-error-title" style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text)' }}>Something went wrong</div>
         </div>
         <div id="workspace-error-message" style={{ padding: '20px', overflowY: 'auto', color: 'var(--text)', fontSize: '14.5px', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
           {error}
@@ -49,7 +49,7 @@ export function ErrorDialog({ error, onDismiss }: ErrorDialogProps) {
             ref={dismissButton}
             type="button"
             onClick={onDismiss}
-            style={{ height: '36px', padding: '0 16px', border: 'none', borderRadius: '9px', backgroundColor: 'var(--accent)', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+            style={{ height: '36px', padding: '0 16px', border: 'none', borderRadius: '9px', backgroundColor: 'var(--accent)', color: '#fff', cursor: 'pointer', fontSize: '13px', fontWeight: 500 }}
           >
             Dismiss
           </button>

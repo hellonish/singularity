@@ -325,6 +325,20 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
             })
         result["evidence_ids"] = persistence["source_ids"]
         result["source_records"] = records
+        # Announce each newly-cited source so the live feed can show a
+        # "Source added" line and increment the Sources telemetry counter. This
+        # fires only for sources that persisted with a citable URL.
+        for source in records:
+            await publish_progress({
+                "kind": "source_added",
+                "phase": "researching",
+                "status": "source_added",
+                "message": f"Source added — {source['name']}",
+                "node_id": node.node_id,
+                "title": source["title"],
+                "url": source["url"],
+                "source_type": source["source_type"],
+            })
         step_log.step(
             "resolve_node",
             phase="end",

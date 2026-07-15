@@ -187,7 +187,7 @@ function ReportReadyCard({ title, sources, onOpen }: { title: string; sources: n
       <article style={{ padding: '26px 30px 28px' }}>
         <div className="sg-mono" style={{ ...MONO, fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '13px' }}>Research Report</div>
         <h2 style={{ margin: '0 0 20px', fontSize: '27px', fontWeight: 400, lineHeight: 1.15, letterSpacing: '-.02em' }}>{title}</h2>
-        <button onClick={onOpen} style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', height: '44px', padding: '0 22px', border: 'none', borderRadius: '11px', background: 'var(--accent)', color: '#fff', ...MONO, fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>
+        <button onClick={onOpen} style={{ display: 'inline-flex', alignItems: 'center', gap: '9px', height: '44px', padding: '0 22px', border: 'none', borderRadius: '11px', background: 'var(--accent)', color: '#fff', ...MONO, fontSize: '12.5px', fontWeight: 500, cursor: 'pointer' }}>
           Open full report
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
         </button>
@@ -260,7 +260,7 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
           <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)' }}><span style={{ width: '7px', height: '7px', background: 'var(--text-dim)' }} />{depthLabel}</span>
           <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</span>
           {running && run && (
-            <button onClick={() => void cancelResearch(run.id).catch(() => undefined)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 14px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', color: 'var(--text)', borderRadius: '9px', cursor: 'pointer', ...MONO, fontSize: '12px', fontWeight: 600 }}>
+            <button onClick={() => void cancelResearch(run.id).catch(() => undefined)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 14px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', color: 'var(--text)', borderRadius: '9px', cursor: 'pointer', ...MONO, fontSize: '12px', fontWeight: 500 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>Stop
             </button>
           )}

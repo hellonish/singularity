@@ -1,4 +1,4 @@
-"""Standalone streaming chat agent.
+"""Unified streaming chat agent loop.
 
 Attributes are exposed lazily so that importing a lightweight submodule
 (e.g. ``engine.chat.effort``) does not eagerly pull in the Groq/OpenAI LLM
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 # (attribute, submodule) — resolved on first access via __getattr__.
 _EXPORTS: dict[str, str] = {
-    "ChatAgent": "engine.chat.agent",
+    "UnifiedChatAgentLoop": "engine.chat.agent_loop",
     "ChatAgentInput": "engine.chat.models",
     "ChatStreamEvent": "engine.chat.models",
     "ContextSnapshot": "engine.chat.context",
@@ -26,7 +26,7 @@ _EXPORTS: dict[str, str] = {
 __all__ = list(_EXPORTS)
 
 if TYPE_CHECKING:  # keep static analysers / IDEs aware of the real symbols
-    from engine.chat.agent import ChatAgent
+    from engine.chat.agent_loop import UnifiedChatAgentLoop
     from engine.chat.context import ContextSnapshot, UniversalContextPolicy
     from engine.chat.effort import ChatEffort, ChatEffortProfile, get_chat_effort_profile
     from engine.chat.models import ChatAgentInput, ChatStreamEvent

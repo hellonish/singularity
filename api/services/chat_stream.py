@@ -1,4 +1,4 @@
-"""Request-scoped bridge from a persisted chat to the engine ChatAgent.
+"""Request-scoped bridge from a persisted chat to the unified chat agent loop.
 
 This mirrors ``api/research_runtime.py``: it resolves the chat's BYOK
 credential, decrypts the key only in memory, builds the engine request config,
@@ -22,7 +22,7 @@ from api.services.llm_credentials import get_credential
 from api.services.report_context_errors import ReportContextError
 from api.services.retrieval import RetrievalService, TenantVectorStore
 from api.vector_runtime import get_vector_store
-from engine.chat.runtime import ChatRuntime
+from engine.chat.agent_loop import UnifiedChatAgentLoop
 from engine.chat.effort import (
     ChatEffort,
     get_chat_effort_profile,
@@ -155,7 +155,7 @@ async def _resolve_config(
         credential_id=config.credential_id,
         model_id=config.model_id,
         temperature=config.temperature,
-        # ChatRuntime resolves live model capabilities before generation and
+        # The agent loop resolves live model capabilities before generation and
         # clamps this effort ceiling against the actual selected model.
         max_output_tokens=config.max_output_tokens,
         reasoning_effort=reasoning_effort_for_model(config.model_id, effort),
@@ -202,7 +202,7 @@ async def build_stream(
     )
 
     api_key = decrypt_secret(credential.encrypted_secret)
-    runtime = ChatRuntime(provider=provider_for(credential.provider))
+    runtime = UnifiedChatAgentLoop(provider=provider_for(credential.provider))
     return runtime.stream(
         agent_input,
         api_key=api_key,

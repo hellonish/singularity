@@ -61,6 +61,7 @@ def test_report_linked_chat_injects_report_context_into_the_prompt(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id, report_id = _make_report_chat(client, current_user)
 
     store = VectorStoreClient(force_in_memory=True, embedder=FakeEmbedder())
@@ -96,6 +97,7 @@ def test_chat_without_report_does_not_touch_the_vector_store(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     credential = client.post(
         "/llm/credentials",
         json={"provider": "groq", "api_key": "gsk_test_not_a_real_key", "default_model_id": "openai/gpt-oss-20b"},

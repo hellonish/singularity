@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
-from engine.chat import ChatAgent, ChatAgentInput
+from engine.chat import ChatAgentInput, UnifiedChatAgentLoop
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import GroqModel
 from engine.observability import LangSmithTracer
@@ -54,16 +54,19 @@ def test_content_capture_still_redacts_secret_like_text(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_emits_context_and_llm_observability_spans() -> None:
+async def test_chat_agent_emits_lookup_and_model_turn_observability_spans() -> None:
     tracer = _RecordingTracer()
+    loop_agent = UnifiedChatAgentLoop(provider=_FakeProvider(), tracer=tracer)
     events = [
         event
-        async for event in ChatAgent(provider=_FakeProvider(), tracer=tracer).stream(
+        async for event in loop_agent.stream(
             ChatAgentInput(context="reference", message="question"),
             api_key="test",
             config=LLMRequestConfig(provider="groq", credential_id="test", model_id="test", max_output_tokens=128),
+            effort="instant",
+            modal_enabled=False,
         )
     ]
 
     assert events[-1].content == "safe output"
-    assert tracer.names == ["groq_model_lookup", "prompt_budgeting", "groq_stream_generation"]
+    assert tracer.names == ["model_lookup", "model_turn"]

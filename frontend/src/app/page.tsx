@@ -76,6 +76,13 @@ export default function LandingPage() {
         .reveal.in{opacity:1;transform:none}
         .lp-bar{transform:scaleY(0);transform-origin:bottom;transition:transform .75s cubic-bezier(.2,.8,.2,1) .15s}
         .reveal.in .lp-bar{transform:scaleY(1)}
+        .lp-btn{transition:background .2s ease,color .2s ease,border-color .2s ease,transform .12s ease,box-shadow .2s ease}
+        .lp-btn svg{transition:transform .2s ease}
+        .lp-btn:hover{transform:translateY(-1px)}
+        .lp-btn:active{transform:translateY(0)}
+        .lp-btn-primary:hover{background:var(--text);box-shadow:0 6px 22px var(--accent-soft)}
+        .lp-btn-primary:hover svg{transform:translateX(3px)}
+        .lp-btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
       ` }} />
 
       {/* ===== NAV ===== */}
@@ -109,7 +116,7 @@ export default function LandingPage() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
             )}
           </button>
-          <button onClick={goDashboard} className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 18px', border: 'none', borderRadius: 999, background: 'var(--accent)', color: '#fff', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>
+          <button onClick={goDashboard} className="lp-mono lp-btn lp-btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 8, height: 38, padding: '0 18px', border: 'none', borderRadius: 0, background: 'var(--accent)', color: '#fff', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>
             Sign in
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
           </button>
@@ -130,11 +137,11 @@ export default function LandingPage() {
             Singularity turns one prompt into a long, cited research report — or a quick chat when you just need to think out loud. Bring your own model keys, and keep every source.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 'clamp(22px,3vw,36px)', animation: 'lp-rise .5s ease both .16s' }}>
-            <button onClick={goDashboard} className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 26px', border: 'none', borderRadius: 999, background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>
+            <button onClick={goDashboard} className="lp-mono lp-btn lp-btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 26px', border: 'none', borderRadius: 0, background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>
               Get started
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
-            <a href="#research" className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 24px', border: '1px solid var(--border-strong)', borderRadius: 999, background: 'var(--surface)', color: 'var(--text)', fontSize: 13.5, fontWeight: 500 }}>
+            <a href="#research" className="lp-mono lp-btn lp-btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 24px', border: '1px solid var(--border-strong)', borderRadius: 0, background: 'var(--surface)', color: 'var(--text)', fontSize: 13.5, fontWeight: 500 }}>
               See a sample report
             </a>
           </div>
@@ -304,7 +311,7 @@ export default function LandingPage() {
           <AppLogoMark width={44} height={44} style={{ display: 'block', margin: '0 auto 22px' }} />
           <h2 className="reveal" style={{ margin: '0 auto', maxWidth: '18ch', fontSize: 'clamp(34px,5vw,60px)', fontWeight: 300, lineHeight: 1.06, letterSpacing: '-.03em', textWrap: 'balance' }}>Intelligence emerges <span style={{ fontStyle: 'italic', color: 'var(--accent)' }}>at this point.</span></h2>
           <div className="reveal" style={{ transitionDelay: '.12s', marginTop: 34 }}>
-            <button onClick={goDashboard} className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, height: 52, padding: '0 30px', border: 'none', borderRadius: 999, background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>
+            <button onClick={goDashboard} className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, height: 52, padding: '0 30px', border: 'none', borderRadius: 0, background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>
               Open your workspace
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>

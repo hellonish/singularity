@@ -149,12 +149,12 @@ export function Composer() {
                 <div className="sg-mono" style={{ fontSize: '9.5px', letterSpacing: '.13em', textTransform: 'uppercase', color: 'var(--text-faint)', padding: '3px 6px 7px' }}>Mode</div>
                 <button type="button" onClick={() => { setMode('chat'); setOpenMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: mode === 'chat' ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Chat</span>
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Chat</span>
                   {mode === 'chat' && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
                 </button>
                 <button type="button" onClick={selectResearchMode} style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: mode === 'research' ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ flexShrink: 0 }}><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Research</span>
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Research</span>
                   {mode === 'research' && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
                 </button>
               </div>
@@ -181,7 +181,7 @@ export function Composer() {
                     onClick={() => { setIntensity(it.id as Intensity); setOpenMenu(null); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: intensity === it.id ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}
                   >
-                    <span style={{ flex: 1, textAlign: 'left', fontSize: '14.5px', fontWeight: 600 }}>{it.name}</span>
+                    <span style={{ flex: 1, textAlign: 'left', fontSize: '14.5px', fontWeight: 500 }}>{it.name}</span>
                     {intensity === it.id && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12" /></svg>}
                   </button>
                 ))}
@@ -265,7 +265,7 @@ export function Composer() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: '400px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '18px', boxShadow: 'var(--shadow)', padding: '22px' }}
           >
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>Start a new chat?</div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 500, color: 'var(--text)' }}>Start a new chat?</div>
             <div style={{ marginTop: '9px', fontSize: '14px', lineHeight: 1.5, color: 'var(--text-dim)' }}>Research requires a new chat.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '9px', marginTop: '22px' }}>
               <button

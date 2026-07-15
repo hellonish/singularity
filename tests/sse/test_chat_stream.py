@@ -116,7 +116,7 @@ def test_hosted_chat_stream_forwards_shared_runtime_progress(
             yield ChatStreamEvent(type="delta", model_id="model", delta="grounded")
             yield ChatStreamEvent(type="completed", model_id="model", content="grounded")
 
-    monkeypatch.setattr("api.services.chat_stream.ChatRuntime", Runtime)
+    monkeypatch.setattr("api.services.chat_stream.UnifiedChatAgentLoop", Runtime)
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FakeProvider([]))
 
     with client.stream(
@@ -153,6 +153,7 @@ def test_first_turn_of_untitled_chat_generates_and_persists_a_title(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id = _make_untitled_chat_with_credential(client, current_user)
     provider = _TitledProvider(["Diffusion ", "transformers ", "explained."])
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: provider)
@@ -181,6 +182,7 @@ def test_title_generation_failure_falls_back_to_the_user_message(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id = _make_untitled_chat_with_credential(client, current_user)
     # _FakeProvider has no complete(): title generation fails and falls back.
     provider = _FakeProvider(["pong"])
@@ -207,6 +209,7 @@ def test_titled_chat_streams_do_not_emit_a_title_event(
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id = _make_chat_with_credential(client, current_user)
     provider = _TitledProvider(["pong"])
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: provider)
@@ -238,12 +241,12 @@ def test_chat_stream_without_credential_returns_422(
     assert response.status_code == 422, response.text
 
 
-def test_live_request_fails_closed_when_hosted_tools_are_disabled(
+def test_explicit_tool_request_fails_closed_when_hosted_tools_are_disabled(
     client: TestClient,
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A missed deployment flag must never degrade a live request to model-only chat."""
+    """An explicit, unsimulatable tool command must never silently degrade."""
     chat_id = _make_chat_with_credential(client, current_user)
     monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FakeProvider(["unsupported"]))
@@ -251,7 +254,7 @@ def test_live_request_fails_closed_when_hosted_tools_are_disabled(
     with client.stream(
         "POST",
         f"/chats/{chat_id}/messages/stream",
-        json={"content": "Can you find me Job Postings in past 7 days for New Grad SWE?"},
+        json={"content": "Run code to sort this list of numbers"},
         headers=current_user,
     ) as response:
         assert response.status_code == 200, response.text
@@ -262,11 +265,38 @@ def test_live_request_fails_closed_when_hosted_tools_are_disabled(
     assert "Modal tools are disabled" in events[-1]["data"]["message"]
 
 
+def test_time_sensitive_request_degrades_with_disclosure_when_tools_are_disabled(
+    client: TestClient,
+    current_user: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool outage on a freshness turn answers with disclosure, not an error."""
+    chat_id = _make_chat_with_credential(client, current_user)
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
+    monkeypatch.setattr(
+        "api.services.chat_stream.provider_for",
+        lambda name: _FakeProvider(["As of my training, ", "details may be outdated."]),
+    )
+
+    with client.stream(
+        "POST",
+        f"/chats/{chat_id}/messages/stream",
+        json={"content": "Can you find me Job Postings in past 7 days for New Grad SWE?"},
+        headers=current_user,
+    ) as response:
+        assert response.status_code == 200, response.text
+        events = parse_sse(response.read().decode())
+
+    assert events[-1]["event"] == "message.completed"
+    assert events[-1]["data"]["content"] == "As of my training, details may be outdated."
+
+
 def test_chat_stream_surfaces_provider_error_as_terminal_event(
     client: TestClient,
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     chat_id = _make_chat_with_credential(client, current_user)
     monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FailingProvider([]))
 

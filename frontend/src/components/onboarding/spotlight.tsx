@@ -273,7 +273,7 @@ export function Spotlight() {
 
       {tooltipStyle && (
         <div style={tooltipStyle} className="animate-sg-pop">
-          <h3 style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>{step.title}</h3>
+          <h3 style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: 500, color: 'var(--text)' }}>{step.title}</h3>
           <p style={{ margin: '0 0 12px', fontSize: '13.5px', lineHeight: 1.5, color: 'var(--text-dim)' }}>{step.desc}</p>
 
           {/* Persistent "do this right now" instruction box */}
@@ -298,7 +298,7 @@ export function Spotlight() {
             {isLast && (
               <button
                 onClick={() => endTour(true)}
-                style={{ marginLeft: 'auto', height: '30px', padding: '0 13px', border: 'none', borderRadius: '8px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}
+                style={{ marginLeft: 'auto', height: '30px', padding: '0 13px', border: 'none', borderRadius: '8px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '11.5px', fontWeight: 500, cursor: 'pointer' }}
               >
                 Got it
               </button>
