@@ -1,15 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Intensity, useAppStore } from '@/store/app-store';
 import { INTENSITIES, PROVIDERS } from '@/lib/dummy-data';
 import { useWorkspace } from '@/components/workspace-provider';
+
+const COMPOSER_LINE_HEIGHT_PX = 27;
+const COMPOSER_VERTICAL_PADDING_PX = 8;
+const COMPOSER_MAX_HEIGHT_PX = COMPOSER_LINE_HEIGHT_PX * 6 + COMPOSER_VERTICAL_PADDING_PX;
 
 export function Composer() {
   const { mode, intensity, modelId, view, activeChatId, openMenu, researchApprovalMode, setResearchApprovalMode, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setActiveRunId, setActivePreparationId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
   const { createAndSendChat, sendChat, prepareResearch, activeCredential, availableModels, modelsLoading, setDefaultModel, clearError, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Switching to Research abandons the open chat, so confirm first when one is active.
   const [researchConfirmOpen, setResearchConfirmOpen] = useState(false);
 
@@ -40,6 +45,16 @@ export function Composer() {
     const applyDraft = window.setTimeout(() => setQuery(composerDraft), 0);
     return () => window.clearTimeout(applyDraft);
   }, [composerDraft]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = 'auto';
+    const nextHeight = Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT_PX);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > COMPOSER_MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  }, [query]);
 
   const modeLabel = mode === 'research' ? 'Research' : 'Chat';
   const intensityName = INTENSITIES.find(i => i.id === intensity)?.name || 'Medium';
@@ -125,12 +140,13 @@ export function Composer() {
       >
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', padding: '14px 14px 6px' }}>
           <textarea
+            ref={textareaRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder={mode === 'research' ? 'What do you want to research?' : 'Message Singularity...'}
-            style={{ flex: 1, resize: 'none', border: 'none', outline: 'none', background: 'transparent', color: 'var(--text)', fontFamily: 'var(--font-serif)', fontSize: '18px', lineHeight: 1.5, maxHeight: '150px', padding: '4px 4px' }}
+            style={{ flex: 1, boxSizing: 'border-box', resize: 'none', border: 'none', outline: 'none', overflowY: 'hidden', background: 'transparent', color: 'var(--text)', fontFamily: 'var(--font-serif)', fontSize: '18px', lineHeight: 1.5, maxHeight: `${COMPOSER_MAX_HEIGHT_PX}px`, padding: '4px 4px' }}
           />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px 12px' }}>

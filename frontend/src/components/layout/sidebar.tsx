@@ -124,8 +124,15 @@ export function Sidebar() {
     >
       {sidebarOpen ? (
         <>
-          <AppLogoMark width={32} height={32} />
-          <span style={{ fontSize: '18px', fontWeight: 600 }}>Singularity</span>
+          <button
+            type="button"
+            onClick={() => setView('grid')}
+            title="Go to projects"
+            style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: 0, border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
+          >
+            <AppLogoMark width={32} height={32} />
+            <span style={{ fontSize: '18px', fontWeight: 600 }}>Singularity</span>
+          </button>
           <button onClick={toggleSidebar} title="Collapse sidebar" style={{ marginLeft: 'auto', width: '30px', height: '30px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             ‹
           </button>
