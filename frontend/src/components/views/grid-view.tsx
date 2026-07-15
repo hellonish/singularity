@@ -82,7 +82,7 @@ export function GridView() {
         <div style={{ maxWidth: '1180px', margin: '0 auto', padding: '90px 32px 40px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '24px' }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: '34px', fontWeight: 300, letterSpacing: '-.02em', lineHeight: 1.05, minHeight: '36px' }}>
+              <h1 style={{ margin: 0, fontSize: '34px', fontWeight: 400, letterSpacing: '-.02em', lineHeight: 1.05, minHeight: '36px' }}>
                 {greetingMessage ? (
                   <>{greetingMessage.prefix}<span style={{ color: 'var(--accent)' }}>{greetingMessage.suffix}</span></>
                 ) : '\u00A0'}
@@ -98,7 +98,7 @@ export function GridView() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                     <span className="sg-mono" style={{ marginLeft: 'auto', fontSize: '10px', padding: '2px 7px', borderRadius: '5px', backgroundColor: report.status === 'ready' ? 'var(--accent-soft)' : 'var(--surface-3)', color: 'var(--accent-2)' }}>{run?.status ?? report.status}</span>
                   </div>
-                  <h3 style={{ margin: '0 0 12px', fontSize: '17px', fontWeight: 300, fontStyle: 'italic', lineHeight: 1.3 }}>{report.title || 'Untitled research'}</h3>
+                  <h3 style={{ margin: '0 0 12px', fontSize: '17px', fontWeight: 500, lineHeight: 1.3 }}>{report.title || 'Untitled research'}</h3>
                   <div className="sg-mono" style={{ display: 'flex', gap: '12px', fontSize: '11px', color: 'var(--text-dim)' }}><span>{relativeTime(report.updated_at)}</span><span style={{ marginLeft: 'auto' }}>{report.source || 'research'}</span></div>
                 </button>;
               })}

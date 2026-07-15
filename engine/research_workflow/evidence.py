@@ -6,6 +6,39 @@ from typing import Any
 from vector_store.models import RetrievalScope
 
 
+def rank_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order evidence so the most substantial records survive downstream caps.
+
+    Both the resolver and the answerer truncate evidence to a per-node budget,
+    so list order decides what the model actually sees. Records are
+    deduplicated by URL (keeping the one with the most content — a fetched
+    page over its search snippet) and sorted so full-text extractions rank
+    ahead of snippets, with source credibility breaking ties. Content length
+    is bucketed to the nearest 1,000 characters so a marginally longer snippet
+    does not outrank a more credible one.
+    """
+    by_url: dict[str, dict[str, Any]] = {}
+    unkeyed: list[dict[str, Any]] = []
+    for item in evidence:
+        url = str(item.get("url", ""))
+        if not url:
+            unkeyed.append(item)
+            continue
+        current = by_url.get(url)
+        if current is None or len(str(item.get("content", ""))) > len(str(current.get("content", ""))):
+            by_url[url] = item
+
+    def rank_key(item: dict[str, Any]) -> tuple[int, float]:
+        content_bucket = len(str(item.get("content", ""))) // 1_000
+        try:
+            credibility = float(item.get("credibility") or 0.0)
+        except (TypeError, ValueError):
+            credibility = 0.0
+        return (content_bucket, credibility)
+
+    return sorted([*by_url.values(), *unkeyed], key=rank_key, reverse=True)
+
+
 def persist_evidence(*, vector_store, scope: RetrievalScope, node_id: str, evidence: list[dict[str, Any]], answer: dict[str, Any]) -> dict[str, Any]:
     """Persist source text and a lineage-linked synthetic answer.
 

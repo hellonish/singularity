@@ -36,14 +36,27 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
     except ImportError as exc:  # pragma: no cover - exercised in deployment
         raise RuntimeError("install langgraph to run the research worker") from exc
 
-    async def progress(phase: str, status: str, message: str, **details: Any) -> None:
+    async def progress(phase: str, status: str, message: str, *, kind: str = "phase", **details: Any) -> None:
+        # Every progress event carries a stable ``kind`` discriminator so the UI
+        # can route it to one component without pattern-matching on phase/status.
+        # ``kind`` defaults to "phase"; node boundaries below emit richer kinds
+        # (scope, agent_dispatch, section_written) that the feed renders as cards.
         if progress_reporter is not None:
-            await progress_reporter({"phase": phase, "status": status, "message": message, **details})
+            await progress_reporter({"kind": kind, "phase": phase, "status": status, "message": message, **details})
 
     async def polish(state: ResearchGraphState):
         await progress("planning", "started", "Clarifying research objective")
         polished = await planner.polish_prompt(state["query"])
         await progress("planning", "completed", "Research objective ready")
+        # Surface the polished objective as a scope card: objective + the
+        # must-have deliverables the run committed to before spending budget.
+        objective = str(polished.get("query") or state["query"])
+        must_haves = [str(item) for item in (polished.get("must_haves") or polished.get("requirements") or []) if str(item).strip()][:6]
+        deliverable = str(polished.get("deliverable") or polished.get("output") or "").strip()
+        await progress(
+            "planning", "completed", "Research scope defined",
+            kind="scope", objective=objective, must_haves=must_haves, deliverable=deliverable,
+        )
         return {
             "original_query": state["query"],
             "query": polished.get("query", state["query"]),
@@ -66,6 +79,13 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
         await progress("planning", "started", "Building bounded research plan")
         dag = await lead.merge(state["query"], state["planner_proposals"], RunCaps(**state["caps"]))
         await progress("planning", "completed", "Research plan ready", node_count=len(dag.nodes))
+        # One agent-dispatch card per planned node, so the feed shows the parallel
+        # workstreams the run is about to resolve before any tool call fires.
+        for node in dag.nodes.values():
+            await progress(
+                "planning", "dispatched", f"Dispatched: {node.question}",
+                kind="agent_dispatch", node_id=node.node_id, question=node.question,
+            )
         return {"dag": dag.model_dump(), "events": [{"kind": "lead_completed"}]}
 
     async def resolve(state: ResearchGraphState):
@@ -110,17 +130,33 @@ def build_research_graph(*, planner, lead, resolver, qa_reviewer, writer, checkp
             state["query"],
             RunCaps(**state["caps"]),
         )
+        # One section-written tick per composed section. The writer runs sections
+        # in parallel and returns them together, so we announce them here at the
+        # node boundary rather than threading a reporter through the writer.
+        for section in report.get("sections", []) if isinstance(report, dict) else []:
+            title = str(section.get("title") or "").strip()
+            if title:
+                await progress(
+                    "writing", "section_written", f"Wrote section: {title}",
+                    kind="section_written", section_title=title,
+                )
         await progress("writing", "completed", "Research report written")
         return {"report": report, "events": [{"kind": "report_written"}]}
 
     def route_after_qa(state: ResearchGraphState):
+        # Any gap-filling nodes QA just accepted must be researched before
+        # writing — including those from the final QA cycle, which previously
+        # went straight to the writer as permanently unanswered nodes.
         dag = ResearchDAG.model_validate(state["dag"])
-        if state.get("cycle", 0) < RunCaps(**state["caps"]).qa_cycles and dag.ready_nodes():
-            return "resolve"
-        return "write"
+        return "resolve" if dag.ready_nodes() else "write"
 
     def route_after_research(state: ResearchGraphState):
-        return "qa" if RunCaps(**state["caps"]).qa_cycles else "write"
+        # The cycle count gates QA passes (not resolve passes), so each QA
+        # pass's suggestions get exactly one resolution round and the run
+        # performs exactly caps.qa_cycles reviews.
+        if int(state.get("cycle", 0)) < RunCaps(**state["caps"]).qa_cycles:
+            return "qa"
+        return "write"
 
     graph = StateGraph(ResearchGraphState)
     graph.add_node("polish_prompt", polish)

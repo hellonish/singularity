@@ -1,30 +1,30 @@
 import asyncio
-from types import SimpleNamespace
+import json
 
 from engine.chat.effort import ChatEffort
 from engine.chat.modal_tools import ChatToolResult
 from engine.cli.agents import ChatTerminalAgent, FreshnessEvidenceUnavailable
 from engine.cli.models import TerminalSession
-from engine.llm.groq import GroqModel
+from engine.llm.groq import GroqModel, LLMStreamEvent, LLMToolCall
 
 
 class CapturingProvider:
+    """Answers on the first model turn; records everything it was shown."""
+
     def __init__(self) -> None:
-        self.messages = None
-        self.planner_messages = []
+        self.tool_turn_messages: list[list[dict]] = []
+        self.chat_messages: list[list[dict]] = []
 
     async def retrieve_model(self, *, api_key, model_id):
         return GroqModel(id=model_id, context_window=32_768, max_completion_tokens=2_000)
 
-    async def plan_tool_call(self, *, api_key, config, messages, tools, end_user_id=None):
-        # After the seeded discovery burst the model planner decides the next
-        # step; returning None means the seed evidence is sufficient.
-        self.planner_messages.append(messages)
-        return None
-
     async def stream_chat(self, *, api_key, config, messages):
-        self.messages = messages
+        self.chat_messages.append(list(messages))
         yield "Grounded current answer."
+
+    async def stream_with_tools(self, *, api_key, config, messages, tools, end_user_id=None):
+        self.tool_turn_messages.append(list(messages))
+        yield LLMStreamEvent(kind="delta", delta="Grounded current answer.")
 
 
 class LiveSearchExecutor:
@@ -63,25 +63,44 @@ def test_current_events_chat_dispatches_search_and_injects_sources(monkeypatch) 
     assert executor.invocations[1].arguments["search_backend"] == "tavily"
     assert executor.closed is True
     assert any(output.kind == "tool_completed" for output in outputs)
-    assert provider.messages is not None
-    assert "https://example.test/current" in str(provider.messages)
+    assert provider.tool_turn_messages, "answer model never ran"
+    assert "https://example.test/current" in str(provider.tool_turn_messages[0])
 
 
-def test_current_events_chat_fails_closed_when_search_fails(monkeypatch) -> None:
+def test_failed_search_degrades_to_disclosed_answer_instead_of_failing(monkeypatch) -> None:
+    """A tool outage on a time-sensitive turn discloses; it no longer dead-ends."""
     monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "1")
     provider = CapturingProvider()
     executor = LiveSearchExecutor(error="provider unavailable")
     agent = ChatTerminalAgent(provider=provider, tool_executor_factory=lambda: executor)
 
-    try:
-        asyncio.run(_collect(agent, "What's going on with Anthropic and OpenAI?"))
-    except FreshnessEvidenceUnavailable as exc:
-        assert "no usable sources" in str(exc)
-    else:
-        raise AssertionError("expected freshness request to fail closed")
+    outputs = asyncio.run(_collect(agent, "What's going on with Anthropic and OpenAI?"))
 
-    assert provider.messages is None
     assert executor.closed is True
+    assert any(output.kind == "completed" for output in outputs)
+    # The model saw the failures as typed error tool messages it can react to.
+    turn = provider.tool_turn_messages[0]
+    error_payloads = [
+        json.loads(message["content"])
+        for message in turn
+        if message.get("role") == "tool" and message["content"].startswith("{")
+    ]
+    assert error_payloads and all("error_kind" in payload for payload in error_payloads)
+
+
+def test_explicit_tool_request_fails_closed_without_modal(monkeypatch) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
+    provider = CapturingProvider()
+    agent = ChatTerminalAgent(provider=provider)
+
+    try:
+        asyncio.run(_collect(agent, "Run code to sort this list of numbers"))
+    except FreshnessEvidenceUnavailable as exc:
+        assert "Modal tools are disabled" in str(exc)
+    else:
+        raise AssertionError("expected an explicit tool request to fail closed")
+
+    assert provider.chat_messages == [] and provider.tool_turn_messages == []
 
 
 def test_job_search_and_retry_follow_up_dispatch_fresh_searches(monkeypatch) -> None:
@@ -97,59 +116,44 @@ def test_job_search_and_retry_follow_up_dispatch_fresh_searches(monkeypatch) -> 
 
     assert [call.query for call in executor.invocations] == [request, f"{request} official primary sources"] * 2
     assert any(output.kind == "routing" for output in retry_outputs)
-    assert provider.messages is not None
-    assert request in str(provider.messages)
+    assert request in str(provider.tool_turn_messages[-1])
 
 
-class FollowUpPlanningProvider(CapturingProvider):
-    """Model planner that requests a search for a non-heuristic follow-up."""
+class FollowUpToolCallingProvider(CapturingProvider):
+    """Model that requests a search for a non-heuristic follow-up, then answers."""
 
-    async def plan_tool_call(self, *, api_key, config, messages, tools, end_user_id=None):
-        self.planner_messages.append(messages)
-        if len(self.planner_messages) > 1:
-            return None
-        return SimpleNamespace(
-            name="general_web_research__web_search",
-            arguments={
+    async def stream_with_tools(self, *, api_key, config, messages, tools, end_user_id=None):
+        self.tool_turn_messages.append(list(messages))
+        if len(self.tool_turn_messages) == 1:
+            arguments = json.dumps({
                 "query": "new grad SWE job postings individual listings",
                 "arguments": {"max_results": 8},
-            },
-        )
+            })
+            yield LLMStreamEvent(kind="tool_calls", tool_calls=(
+                LLMToolCall(
+                    id="c1",
+                    name="general_web_research__web_search",
+                    arguments=json.loads(arguments),
+                    raw_arguments=arguments,
+                ),
+            ))
+            return
+        yield LLMStreamEvent(kind="delta", delta="Grounded current answer.")
 
 
-class FailingPlanningProvider(CapturingProvider):
-    async def plan_tool_call(self, *, api_key, config, messages, tools, end_user_id=None):
-        raise RuntimeError("planner unavailable")
-
-
-def test_elliptical_follow_up_reaches_model_planner_and_injects_evidence(monkeypatch) -> None:
-    """A follow-up no heuristic matches must still get a planning chance."""
+def test_elliptical_follow_up_lets_the_model_plan_its_own_search(monkeypatch) -> None:
+    """A follow-up no heuristic matches must still get live retrieval via the model."""
     monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "1")
-    provider = FollowUpPlanningProvider()
+    provider = FollowUpToolCallingProvider()
     executor = LiveSearchExecutor()
     agent = ChatTerminalAgent(provider=provider, tool_executor_factory=lambda: executor)
 
     outputs = asyncio.run(_collect(agent, "Can you find me the postings instead of just the portals."))
 
     assert [call.tool_name for call in executor.invocations] == ["web_search"]
-    assert provider.planner_messages, "model planner was never consulted"
-    assert "No deterministic heuristic matched" in str(provider.planner_messages[0])
-    assert "https://example.test/current" in str(provider.messages)
+    assert "No deterministic heuristic matched" in str(provider.tool_turn_messages[0])
+    assert "https://example.test/current" in str(provider.tool_turn_messages[1])
     assert any(output.kind == "tool_completed" for output in outputs)
-
-
-def test_optional_planning_failure_degrades_to_direct_answer(monkeypatch) -> None:
-    """Planner errors must not block turns the heuristics never marked live."""
-    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "1")
-    provider = FailingPlanningProvider()
-    executor = LiveSearchExecutor()
-    agent = ChatTerminalAgent(provider=provider, tool_executor_factory=lambda: executor)
-
-    outputs = asyncio.run(_collect(agent, "Thanks, that was helpful."))
-
-    assert executor.invocations == []
-    assert provider.messages is not None, "answer model never ran"
-    assert any("answering directly" in (output.content or "") for output in outputs)
 
 
 async def _collect(agent: ChatTerminalAgent, message: str):

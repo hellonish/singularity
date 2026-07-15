@@ -5,7 +5,7 @@ import logging
 import json
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from openai import (
     APIConnectionError,
@@ -71,8 +71,26 @@ class LLMCompletion:
 
 @dataclass(frozen=True)
 class LLMToolCall:
+    """One accumulated tool call from a streamed model turn.
+
+    ``arguments`` is ``None`` when the model emitted malformed JSON; the raw
+    text is preserved so the loop can reject that call with a precise tool
+    message instead of failing the whole turn.
+    """
+
+    id: str
     name: str
-    arguments: dict[str, Any]
+    arguments: dict[str, Any] | None
+    raw_arguments: str
+
+
+@dataclass(frozen=True)
+class LLMStreamEvent:
+    """A streamed model-turn event: a visible text delta or the final tool batch."""
+
+    kind: Literal["delta", "tool_calls"]
+    delta: str = ""
+    tool_calls: tuple[LLMToolCall, ...] = ()
 
 
 class GroqProvider:
@@ -273,59 +291,80 @@ class GroqProvider:
             structured_output=parsed_output,
         )
 
-    async def plan_tool_call(
+    async def stream_with_tools(
         self,
         *,
         api_key: str,
         config: LLMRequestConfig,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[dict[str, Any]],
         tools: list[dict[str, Any]],
         end_user_id: str | None = None,
-    ) -> LLMToolCall | None:
-        """Ask Groq for at most one validated tool decision, without streaming."""
+    ) -> AsyncIterator[LLMStreamEvent]:
+        """Stream one model turn that may answer in text or emit parallel tool calls.
+
+        Text deltas are yielded as they arrive. Tool-call fragments are
+        accumulated across chunks and yielded once, as a single terminal
+        ``tool_calls`` event, so the caller always receives complete calls.
+        """
+        accumulating: dict[int, dict[str, Any]] = {}
         try:
             async with AsyncOpenAI(api_key=api_key, base_url=self.base_url) as client:
                 request_data: dict[str, Any] = {
                     "model": config.model_id,
                     "messages": list(messages),
                     "temperature": config.temperature,
-                    self.max_output_parameter: min(config.max_output_tokens, 512),
+                    self.max_output_parameter: config.max_output_tokens,
+                    "stream": True,
                     "tools": tools,
                     "tool_choice": "auto",
                 }
                 if end_user_id is not None:
                     request_data["user"] = end_user_id
                 self._apply_reasoning(request_data, config.reasoning_effort)
-                response = await client.chat.completions.create(**request_data)
+                stream = await client.chat.completions.create(**request_data)
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        yield LLMStreamEvent(kind="delta", delta=delta.content)
+                    for fragment in delta.tool_calls or ():
+                        entry = accumulating.setdefault(
+                            fragment.index, {"id": "", "name": "", "arguments": ""}
+                        )
+                        if fragment.id:
+                            entry["id"] = fragment.id
+                        if fragment.function is not None:
+                            if fragment.function.name:
+                                entry["name"] = fragment.function.name
+                            if fragment.function.arguments:
+                                entry["arguments"] += fragment.function.arguments
         except Exception as exc:
-            classified = self._classify_error(exc, operation="plan chat tool use")
-            # GPT-OSS can occasionally emit an invalid local-tool argument
-            # object. Groq returns that as HTTP 400 before giving us a model
-            # response. Planning is optional, so fall back to normal chat
-            # rather than failing the whole turn.
-            if classified.code == "provider_invalid_tool_generation":
-                return None
-            raise classified from exc
-        message = response.choices[0].message if response.choices else None
-        calls = getattr(message, "tool_calls", None) if message else None
-        if not calls:
-            return None
-        call = calls[0]
-        try:
-            arguments = json.loads(call.function.arguments or "{}")
-        except (TypeError, json.JSONDecodeError) as exc:
-            raise GroqProviderError(
-                code="provider_invalid_tool_arguments",
-                message="Groq returned malformed chat tool arguments",
-                retryable=True,
-            ) from exc
-        if not isinstance(arguments, dict):
-            raise GroqProviderError(
-                code="provider_invalid_tool_arguments",
-                message="Groq returned non-object chat tool arguments",
-                retryable=True,
+            raise self._classify_error(exc, operation="stream chat response") from exc
+        if accumulating:
+            yield LLMStreamEvent(
+                kind="tool_calls",
+                tool_calls=tuple(
+                    _finish_tool_call(entry, index)
+                    for index, entry in sorted(accumulating.items())
+                ),
             )
-        return LLMToolCall(name=call.function.name, arguments=arguments)
+
+
+def _finish_tool_call(entry: dict[str, Any], index: int) -> LLMToolCall:
+    """Parse one accumulated tool-call fragment set into a complete call."""
+    raw = entry["arguments"] or "{}"
+    try:
+        parsed = json.loads(raw)
+        arguments = parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        arguments = None
+    return LLMToolCall(
+        id=entry["id"] or f"call_{index}",
+        name=entry["name"],
+        arguments=arguments,
+        raw_arguments=raw,
+    )
 
 
 def _classify_groq_error(exc: Exception, *, operation: str, provider_name: str = "Groq") -> GroqProviderError:

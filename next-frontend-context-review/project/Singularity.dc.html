@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..500;1,6..72,300..500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root, [data-app-theme="dark"]{
+    --bg:#0b0a09; --bg-sunken:#050505; --surface:#141210; --surface-2:#1c1915; --surface-3:#25211b;
+    --border:rgba(255,255,255,0.09); --border-strong:rgba(255,255,255,0.17);
+    --text:#efece6; --text-dim:#a9a39a; --text-faint:#6f685f;
+    --accent:#6366f1; --accent-2:#8b8dff; --accent-soft:rgba(99,102,241,0.16);
+    --ok:#3fc8a4; --warn:#e6a13c; --danger:#f26d5b;
+    --shadow:0 16px 48px rgba(0,0,0,0.5); --shadow-sm:0 1px 3px rgba(0,0,0,0.45);
+  }
+  [data-app-theme="light"]{
+    --bg:#f7f5f0; --bg-sunken:#ece9e2; --surface:#ffffff; --surface-2:#faf8f4; --surface-3:#ece9e2;
+    --border:rgba(42,40,36,0.10); --border-strong:rgba(42,40,36,0.17);
+    --text:#2a2824; --text-dim:#5c5952; --text-faint:#9a968d;
+    --accent:#7c5230; --accent-2:#5f3d21; --accent-soft:rgba(124,82,48,0.12);
+    --ok:#0f9d78; --warn:#c47510; --danger:#d94a38;
+    --shadow:0 18px 50px rgba(20,30,55,0.14); --shadow-sm:0 1px 3px rgba(20,30,55,0.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;font-family:'Newsreader',Georgia,serif}
+  a{color:var(--accent-2)} a:hover{color:var(--accent)}
+  ::selection{background:var(--accent-soft);color:var(--text)}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  @keyframes sg-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @keyframes sg-scrim{from{opacity:0}to{opacity:1}}
+  @keyframes sg-pop{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+  @keyframes sg-grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+  .sg-mono{font-family:'JetBrains Mono',monospace}
+  .sg-logobtn .sg-arrow{opacity:0}
+  .sg-logobtn:hover .sg-arrow{opacity:1}
+  .sg-logobtn:hover .sg-logo{opacity:0}
+</style>
+</helmet>
+
+<div ref="{{ themeRef }}" data-app-theme="{{ theme }}" style="display:flex;height:100vh;width:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Newsreader',Georgia,serif;transition:background .3s,color .3s">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside data-screen-label="Sidebar" style="{{ sidebarStyle }}">
+    <div style="display:flex;align-items:center;gap:9px;height:58px;padding:0 12px 0 14px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+        <img src="reference/singularity-logo.png" alt="Singularity" style="width:32px;height:32px;flex-shrink:0;object-fit:contain"/>
+        <span style="font-size:18px;font-weight:500;letter-spacing:-.01em;white-space:nowrap">Singularity</span>
+        <button onClick="{{ toggleSidebar }}" title="Collapse sidebar" style="margin-left:auto;flex-shrink:0;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);border-radius:9px;cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+      </sc-if>
+      <sc-if value="{{ sidebarClosed }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ toggleSidebar }}" title="Expand sidebar" class="sg-logobtn" style="position:relative;width:38px;height:38px;margin:0 auto;flex-shrink:0;border:none;background:transparent;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center">
+          <img class="sg-logo" src="reference/singularity-logo.png" alt="Singularity" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transition:opacity .15s"/>
+          <span class="sg-arrow" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text);border:1px solid var(--border);background:var(--surface-2);border-radius:8px;transition:opacity .15s">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </span>
+        </button>
+      </sc-if>
+    </div>
+
+    <div style="padding:12px;flex-shrink:0">
+      <button onClick="{{ newSession }}" style="{{ newChatStyle }}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}"><span style="white-space:nowrap">New research</span></sc-if>
+      </button>
+    </div>
+
+    <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+      <div class="sg-mono" style="padding:6px 18px 6px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint)">Research</div>
+    </sc-if>
+    <nav style="flex:1;min-height:0;overflow-y:auto;padding:2px 8px 12px;display:flex;flex-direction:column;gap:2px">
+      <sc-for list="{{ navReports }}" as="r" hint-placeholder-count="5">
+        <button onClick="{{ r.onOpen }}" title="{{ r.title }}" style="{{ r.rowStyle }}">
+          <span style="display:flex;align-items:center;justify-content:center;width:22px;flex-shrink:0;color:{{ r.dot }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </span>
+          <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px">{{ r.title }}</span>
+            <span class="sg-mono" style="font-size:10px;color:var(--text-faint);flex-shrink:0">{{ r.chatCount }}</span>
+          </sc-if>
+        </button>
+        <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:1px;margin:1px 0 4px 22px;padding-left:8px;border-left:1px solid var(--border)">
+            <sc-for list="{{ r.chats }}" as="c" hint-placeholder-count="2">
+              <button onClick="{{ c.onSelect }}" title="{{ c.title }}" style="{{ c.style }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0;opacity:.7"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.title }}</span>
+              </button>
+            </sc-for>
+            <button onClick="{{ r.onNewChat }}" style="display:flex;align-items:center;gap:7px;padding:6px 8px;border:none;background:transparent;color:var(--text-faint);border-radius:7px;cursor:pointer;font-size:12px;text-align:left" class="sg-mono">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New chat
+            </button>
+          </div>
+        </sc-if>
+      </sc-for>
+
+      <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+        <div class="sg-mono" style="padding:14px 10px 6px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint)">Chats</div>
+      </sc-if>
+      <sc-for list="{{ navChats }}" as="c" hint-placeholder-count="2">
+        <button onClick="{{ c.onSelect }}" title="{{ c.title }}" style="{{ c.rowStyle }}">
+          <span style="display:flex;align-items:center;justify-content:center;width:22px;flex-shrink:0;color:var(--text-faint)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          </span>
+          <sc-if value="{{ sidebarOpen }}" hint-placeholder-val="{{ true }}">
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px">{{ c.title }}</span>
+          </sc-if>
+        </button>
+      </sc-for>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main data-screen-label="Workspace" style="position:relative;flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)">
+
+    <!-- Top chrome -->
+    <header style="position:absolute;top:0;left:0;right:0;z-index:25;display:flex;align-items:center;gap:8px;height:58px;padding:0 18px;pointer-events:none">
+      <sc-if value="{{ isReport }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ backToGrid }}" style="pointer-events:auto;display:flex;align-items:center;gap:7px;height:34px;padding:0 13px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);border-radius:999px;cursor:pointer;font-size:12px" class="sg-mono">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Projects
+        </button>
+      </sc-if>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px;pointer-events:auto">
+        <button onClick="{{ toggleTheme }}" title="Toggle theme" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);border-radius:999px;cursor:pointer">
+          <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+          </sc-if>
+          <sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          </sc-if>
+        </button>
+        <button data-tour="settings" onClick="{{ openSettings }}" title="Settings" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);border-radius:999px;cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+        <div style="position:relative">
+          <button onClick="{{ toggleUserMenu }}" title="Account" style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:999px;background:var(--accent-soft);color:var(--accent-2);font-weight:500;font-size:15px;cursor:pointer;border:1px solid var(--border)">A</button>
+          <sc-if value="{{ userMenuOpen }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ closeUserMenu }}" style="position:fixed;inset:0;z-index:40"></div>
+            <div style="position:absolute;top:calc(100% + 8px);right:0;width:236px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;box-shadow:var(--shadow);padding:6px;z-index:50;animation:sg-pop .16s ease both">
+              <div style="padding:10px 11px 11px;border-bottom:1px solid var(--border);margin-bottom:5px">
+                <div style="font-size:14.5px;font-weight:500;color:var(--text)">Alex Rivera</div>
+                <div class="sg-mono" style="font-size:11px;color:var(--text-faint);margin-top:2px">alex@singularity.ai</div>
+              </div>
+              <button onClick="{{ openSettingsFromMenu }}" style="display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;border:none;background:transparent;color:var(--text);border-radius:9px;cursor:pointer;font-size:14px;text-align:left">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Settings
+              </button>
+              <button onClick="{{ closeUserMenu }}" style="display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;border:none;border-top:1px solid var(--border);margin-top:5px;background:transparent;color:var(--danger);border-radius:9px;cursor:pointer;font-size:14px;text-align:left">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Log out
+              </button>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+    </header>
+
+    <!-- ===== GRID VIEW ===== -->
+    <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain">
+        <sc-if value="{{ isChat }}" hint-placeholder-val="{{ false }}">
+          <div style="max-width:720px;margin:0 auto;padding:90px 24px 24px;display:flex;flex-direction:column;gap:22px">
+            <sc-for list="{{ chatMessages }}" as="m" hint-placeholder-count="2">
+              <div style="{{ m.wrap }}"><div class="sg-mono" style="font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);margin-bottom:6px">{{ m.who }}</div><div style="{{ m.bubble }}">{{ m.text }}</div></div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}">
+        <div style="max-width:1180px;margin:0 auto;padding:90px 32px 40px">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:24px">
+            <div>
+              <div class="sg-mono" style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">Workspace</div>
+              <h1 style="margin:0;font-size:34px;font-weight:300;font-style:italic;letter-spacing:-.02em;line-height:1.05">Recent research</h1>
+            </div>
+            <span class="sg-mono" style="font-size:12px;color:var(--text-dim);padding-bottom:4px">{{ reportCount }} reports</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:16px">
+            <sc-for list="{{ gridReports }}" as="r" hint-placeholder-count="6">
+              <div onClick="{{ r.onOpen }}" style="position:relative;cursor:pointer;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 18px 15px;box-shadow:var(--shadow-sm);animation:sg-rise .4s ease both">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                  <span class="sg-mono" style="margin-left:auto;font-size:10px;padding:2px 7px;border-radius:5px;background:var(--accent-soft);color:var(--accent-2)">v{{ r.ver }}</span>
+                </div>
+                <h3 style="margin:0 0 12px;font-size:17px;font-weight:300;font-style:italic;line-height:1.3;color:var(--text)">{{ r.title }}</h3>
+                <div class="sg-mono" style="display:flex;gap:12px;font-size:11px;color:var(--text-dim)">
+                  <span>{{ r.time }}</span>
+                  <span style="margin-left:auto;display:flex;align-items:center;gap:4px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>{{ r.chatCount }}</span>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+
+      <!-- Dashboard composer -->
+      <div style="flex-shrink:0;padding:14px 24px 22px;background:linear-gradient(0deg,var(--bg) 62%,transparent)">
+        <form data-tour="composer" onSubmit="{{ onSubmit }}" style="max-width:720px;margin:0 auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:20px;box-shadow:var(--shadow);position:relative">
+          <div style="display:flex;align-items:flex-end;gap:8px;padding:14px 14px 6px">
+            <textarea value="{{ query }}" onInput="{{ onQuery }}" onKeyDown="{{ onKeyDown }}" rows="1" placeholder="{{ placeholder }}" style="flex:1;resize:none;border:none;outline:none;background:transparent;color:var(--text);font-family:'Newsreader',Georgia,serif;font-size:18px;line-height:1.5;max-height:150px;padding:4px 4px"></textarea>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 12px 12px">
+            <!-- mode chip -->
+            <div style="position:relative">
+              <button data-tour="mode" type="button" onClick="{{ toggleModeMenu }}" style="{{ modeChipStyle }}">
+                <span style="{{ modeDotStyle }}"></span>{{ modeLabel }}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <sc-if value="{{ modeMenuOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:236px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;box-shadow:var(--shadow);padding:8px;z-index:50;animation:sg-pop .16s ease both">
+                  <div class="sg-mono" style="font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-faint);padding:3px 6px 7px">Mode</div>
+                  <button type="button" onClick="{{ setChat }}" style="{{ chatRowStyle }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style="flex:1;text-align:left;font-size:14px;font-weight:500">Chat</span><sc-if value="{{ isChatMode }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></sc-if></button>
+                  <button type="button" onClick="{{ setResearch }}" style="{{ researchRowStyle }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="flex-shrink:0"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span style="flex:1;text-align:left;font-size:14px;font-weight:500">Research</span><sc-if value="{{ isResearch }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></sc-if></button>
+                </div>
+              </sc-if>
+            </div>
+
+            <!-- effort chip -->
+            <div style="position:relative">
+              <button type="button" onClick="{{ toggleEffortMenu }}" style="{{ effortChipStyle }}">
+                {{ intensityName }}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <sc-if value="{{ effortMenuOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:200px;background:var(--surface);border:1px solid var(--border-strong);border-radius:14px;box-shadow:var(--shadow);padding:8px;z-index:50;animation:sg-pop .16s ease both">
+                  <div class="sg-mono" style="font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-faint);padding:3px 6px 7px">Effort</div>
+                  <sc-for list="{{ intensities }}" as="it" hint-placeholder-count="4">
+                    <button type="button" onClick="{{ it.onSelect }}" style="{{ it.rowStyle }}">
+                      <span style="flex:1;text-align:left;font-size:14.5px;font-weight:500">{{ it.name }}</span>
+                      <sc-if value="{{ it.selected }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4" style="flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg></sc-if>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <!-- model chip -->
+            <div style="position:relative">
+              <button type="button" onClick="{{ toggleModelMenu }}" style="{{ modelChipStyle }}">
+                <span style="{{ modelDotStyle }}"></span>{{ modelName }}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <sc-if value="{{ modelMenuOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:250px;max-height:300px;overflow-y:auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:13px;box-shadow:var(--shadow);padding:6px;z-index:50;animation:sg-pop .16s ease both">
+                  <sc-for list="{{ modelGroups }}" as="g" hint-placeholder-count="3">
+                    <div class="sg-mono" style="padding:8px 9px 4px;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);display:flex;align-items:center;gap:7px"><span style="{{ g.dotStyle }}"></span>{{ g.group }}</div>
+                    <sc-for list="{{ g.items }}" as="mi" hint-placeholder-count="2">
+                      <button type="button" onClick="{{ mi.onSelect }}" style="{{ mi.style }}"><span style="flex:1;text-align:left">{{ mi.name }}</span><sc-if value="{{ mi.selected }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></sc-if></button>
+                    </sc-for>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+
+            <button type="submit" title="Send" style="{{ sendStyle }}">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+            </button>
+          </div>
+          <sc-if value="{{ anyMenuOpen }}" hint-placeholder-val="{{ false }}"><div onClick="{{ closeMenus }}" style="position:fixed;inset:0;z-index:40"></div></sc-if>
+        </form>
+        <div class="sg-mono" style="max-width:720px;margin:9px auto 0;font-size:10.5px;color:var(--text-faint);text-align:center">{{ hintLine }}</div>
+      </div>
+    </sc-if>
+
+    <!-- ===== REPORT VIEW ===== -->
+    <sc-if value="{{ isReport }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;min-height:0;display:flex;overflow:hidden">
+        <!-- report body -->
+        <div data-screen-label="Report" style="flex:1;min-width:0;overflow-y:auto">
+          <article style="max-width:720px;margin:0 auto;padding:88px 40px 80px">
+            <div style="border-bottom:1px solid var(--border-strong);padding-bottom:26px;margin-bottom:34px">
+              <div class="sg-mono" style="font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-2);margin-bottom:14px">Research Report</div>
+              <h1 style="margin:0 0 18px;font-size:38px;font-weight:300;line-height:1.12;letter-spacing:-.02em">{{ activeReport.title }}</h1>
+              <div class="sg-mono" style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--text-dim)">
+                <span>Depth: {{ activeReport.tierLabel }}</span><span>·</span><span>{{ activeReport.chars }}</span><span>·</span><span>v{{ activeReport.ver }}</span><span>·</span><span>{{ activeReport.time }}</span>
+              </div>
+            </div>
+
+            <sc-for list="{{ reportBlocks }}" as="b" hint-placeholder-count="6">
+              <sc-if value="{{ b.isLead }}" hint-placeholder-val="{{ false }}"><p style="font-size:21px;font-weight:300;line-height:1.6;color:var(--text);margin:0 0 26px">{{ b.text }}</p></sc-if>
+              <sc-if value="{{ b.isH2 }}" hint-placeholder-val="{{ false }}"><h2 style="font-size:15px;font-weight:500;letter-spacing:.02em;color:var(--text);margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)">{{ b.text }}</h2></sc-if>
+              <sc-if value="{{ b.isP }}" hint-placeholder-val="{{ false }}"><p style="font-size:17px;line-height:1.72;color:var(--text);margin:0 0 18px">{{ b.text }}</p></sc-if>
+              <sc-if value="{{ b.isCallout }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;gap:14px;margin:24px 0;padding:18px 20px;background:var(--accent-soft);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px">
+                  <div><div class="sg-mono" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-2);margin-bottom:7px">{{ b.label }}</div><div style="font-size:17px;line-height:1.6;font-style:italic">{{ b.text }}</div></div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isStats }}" hint-placeholder-val="{{ false }}">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0">
+                  <sc-for list="{{ b.items }}" as="st" hint-placeholder-count="3">
+                    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px">
+                      <div style="font-size:28px;font-weight:300;letter-spacing:-.02em;color:var(--text)">{{ st.v }}</div>
+                      <div style="font-size:14px;font-style:italic;color:var(--text-dim);margin-top:2px">{{ st.k }}</div>
+                      <div class="sg-mono" style="font-size:10.5px;color:{{ st.dc }};margin-top:8px">{{ st.d }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isChart }}" hint-placeholder-val="{{ false }}">
+                <figure style="margin:26px 0;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 20px 16px" data-om-raster>
+                  <div class="sg-mono" style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);margin-bottom:18px">{{ b.title }}</div>
+                  <div style="display:flex;align-items:flex-end;gap:14px;height:150px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+                    <sc-for list="{{ b.bars }}" as="bar" hint-placeholder-count="4">
+                      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:8px">
+                        <span class="sg-mono" style="font-size:12px;color:var(--text)">{{ bar.value }}</span>
+                        <div style="{{ bar.style }}"></div>
+                      </div>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex;gap:14px;margin-top:8px">
+                    <sc-for list="{{ b.bars }}" as="bar" hint-placeholder-count="4"><span class="sg-mono" style="flex:1;text-align:center;font-size:11px;color:var(--text-dim)">{{ bar.label }}</span></sc-for>
+                  </div>
+                  <figcaption style="font-size:13.5px;font-style:italic;color:var(--text-dim);margin-top:14px">{{ b.caption }}</figcaption>
+                </figure>
+              </sc-if>
+              <sc-if value="{{ b.isTable }}" hint-placeholder-val="{{ false }}">
+                <div style="margin:24px 0;border:1px solid var(--border-strong);border-radius:12px;overflow:hidden">
+                  <table style="width:100%;border-collapse:collapse;font-family:'JetBrains Mono',monospace;font-size:13px">
+                    <thead><tr>
+                      <sc-for list="{{ b.head }}" as="h" hint-placeholder-count="4"><th style="text-align:left;padding:11px 14px;background:var(--surface-3);font-size:10px;letter-spacing:.08em;text-transform:uppercase;font-weight:500;color:var(--text-dim);border-bottom:1px solid var(--border)">{{ h }}</th></sc-for>
+                    </tr></thead>
+                    <tbody>
+                      <sc-for list="{{ b.rows }}" as="row" hint-placeholder-count="4">
+                        <tr><sc-for list="{{ row.cells }}" as="cell" hint-placeholder-count="4"><td style="{{ cell.style }}">{{ cell.text }}</td></sc-for></tr>
+                      </sc-for>
+                    </tbody>
+                  </table>
+                </div>
+              </sc-if>
+              <sc-if value="{{ b.isImage }}" hint-placeholder-val="{{ false }}">
+                <figure style="margin:26px 0">
+                  <div style="height:220px;border:1px solid var(--border-strong);border-radius:14px;background-image:repeating-linear-gradient(45deg,var(--surface-2),var(--surface-2) 11px,var(--surface) 11px,var(--surface) 22px);display:flex;align-items:center;justify-content:center">
+                    <span class="sg-mono" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);background:var(--surface);padding:6px 12px;border-radius:8px;border:1px solid var(--border)">{{ b.caption }}</span>
+                  </div>
+                </figure>
+              </sc-if>
+              <sc-if value="{{ b.isQuote }}" hint-placeholder-val="{{ false }}">
+                <blockquote style="margin:28px 0;padding:6px 0 6px 22px;border-left:3px solid var(--accent);font-size:22px;font-weight:300;font-style:italic;line-height:1.5;color:var(--text)">{{ b.text }}<footer class="sg-mono" style="font-size:11px;font-style:normal;color:var(--text-faint);letter-spacing:.06em;text-transform:uppercase;margin-top:14px">{{ b.cite }}</footer></blockquote>
+              </sc-if>
+              <sc-if value="{{ b.isRefs }}" hint-placeholder-val="{{ false }}">
+                <ul style="list-style:none;margin:14px 0 0;padding:0;display:flex;flex-direction:column;gap:12px">
+                  <sc-for list="{{ b.items }}" as="ref" hint-placeholder-count="3">
+                    <li style="display:flex;gap:12px;font-size:15px;line-height:1.5"><span class="sg-mono" style="flex-shrink:0;font-size:11px;padding:2px 7px;height:fit-content;border-radius:5px;background:var(--surface-3);color:var(--accent-2)">{{ ref.k }}</span><span><span style="color:var(--text)">{{ ref.t }}</span> <a href="{{ ref.href }}" target="_blank" rel="noopener" class="sg-mono" style="font-size:12px">{{ ref.u }}</a></span></li>
+                  </sc-for>
+                </ul>
+              </sc-if>
+            </sc-for>
+          </article>
+        </div>
+
+        <!-- collapsed chat rail -->
+        <sc-if value="{{ chatCollapsed }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ toggleChatCollapsed }}" title="Show chat" style="width:56px;flex-shrink:0;border:none;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;align-items:center;padding:66px 0 20px;gap:16px;cursor:pointer;color:var(--text-dim)">
+            <span style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid var(--border);background:var(--surface-2);border-radius:10px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="15 18 9 12 15 6"/></svg>
+            </span>
+            <span style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:10px;padding-top:6px;color:var(--text-faint)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span class="sg-mono" style="font-size:11px;writing-mode:vertical-rl;text-orientation:mixed;letter-spacing:.16em;text-transform:uppercase">{{ activeReport.chatCount }} chats</span>
+            </span>
+          </button>
+        </sc-if>
+
+        <!-- report chat panel -->
+        <sc-if value="{{ chatExpanded }}" hint-placeholder-val="{{ true }}">
+        <div style="width:400px;flex-shrink:0;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;min-height:0">
+          <div style="flex-shrink:0;padding:66px 12px 12px 16px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center">
+            <button onClick="{{ toggleChatCollapsed }}" title="Hide chat" style="flex-shrink:0;display:flex;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);border-radius:11px;cursor:pointer">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <div style="position:relative;flex:1;min-width:0">
+              <button onClick="{{ toggleThreadMenu }}" style="display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border:1px solid var(--border);background:var(--surface-2);border-radius:11px;cursor:pointer;text-align:left;color:var(--text)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.8" style="flex-shrink:0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span style="flex:1;min-width:0"><span style="display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ activeChatTitle }}</span><span class="sg-mono" style="display:block;font-size:10px;color:var(--text-faint);margin-top:1px">{{ chatPositionLabel }}</span></span>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <sc-if value="{{ threadMenuOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface);border:1px solid var(--border-strong);border-radius:13px;box-shadow:var(--shadow);padding:6px;z-index:50;animation:sg-pop .16s ease both">
+                  <div class="sg-mono" style="padding:7px 9px 5px;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint)">{{ activeReport.chatCount }} chats in this research</div>
+                  <sc-for list="{{ reportChats }}" as="c" hint-placeholder-count="3">
+                    <button onClick="{{ c.onSelect }}" style="{{ c.style }}"><span style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ c.title }}</span><sc-if value="{{ c.selected }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></sc-if></button>
+                  </sc-for>
+                  <button onClick="{{ newReportChat }}" style="display:flex;align-items:center;gap:8px;width:100%;padding:9px;border:none;border-top:1px solid var(--border);margin-top:4px;background:transparent;color:var(--accent-2);border-radius:8px;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:12.5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>New chat on this report</button>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+
+          <div style="flex:1;min-height:0;overflow-y:auto;padding:20px 18px;display:flex;flex-direction:column;gap:20px">
+            <sc-for list="{{ chatMessages }}" as="m" hint-placeholder-count="2">
+              <div style="{{ m.wrap }}"><div class="sg-mono" style="font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--text-faint);margin-bottom:6px">{{ m.who }}</div><div style="{{ m.bubble }}">{{ m.text }}</div></div>
+            </sc-for>
+          </div>
+
+          <div style="flex-shrink:0;padding:12px 16px 16px">
+            <form onSubmit="{{ onReportSend }}" style="background:var(--surface-2);border:1px solid var(--border-strong);border-radius:16px;position:relative">
+              <textarea value="{{ reportQuery }}" onInput="{{ onReportQuery }}" onKeyDown="{{ onReportKeyDown }}" rows="1" placeholder="Ask a follow-up about this report…" style="width:100%;resize:none;border:none;outline:none;background:transparent;color:var(--text);font-family:'Newsreader',Georgia,serif;font-size:16px;line-height:1.5;max-height:120px;padding:13px 14px 6px"></textarea>
+              <div style="display:flex;align-items:center;gap:8px;padding:2px 10px 10px">
+                <div style="position:relative">
+                  <button type="button" onClick="{{ toggleRModelMenu }}" style="{{ rModelChipStyle }}"><span style="{{ modelDotStyle }}"></span>{{ modelName }}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.5"><polyline points="6 9 12 15 18 9"/></svg></button>
+                  <sc-if value="{{ rModelMenuOpen }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;bottom:calc(100% + 8px);left:0;width:230px;max-height:280px;overflow-y:auto;background:var(--surface);border:1px solid var(--border-strong);border-radius:13px;box-shadow:var(--shadow);padding:6px;z-index:50;animation:sg-pop .16s ease both">
+                      <sc-for list="{{ modelGroups }}" as="g" hint-placeholder-count="3">
+                        <div class="sg-mono" style="padding:8px 9px 4px;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-faint);display:flex;align-items:center;gap:7px"><span style="{{ g.dotStyle }}"></span>{{ g.group }}</div>
+                        <sc-for list="{{ g.items }}" as="mi" hint-placeholder-count="2"><button type="button" onClick="{{ mi.onSelect }}" style="{{ mi.style }}"><span style="flex:1;text-align:left">{{ mi.name }}</span><sc-if value="{{ mi.selected }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></sc-if></button></sc-for>
+                      </sc-for>
+                    </div>
+                  </sc-if>
+                </div>
+                <button type="submit" title="Send" style="{{ rSendStyle }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+              </div>
+              <sc-if value="{{ anyReportMenuOpen }}" hint-placeholder-val="{{ false }}"><div onClick="{{ closeMenus }}" style="position:fixed;inset:0;z-index:40"></div></sc-if>
+            </form>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+    </sc-if>
+  </main>
+
+  <!-- ============ ONBOARDING WALKTHROUGH (spotlight) ============ -->
+  <sc-if value="{{ onboarding }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Onboarding">
+      <!-- click blocker (transparent; dimming comes from the spotlight shadow) -->
+      <div onClick="{{ obNudge }}" style="position:fixed;inset:0;z-index:64"></div>
+
+      <!-- spotlight cut-out over the live target -->
+      <sc-if value="{{ tourHasRect }}" hint-placeholder-val="{{ false }}">
+        <button onClick="{{ obCtaAction }}" title="{{ obCta }}" style="{{ spotlightStyle }}"></button>
+        <svg style="position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:66;overflow:visible">
+          <defs>
+            <marker id="sg-tourhead" markerWidth="13" markerHeight="13" refX="7" refY="6" orient="auto"><path d="M2,1.5 L10,6 L2,10.5" fill="none" stroke="var(--accent-2)" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></marker>
+          </defs>
+          <path d="{{ arrowPath }}" fill="none" stroke="var(--accent-2)" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="1 8.5" marker-end="url(#sg-tourhead)"></path>
+        </svg>
+      </sc-if>
+
+      <!-- guidance card -->
+      <div style="{{ tourCardStyle }}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <img src="reference/singularity-logo.png" alt="" style="width:26px;height:26px;object-fit:contain"/>
+          <span class="sg-mono" style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--text-faint)">Getting started</span>
+          <span class="sg-mono" style="margin-left:auto;font-size:10px;letter-spacing:.08em;color:var(--accent-2);background:var(--accent-soft);padding:3px 9px;border-radius:999px">Step {{ obStepNum }} / {{ obTotal }}</span>
+        </div>
+        <h2 style="margin:0 0 8px;font-size:25px;font-weight:300;font-style:italic;letter-spacing:-.02em;color:var(--text)">{{ obTitle }}</h2>
+        <p style="margin:0 0 18px;font-size:15.5px;line-height:1.6;color:var(--text-dim)">{{ obDesc }}</p>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:18px">
+          <sc-for list="{{ obDots }}" as="d" hint-placeholder-count="5"><span style="{{ d.barStyle }}"></span></sc-for>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button onClick="{{ obSkip }}" style="border:none;background:transparent;color:var(--text-faint);font-family:'JetBrains Mono',monospace;font-size:12px;cursor:pointer;padding:6px 2px">Skip tour</button>
+          <button onClick="{{ obCtaAction }}" style="margin-left:auto;display:flex;align-items:center;gap:9px;height:42px;padding:0 20px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;cursor:pointer">
+            {{ obCta }}
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ SETTINGS MODAL ============ -->
+  <sc-if value="{{ settingsOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSettings }}" style="position:fixed;inset:0;z-index:60;background:rgba(6,9,14,0.58);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;animation:sg-scrim .18s ease both">
+      <div onClick="{{ stop }}" data-screen-label="Settings" style="width:min(760px,100%);max-height:86vh;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border-strong);border-radius:20px;box-shadow:var(--shadow);overflow:hidden;animation:sg-pop .22s cubic-bezier(.2,.8,.2,1) both">
+        <div style="display:flex;align-items:center;gap:12px;padding:20px 24px;border-bottom:1px solid var(--border)">
+          <div><div class="sg-mono" style="font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--text-faint);margin-bottom:5px">Settings</div><h2 style="margin:0;font-size:23px;font-weight:300;font-style:italic;letter-spacing:-.01em">Model providers</h2></div>
+          <button onClick="{{ closeSettings }}" style="margin-left:auto;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);border-radius:9px;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        </div>
+        <div style="display:flex;min-height:0;flex:1">
+          <div data-tour="providers" style="width:212px;flex-shrink:0;border-right:1px solid var(--border);padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+            <sc-for list="{{ providers }}" as="p" hint-placeholder-count="5">
+              <button onClick="{{ p.onSelect }}" style="{{ p.style }}"><span style="{{ p.dotStyle }}"></span><span style="flex:1;min-width:0;text-align:left"><span style="display:block;font-size:14px;font-weight:500">{{ p.name }}</span><span class="sg-mono" style="display:block;font-size:10px;color:var(--text-faint);margin-top:1px">{{ p.sub }}</span></span><sc-if value="{{ p.connected }}" hint-placeholder-val="{{ false }}"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok)"></span></sc-if></button>
+            </sc-for>
+          </div>
+          <div style="flex:1;min-width:0;padding:24px;overflow-y:auto">
+            <div style="display:flex;align-items:center;gap:11px;margin-bottom:6px"><span style="{{ activeDotStyle }}"></span><h3 style="margin:0;font-size:20px;font-weight:400">{{ activeProvider.name }}</h3><span style="{{ activeStatusStyle }}">{{ activeStatusLabel }}</span></div>
+            <p style="margin:0 0 20px;font-size:15px;font-style:italic;color:var(--text-dim);line-height:1.5">{{ activeProvider.blurb }}</p>
+            <label class="sg-mono" style="display:block;font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-faint);margin-bottom:8px">API key</label>
+            <div data-tour="keyfield" style="display:flex;gap:8px;margin-bottom:10px">
+              <input value="{{ currentKey }}" onInput="{{ onKeyInput }}" type="password" placeholder="{{ activeProvider.prefix }}" class="sg-mono" style="flex:1;height:42px;padding:0 13px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);border-radius:10px;font-size:13px;outline:none"/>
+              <button onClick="{{ saveKey }}" style="height:42px;padding:0 18px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:500;cursor:pointer">Save</button>
+            </div>
+            <div style="margin-top:18px;padding:16px;border:1px solid var(--border);border-radius:13px;background:var(--surface-2)">
+              <div class="sg-mono" style="font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-faint);margin-bottom:12px">How to get your key</div>
+              <ol style="margin:0;padding-left:18px;font-size:14.5px;line-height:1.7;color:var(--text)">
+                <li>Open the <a href="{{ activeProvider.url }}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:2px">{{ activeProvider.name }} console</a>.</li>
+                <li>Create a new secret key (starts with <span class="sg-mono" style="font-size:12px;padding:1px 5px;border-radius:4px;background:var(--surface-3)">{{ activeProvider.prefix }}</span>).</li>
+                <li>Copy it and paste above — keys are stored to your account only.</li>
+              </ol>
+              <a href="{{ activeProvider.url }}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:7px;margin-top:14px;height:36px;padding:0 14px;border:1px solid var(--border-strong);border-radius:9px;background:var(--surface);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;text-decoration:none">Open {{ activeProvider.name }} keys<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>
+              <div style="margin-top:12px;font-size:12.5px;font-style:italic;color:var(--text-faint);line-height:1.5">{{ activeProvider.docHint }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860},&quot;startTheme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#7c5230&quot;,&quot;options&quot;:[&quot;#7c5230&quot;,&quot;#6366f1&quot;,&quot;#3fc8a4&quot;,&quot;#c45c00&quot;],&quot;tsType&quot;:&quot;string|null&quot;,&quot;section&quot;:&quot;Theme&quot;},&quot;defaultMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;research&quot;,&quot;chat&quot;],&quot;default&quot;:&quot;chat&quot;,&quot;tsType&quot;:&quot;'research'|'chat'&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme: this.props.startTheme || 'dark',
+    accent: this.props.accent || null,
+    sidebarOpen: true,
+    view: 'grid',
+    mode: this.props.defaultMode || 'research',
+    intensity: 'medium',
+    modelId: 'claude-sonnet-4-5',
+    openMenu: null,          // 'mode' | 'model' | 'thread' | 'rmodel'
+    chatCollapsed: false,
+    settingsOpen: false,
+    userMenuOpen: false,
+    onboarding: true,
+    obStep: 0,
+    tourRect: null,
+    provider: 'anthropic',
+    keys: { anthropic: '' },
+    query: '',
+    reportQuery: '',
+    activeReportId: null,
+    activeChatId: null,
+    activeStandaloneId: null,
+    standaloneChats: [
+      { id: 'sc1', title: 'Explain diffusion transformers simply' },
+      { id: 'sc2', title: 'Summarize the Q3 earnings call' },
+    ],
+    chatMessages: [],
+  };
+
+  themeRef = React.createRef();
+  componentDidMount() {
+    this.applyAccent();
+    this._onResize = () => this.measureTour();
+    window.addEventListener('resize', this._onResize);
+    this.measureTour();
+  }
+  componentWillUnmount() { window.removeEventListener('resize', this._onResize); }
+  componentDidUpdate() { this.applyAccent(); this.measureTour(); }
+  measureTour() {
+    if (!this.state.onboarding) { if (this.state.tourRect) this.setState({ tourRect: null }); return; }
+    const step = this.OB[this.state.obStep];
+    const el = document.querySelector('[data-tour="' + step.target + '"]');
+    if (!el) { if (this.state.tourRect) this.setState({ tourRect: null }); return; }
+    const r = el.getBoundingClientRect();
+    const rect = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    const p = this.state.tourRect;
+    if (!p || p.x !== rect.x || p.y !== rect.y || p.w !== rect.w || p.h !== rect.h) this.setState({ tourRect: rect });
+  }
+  remeasureSoon() { setTimeout(() => this.measureTour(), 300); }
+  obGo(delta) {
+    const next = this.state.obStep + delta;
+    if (next > 4) { this.setState({ onboarding: false, tourRect: null }); return; }
+    const step = this.OB[next];
+    const patch = { obStep: next, tourRect: null };
+    if (step.target === 'providers' || step.target === 'keyfield') patch.settingsOpen = true;
+    else patch.settingsOpen = false;
+    if (step.target === 'mode' || step.target === 'composer') patch.view = 'grid';
+    this.setState(patch); this.remeasureSoon();
+  }
+  obAct() {
+    const step = this.OB[this.state.obStep];
+    if (step.act === 'setChat') this.setState({ mode: 'chat' });
+    if (step.act === 'pickProvider') this.setState({ provider: 'anthropic' });
+    this.obGo(1);
+  }
+  applyAccent() {
+    const el = this.themeRef.current; if (!el) return;
+    if (this.state.accent) {
+      const hex = this.state.accent;
+      if (this.state.theme === 'dark') {
+        // dark theme: lighten the selected accent, keep the base as accent-2
+        el.style.setProperty('--accent', this.lighten(hex, 0.42));
+        el.style.setProperty('--accent-2', this.lighten(hex, 0.62));
+        el.style.setProperty('--accent-soft', this.rgba(hex, 0.18));
+      } else {
+        el.style.setProperty('--accent', hex);
+        el.style.setProperty('--accent-2', this.lighten(hex, -0.14));
+        el.style.setProperty('--accent-soft', this.rgba(hex, 0.12));
+      }
+    } else { el.style.removeProperty('--accent'); el.style.removeProperty('--accent-2'); el.style.removeProperty('--accent-soft'); }
+  }
+  rgba(hex, a) {
+    const h = hex.replace('#',''); if (h.length !== 6) return hex;
+    const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+  lighten(hex, amt) {
+    const h = hex.replace('#',''); if (h.length !== 6) return hex;
+    let r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+    const f = (c) => Math.max(0, Math.min(255, Math.round(amt >= 0 ? c + (255 - c) * amt : c * (1 + amt))));
+    const t = (c) => f(c).toString(16).padStart(2,'0');
+    return '#' + t(r) + t(g) + t(b);
+  }
+
+  MODELS = [
+    { group: 'Anthropic', dot: '#d97757', items: [ { id: 'claude-opus-4-1', name: 'Claude Opus 4.1' }, { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' } ] },
+    { group: 'OpenAI', dot: '#10a37f', items: [ { id: 'gpt-5', name: 'GPT-5' }, { id: 'gpt-5-mini', name: 'GPT-5 mini' } ] },
+    { group: 'DeepSeek', dot: '#4d6bfe', items: [ { id: 'deepseek-v3', name: 'DeepSeek V3' }, { id: 'deepseek-r1', name: 'DeepSeek R1' } ] },
+    { group: 'xAI', dot: '#c9ccd1', items: [ { id: 'grok-4', name: 'Grok 4' } ] },
+    { group: 'Groq', dot: '#f55036', items: [ { id: 'llama-3.3-70b', name: 'Llama 3.3 70B' } ] },
+  ];
+
+  PROVIDERS = [
+    { id: 'anthropic', name: 'Anthropic', sub: 'Claude', dot: '#d97757', url: 'https://console.anthropic.com/settings/keys', prefix: 'sk-ant-…', blurb: 'Claude Opus & Sonnet — strongest long-form synthesis for Ultra research.', docHint: 'Tip: create a workspace key so usage is scoped per project.' },
+    { id: 'openai', name: 'OpenAI', sub: 'GPT-5', dot: '#10a37f', url: 'https://platform.openai.com/api-keys', prefix: 'sk-…', blurb: 'GPT-5 family — fast general reasoning for Chat and Medium research.', docHint: 'Set a monthly usage limit in Billing to stay in budget.' },
+    { id: 'deepseek', name: 'DeepSeek', sub: 'V3 · R1', dot: '#4d6bfe', url: 'https://platform.deepseek.com/api_keys', prefix: 'sk-…', blurb: 'DeepSeek R1 reasoning at low cost — great value for High-depth runs.', docHint: 'Add credit first; keys are inactive until the balance is funded.' },
+    { id: 'grok', name: 'Grok', sub: 'xAI · Grok 4', dot: '#c9ccd1', url: 'https://console.x.ai', prefix: 'xai-…', blurb: 'Grok 4 with live signal — useful for fast, current-events research.', docHint: 'Create the key inside a Team to share it across seats.' },
+    { id: 'groq', name: 'Groq', sub: 'Fast inference', dot: '#f55036', url: 'https://console.groq.com/keys', prefix: 'gsk_…', blurb: 'Groq LPU inference — the fastest tokens for Instant answers.', docHint: 'Free tier is rate-limited; upgrade for sustained Instant throughput.' },
+  ];
+
+  INTENSITIES = [
+    { id: 'instant', name: 'Instant', bars: 1, desc: 'One quick pass — seconds.' },
+    { id: 'medium', name: 'Medium', bars: 2, desc: 'Balanced multi-source — ~2 min.' },
+    { id: 'high', name: 'High', bars: 3, desc: 'Deep retrieval — ~6 min.' },
+    { id: 'ultra', name: 'Ultra', bars: 4, desc: 'Exhaustive synthesis — ~15 min.' },
+  ];
+
+  OB = [
+    { target: 'settings', title: 'Open Settings', cta: 'Open Settings', act: 'openSettings', desc: 'Everything starts with a model key. Head to Settings — the gear in the top-right — to connect a provider.' },
+    { target: 'providers', title: 'Choose a provider', cta: 'Got it', act: 'pickProvider', desc: 'Pick who powers your research: Anthropic, OpenAI, DeepSeek, Grok, or Groq. Each links straight to its console.' },
+    { target: 'keyfield', title: 'Paste your API key', cta: 'Key added', act: 'closeSettings', desc: 'Drop the key into this field and Save. It’s stored to your account only — never shared.' },
+    { target: 'mode', title: 'Select Chat mode', cta: 'Use Chat mode', act: 'setChat', desc: 'Chat is quick back-and-forth. (Switch to Research any time you want a full, sourced report instead.)' },
+    { target: 'composer', title: 'Send your first message', cta: 'Finish', act: 'finish', desc: 'Type a question here and press Enter. That’s all it takes — welcome to Singularity.' },
+  ];
+
+  tierMeta = { instant: { label: 'Instant', c: 'var(--text-faint)' }, medium: { label: 'Medium', c: 'var(--warn)' }, high: { label: 'High', c: 'var(--accent-2)' }, ultra: { label: 'Ultra', c: 'var(--ok)' } };
+
+  REPORTS = [
+    { id: 'r1', title: 'Solid-state battery supply chains and 2027 cost curves', time: '2h ago', chars: '48k chars', ver: 3, tier: 'ultra', chats: [ { id: 'c1', title: 'Supply chain risk' }, { id: 'c2', title: 'Cost sensitivity' }, { id: 'c3', title: 'Compare to LFP' } ] },
+    { id: 'r2', title: 'Competitive landscape of open-weight reasoning models', time: 'Yesterday', chars: '31k chars', ver: 2, tier: 'high', chats: [ { id: 'c1', title: 'Licensing terms' }, { id: 'c2', title: 'Benchmark deltas' } ] },
+    { id: 'r3', title: 'Regulatory outlook for stablecoin issuers in the EU', time: '2d ago', chars: '22k chars', ver: 1, tier: 'medium', chats: [ { id: 'c1', title: 'MiCA timeline' } ] },
+    { id: 'r4', title: 'Fusion startups: funding, timelines, and technical risk', time: '4d ago', chars: '39k chars', ver: 2, tier: 'high', chats: [ { id: 'c1', title: 'Funding rounds' }, { id: 'c2', title: 'Net-energy claims' } ] },
+    { id: 'r5', title: 'GLP-1 market: prescribers, payers, and supply', time: '1w ago', chars: '17k chars', ver: 1, tier: 'medium', chats: [ { id: 'c1', title: 'Payer coverage' } ] },
+    { id: 'r6', title: 'Quick take — desalination cost per cubic meter', time: '1w ago', chars: '6k chars', ver: 1, tier: 'instant', chats: [ { id: 'c1', title: 'Energy cost driver' } ] },
+  ];
+
+  BLOCKS = [
+    { type: 'lead', text: 'Solid-state cells are on track to undercut today’s lithium-ion packs on a $/kWh basis before the end of the decade, but the transition hinges on two fragile inputs: sulfide electrolyte supply and dry-room manufacturing capacity.' },
+    { type: 'h2', text: 'Key findings' },
+    { type: 'callout', label: 'Key finding', text: 'Projected pack cost falls ~45% between 2024 and 2027, crossing the $60/kWh line that makes solid-state competitive for mass-market EVs.' },
+    { type: 'stats', items: [ { v: '$54', k: '/kWh by 2027', d: '−45% vs 2024', dc: 'var(--ok)' }, { v: '3.2×', k: 'energy density', d: 'vs Li-ion', dc: 'var(--text-dim)' }, { v: '2027', k: 'first GWh line', d: 'estimated', dc: 'var(--text-dim)' } ] },
+    { type: 'h2', text: 'Cost trajectory to 2027' },
+    { type: 'chart', title: 'Projected pack cost ($/kWh)', data: [ { label: '2024', v: 98 }, { label: '2025', v: 82 }, { label: '2026', v: 67 }, { label: '2027', v: 54 } ], caption: 'Blended cell + pack cost, base-case scenario. Source: internal model, BNEF inputs.' },
+    { type: 'p', text: 'The steepest declines come from electrolyte yield improvements rather than cathode chemistry, which is already near its practical floor. Capacity additions in South Korea and Japan account for most of the 2026–2027 step-down.' },
+    { type: 'h2', text: 'Supplier comparison' },
+    { type: 'table', head: ['Supplier', 'Region', 'Capacity', 'Status'], rows: [ ['QuantumScape', 'US', '4 GWh', 'Pilot'], ['Samsung SDI', 'KR', '12 GWh', 'Scaling'], ['Toyota / Idemitsu', 'JP', '9 GWh', 'Announced'], ['ProLogium', 'TW', '7 GWh', 'Scaling'] ] },
+    { type: 'image', caption: 'Figure 1 — sulfide-electrolyte cell architecture' },
+    { type: 'h2', text: 'Outlook' },
+    { type: 'p', text: 'Base case assumes no major electrolyte shortage. A supply crunch in lithium sulfide would push parity out by roughly 18 months and keep early volumes locked to premium vehicles.' },
+    { type: 'quote', text: 'Whoever secures sulfide electrolyte at scale first will set the pack-cost floor for the rest of the decade.', cite: 'Internal synthesis · 42 sources' },
+    { type: 'h2', text: 'Reference list' },
+    { type: 'refs', items: [ { k: 'BNEF24', t: 'Battery Price Survey 2024.', u: 'bnef.com', href: 'https://about.bnef.com' }, { k: 'SDI25', t: 'Samsung SDI capacity roadmap, Q1 2025.', u: 'samsungsdi.com', href: 'https://samsungsdi.com' }, { k: 'QS24', t: 'QuantumScape shareholder letter, 2024.', u: 'quantumscape.com', href: 'https://quantumscape.com' } ] },
+  ];
+
+  tourGeometry() {
+    const r = this.state.tourRect;
+    if (!r) {
+      return { tourHasRect: false, spotlightStyle: 'display:none', arrowPath: '',
+        tourCardStyle: 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:67;width:min(400px,calc(100% - 40px));background:var(--surface);border:1px solid var(--border-strong);border-radius:18px;box-shadow:var(--shadow);padding:24px 24px 18px;animation:sg-pop .24s ease both' };
+    }
+    const vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+    const vh = (typeof window !== 'undefined' && window.innerHeight) || 800;
+    const pad = 8;
+    const sx = r.x - pad, sy = r.y - pad, sw = r.w + pad * 2, sh = r.h + pad * 2;
+    const radius = sh > 60 ? 16 : Math.min(sh, sw) / 2 + 4;
+    const spotlightStyle = 'position:fixed;left:' + sx + 'px;top:' + sy + 'px;width:' + sw + 'px;height:' + sh + 'px;border:2px solid var(--accent-2);border-radius:' + radius + 'px;background:transparent;cursor:pointer;z-index:65;box-shadow:0 0 0 9999px rgba(6,9,14,0.74);transition:all .28s cubic-bezier(.2,.8,.2,1)';
+
+    // target + card centers
+    const tx = r.x + r.w / 2, ty = r.y + r.h / 2;
+    const cardW = Math.min(400, vw - 40), cardH = 234;
+    const targetTop = ty < vh * 0.5;
+    const cardLeft = (vw - cardW) / 2;
+    const cardTop = targetTop ? Math.min(vh - cardH - 24, vh * 0.56) : Math.max(24, vh * 0.44 - cardH);
+    const cardCx = cardLeft + cardW / 2, cardCy = cardTop + cardH / 2;
+    const tourCardStyle = 'position:fixed;left:' + Math.round(cardLeft) + 'px;top:' + Math.round(cardTop) + 'px;z-index:67;width:' + Math.round(cardW) + 'px;background:var(--surface);border:1px solid var(--border-strong);border-radius:18px;box-shadow:var(--shadow);padding:24px 24px 18px;animation:sg-pop .24s ease both';
+
+    // arced arrow from card edge to target edge
+    let dx = tx - cardCx, dy = ty - cardCy; const L = Math.hypot(dx, dy) || 1; const ux = dx / L, uy = dy / L;
+    const ex = tx - ux * (Math.max(sw, sh) / 2 + 12), ey = ty - uy * (Math.max(sw, sh) / 2 + 12);
+    const startEdgeX = cardCx + ux * (cardW * 0.30), startEdgeY = cardCy + uy * (cardH * 0.5 + 6);
+    const mx = (startEdgeX + ex) / 2, my = (startEdgeY + ey) / 2;
+    const bend = (targetTop ? -1 : 1) * 62;
+    const cx = mx + (-uy) * bend, cy = my + (ux) * bend;
+    const arrowPath = 'M ' + Math.round(startEdgeX) + ' ' + Math.round(startEdgeY) + ' Q ' + Math.round(cx) + ' ' + Math.round(cy) + ' ' + Math.round(ex) + ' ' + Math.round(ey);
+
+    return { tourHasRect: true, spotlightStyle, arrowPath, tourCardStyle };
+  }
+
+  set(patch) { this.setState(patch); }
+  openReport(id, chatId) {
+    const r = this.REPORTS.find(x => x.id === id);
+    const cid = chatId || (r.chats[0] && r.chats[0].id);
+    const chat = r.chats.find(c => c.id === cid);
+    this.setState({ view: 'report', activeReportId: id, activeChatId: cid, activeStandaloneId: null, openMenu: null,
+      chatMessages: [ { role: 'user', text: chat ? chat.title : 'Tell me about this report' }, { role: 'assistant', text: 'This thread is scoped to the report on the left. I can pull any figure, table, or claim and expand on it — ask away.' } ] });
+  }
+  openStandalone(id, title, seed) {
+    this.setState({ view: 'chat', activeStandaloneId: id, activeReportId: null, openMenu: null,
+      chatMessages: seed || [ { role: 'user', text: title }, { role: 'assistant', text: 'Continuing this chat — ask anything, or switch to Research to spin up a sourced report.' } ] });
+  }
+  submit = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const q = this.state.query.trim(); if (!q) return;
+    if (this.state.mode === 'research') { this.openReport('r1'); this.setState({ query: '', openMenu: null }); return; }
+    const id = 'sc' + Date.now();
+    const eff = this.INTENSITIES.find(i => i.id === this.state.intensity).name;
+    this.setState(st => ({ view: 'chat', activeStandaloneId: id, activeReportId: null, query: '', openMenu: null,
+      standaloneChats: [ { id, title: q.length > 46 ? q.slice(0, 46) + '…' : q }, ...st.standaloneChats ],
+      chatMessages: [ { role: 'user', text: q }, { role: 'assistant', text: 'Here’s a concise ' + eff + '-effort answer. This is a standalone chat — switch to Research to turn it into a full sourced report.' } ] }));
+  };
+  reportSend = (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const q = this.state.reportQuery.trim(); if (!q) return;
+    this.setState(st => ({ reportQuery: '', openMenu: null, chatMessages: [ ...st.chatMessages, { role: 'user', text: q }, { role: 'assistant', text: 'Good question — cross-referencing the report’s sources now and drafting an answer grounded in the figures above.' } ] }));
+  };
+
+  renderVals() {
+    const s = this.state;
+    const isDark = s.theme === 'dark';
+    let modelName = 'Select model', modelDot = 'var(--text-faint)';
+    for (const g of this.MODELS) for (const m of g.items) if (m.id === s.modelId) { modelName = m.name; modelDot = g.dot; }
+    const activeInt = this.INTENSITIES.find(i => i.id === s.intensity);
+
+    const rowBase = 'display:flex;align-items:center;gap:11px;width:100%;padding:9px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent;transition:background .12s;color:var(--text);';
+    const intensities = this.INTENSITIES.map(it => {
+      const sel = it.id === s.intensity;
+      const bars = [0,1,2,3].map(i => { const on = i < it.bars; const h = 5 + i * 3.2;
+        return { style: `width:3.5px;height:${h}px;border-radius:2px;background:${on ? 'var(--accent)' : 'var(--border-strong)'}` }; });
+      return { name: it.name, desc: it.desc, bars, selected: sel, onSelect: () => this.set({ intensity: it.id, openMenu: null }),
+        rowStyle: rowBase + (sel ? 'background:var(--accent-soft);border-color:var(--border-strong)' : 'background:transparent') };
+    });
+
+    const pillBase = 'display:flex;align-items:center;justify-content:center;gap:6px;flex:1;height:30px;border:none;border-radius:9px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:12.5px;font-weight:500;transition:all .15s;';
+    const pillOn = 'background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);';
+    const pillOff = 'background:transparent;color:var(--text-dim);';
+
+    const mkModelGroups = (onPick) => this.MODELS.map(g => ({ group: g.group, dotStyle: `width:7px;height:7px;border-radius:50%;background:${g.dot}`,
+      items: g.items.map(m => { const sel = m.id === s.modelId;
+        return { name: m.name, selected: sel, onSelect: () => onPick(m.id),
+          style: 'display:flex;align-items:center;gap:8px;width:100%;padding:8px 9px;border:none;border-radius:8px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:12.5px;background:' + (sel ? 'var(--accent-soft)' : 'transparent') + ';color:var(--text)' }; }) }));
+
+    const chipBase = 'display:flex;align-items:center;gap:7px;height:32px;padding:0 11px;border:1px solid var(--border);background:var(--surface-2);border-radius:10px;cursor:pointer;color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:12px;';
+
+    // navReports (sidebar)
+    const navReports = this.REPORTS.map(r => { const tm = this.tierMeta[r.tier]; const active = r.id === s.activeReportId && s.view === 'report';
+      return { title: r.title, chatCount: r.chats.length, dot: 'var(--text-faint)', expanded: active && s.sidebarOpen,
+        onOpen: () => this.openReport(r.id),
+        onNewChat: () => this.openReport(r.id),
+        rowStyle: 'display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:none;border-radius:9px;cursor:pointer;text-align:left;background:' + (active ? 'var(--accent-soft)' : 'transparent') + ';color:var(--text-dim);' + (s.sidebarOpen ? '' : 'justify-content:center'),
+        chats: r.chats.map(c => { const csel = active && c.id === s.activeChatId;
+          return { title: c.title, onSelect: () => this.openReport(r.id, c.id),
+            style: 'display:flex;align-items:center;gap:7px;padding:6px 8px;border:none;background:transparent;border-radius:7px;cursor:pointer;font-size:12.5px;text-align:left;color:' + (csel ? 'var(--accent-2)' : 'var(--text-dim)') }; }) };
+    });
+
+    const navChats = this.state.standaloneChats.map(c => { const active = c.id === s.activeStandaloneId && s.view === 'chat';
+      return { title: c.title,
+        onSelect: () => this.openStandalone(c.id, c.title),
+        rowStyle: 'display:flex;align-items:center;gap:9px;width:100%;padding:9px 8px;border:none;border-radius:9px;cursor:pointer;text-align:left;background:' + (active ? 'var(--accent-soft)' : 'transparent') + ';color:' + (active ? 'var(--text)' : 'var(--text-dim)') + ';' + (s.sidebarOpen ? '' : 'justify-content:center') };
+    });
+
+    const gridReports = this.REPORTS.map(r => { const tm = this.tierMeta[r.tier];
+      return { title: r.title, time: r.time, chars: r.chars, ver: r.ver, chatCount: r.chats.length,
+        tierLabel: tm.label, tierDotStyle: `width:8px;height:8px;border-radius:50%;background:${tm.c}`,
+        onOpen: () => this.openReport(r.id) }; });
+
+    // active report + chat
+    const ar = this.REPORTS.find(r => r.id === s.activeReportId) || this.REPORTS[0];
+    const arTier = this.tierMeta[ar.tier];
+    const activeReport = { title: ar.title, tierLabel: arTier.label, chars: ar.chars, ver: ar.ver, time: ar.time, chatCount: ar.chats.length };
+    const activeChat = ar.chats.find(c => c.id === s.activeChatId) || ar.chats[0];
+    const chatIdx = ar.chats.findIndex(c => c.id === (activeChat && activeChat.id));
+    const reportChats = ar.chats.map((c, i) => { const csel = c.id === (activeChat && activeChat.id);
+      return { title: c.title, selected: csel, onSelect: () => this.openReport(ar.id, c.id),
+        style: 'display:flex;align-items:center;gap:8px;width:100%;padding:9px;border:none;border-radius:8px;cursor:pointer;font-size:13.5px;background:' + (csel ? 'var(--accent-soft)' : 'transparent') + ';color:var(--text)' }; });
+
+    // report blocks
+    const reportBlocks = this.BLOCKS.map(b => {
+      const o = { isLead: b.type === 'lead', isH2: b.type === 'h2', isP: b.type === 'p', isCallout: b.type === 'callout', isStats: b.type === 'stats', isChart: b.type === 'chart', isTable: b.type === 'table', isImage: b.type === 'image', isQuote: b.type === 'quote', isRefs: b.type === 'refs', text: b.text, label: b.label, title: b.title, caption: b.caption, cite: b.cite, items: b.items, head: b.head };
+      if (b.type === 'chart') { const max = Math.max(...b.data.map(d => d.v));
+        o.bars = b.data.map((d, i) => { const isLast = i === b.data.length - 1;
+          return { label: d.label, value: '$' + d.v, style: `width:100%;max-width:54px;height:${Math.round(d.v / max * 118)}px;border-radius:6px 6px 0 0;transform-origin:bottom;animation:sg-grow .5s ease both;background:${isLast ? 'var(--ok)' : 'var(--accent)'}` }; }); }
+      if (b.type === 'table') { o.rows = b.rows.map(cells => ({ cells: cells.map((text, ci) => ({ text, style: 'padding:10px 14px;border-bottom:1px solid var(--border);color:' + (ci === 0 ? 'var(--text)' : 'var(--text-dim)') })) })); }
+      return o;
+    });
+
+    const chatMessages = s.chatMessages.map(m => { const user = m.role === 'user';
+      return { who: user ? 'You' : 'Singularity', text: m.text, wrap: user ? 'align-self:flex-end;max-width:88%' : 'align-self:flex-start;max-width:94%',
+        bubble: user ? 'background:var(--accent-soft);border:1px solid var(--border);border-radius:15px 15px 4px 15px;padding:11px 14px;font-size:15.5px;line-height:1.55;color:var(--text)' : 'font-size:16px;line-height:1.6;color:var(--text)' }; });
+
+    const canSend = s.query.trim() && !(s.mode === 'research' && s.query.trim().length < 10);
+    const rCanSend = !!s.reportQuery.trim();
+    const ap = this.PROVIDERS.find(p => p.id === s.provider);
+    const apConnected = !!(s.keys[s.provider] && s.keys[s.provider].trim());
+    const provRowBase = 'display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:11px;cursor:pointer;transition:all .15s;border:1px solid transparent;color:var(--text);';
+
+    return {
+      themeRef: this.themeRef, theme: s.theme, isDark, isLight: !isDark,
+      toggleTheme: () => this.set({ theme: isDark ? 'light' : 'dark' }),
+      sidebarOpen: s.sidebarOpen, sidebarClosed: !s.sidebarOpen, toggleSidebar: () => this.set({ sidebarOpen: !s.sidebarOpen }),
+      sidebarStyle: 'display:flex;flex-direction:column;flex-shrink:0;height:100%;background:var(--surface);border-right:1px solid var(--border);transition:width .2s ease;overflow:hidden;width:' + (s.sidebarOpen ? '264px' : '62px'),
+      newChatStyle: 'display:flex;align-items:center;gap:9px;width:100%;height:40px;padding:0 12px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);border-radius:11px;cursor:pointer;font-family:\'JetBrains Mono\',monospace;font-size:13px;' + (s.sidebarOpen ? '' : 'justify-content:center;padding:0'),
+      newSession: () => this.set({ view: 'grid', openMenu: null }),
+      navReports, gridReports, reportCount: this.REPORTS.length,
+      isDash: s.view === 'grid' || s.view === 'chat', isGrid: s.view === 'grid', isChat: s.view === 'chat', isReport: s.view === 'report',
+      backToGrid: () => this.set({ view: 'grid', openMenu: null }),
+      navChats,
+
+      // dashboard composer
+      mode: s.mode, isResearch: s.mode === 'research', isChatMode: s.mode === 'chat', modeLabel: s.mode === 'research' ? 'Research' : 'Chat',
+      modeDotStyle: 'width:7px;height:7px;border-radius:50%;background:' + (s.mode === 'research' ? 'var(--accent)' : 'var(--ok)'),
+      modeChipStyle: chipBase + (s.openMenu === 'mode' ? 'border-color:var(--border-strong)' : ''),
+      effortChipStyle: chipBase + (s.openMenu === 'effort' ? 'border-color:var(--border-strong)' : ''),
+      modelChipStyle: chipBase + (s.openMenu === 'model' ? 'border-color:var(--border-strong)' : ''),
+      toggleModeMenu: () => this.set({ openMenu: s.openMenu === 'mode' ? null : 'mode' }),
+      toggleEffortMenu: () => this.set({ openMenu: s.openMenu === 'effort' ? null : 'effort' }),
+      toggleModelMenu: () => this.set({ openMenu: s.openMenu === 'model' ? null : 'model' }),
+      modeMenuOpen: s.openMenu === 'mode', effortMenuOpen: s.openMenu === 'effort', modelMenuOpen: s.openMenu === 'model',
+      anyMenuOpen: s.openMenu === 'mode' || s.openMenu === 'effort' || s.openMenu === 'model',
+      closeMenus: () => this.set({ openMenu: null }),
+      setChat: () => this.set({ mode: 'chat', openMenu: null }), setResearch: () => this.set({ mode: 'research', openMenu: null }),
+      chatRowStyle: rowBase + (s.mode === 'chat' ? 'background:var(--accent-soft)' : ''),
+      researchRowStyle: rowBase + (s.mode === 'research' ? 'background:var(--accent-soft)' : ''),
+      intensities, intensityName: activeInt.name,
+      modelName, modelDotStyle: `width:8px;height:8px;border-radius:50%;background:${modelDot}`,
+      modelGroups: mkModelGroups((id) => this.set({ modelId: id, openMenu: null })),
+      query: s.query, onQuery: (e) => this.set({ query: e.target.value }),
+      onKeyDown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.submit(); } },
+      onSubmit: this.submit,
+      placeholder: s.mode === 'research' ? 'Describe a research topic (min. 10 characters)…' : 'Ask anything…',
+      hintLine: (s.mode === 'research' ? 'Research' : 'Chat') + ' · ' + activeInt.name + ' · ' + modelName + '  —  Enter to send, Shift+Enter for newline',
+      sendStyle: 'margin-left:auto;display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex-shrink:0;border:none;border-radius:11px;cursor:pointer;transition:all .15s;' + (canSend ? 'background:var(--accent);color:#fff' : 'background:var(--surface-3);color:var(--text-faint);cursor:default'),
+
+      // report view
+      activeReport, reportBlocks, chatMessages,
+      activeChatTitle: activeChat ? activeChat.title : 'Chat', chatPositionLabel: 'Chat ' + (chatIdx + 1) + ' of ' + ar.chats.length,
+      reportChats, toggleThreadMenu: () => this.set({ openMenu: s.openMenu === 'thread' ? null : 'thread' }), threadMenuOpen: s.openMenu === 'thread',
+      newReportChat: () => this.openReport(ar.id),
+      chatCollapsed: s.chatCollapsed, chatExpanded: !s.chatCollapsed,
+      toggleChatCollapsed: () => this.set({ chatCollapsed: !s.chatCollapsed, openMenu: null }),
+      reportQuery: s.reportQuery, onReportQuery: (e) => this.set({ reportQuery: e.target.value }),
+      onReportKeyDown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.reportSend(); } },
+      onReportSend: this.reportSend,
+      rModelChipStyle: 'display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--border);background:var(--surface);border-radius:8px;cursor:pointer;color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:11.5px',
+      toggleRModelMenu: () => this.set({ openMenu: s.openMenu === 'rmodel' ? null : 'rmodel' }), rModelMenuOpen: s.openMenu === 'rmodel',
+      anyReportMenuOpen: s.openMenu === 'rmodel',
+      rSendStyle: 'margin-left:auto;display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex-shrink:0;border:none;border-radius:9px;cursor:pointer;' + (rCanSend ? 'background:var(--accent);color:#fff' : 'background:var(--surface-3);color:var(--text-faint);cursor:default'),
+
+      // settings
+      // onboarding walkthrough (spotlight)
+      onboarding: s.onboarding, obStepNum: s.obStep + 1, obTotal: this.OB.length,
+      obTitle: this.OB[s.obStep].title, obDesc: this.OB[s.obStep].desc, obCta: this.OB[s.obStep].cta,
+      obDots: this.OB.map((o, i) => ({ barStyle: 'height:4px;border-radius:2px;transition:all .25s;flex:' + (i === s.obStep ? '2.4' : '1') + ';background:' + (i < s.obStep ? 'var(--ok)' : i === s.obStep ? 'var(--accent)' : 'var(--border-strong)') })),
+      obCtaAction: () => this.obAct(),
+      obNudge: () => {},
+      obSkip: () => this.setState({ onboarding: false, tourRect: null }),
+      ...this.tourGeometry(),
+      userMenuOpen: s.userMenuOpen, toggleUserMenu: () => this.set({ userMenuOpen: !s.userMenuOpen }), closeUserMenu: () => this.set({ userMenuOpen: false }),
+      openSettingsFromMenu: () => this.set({ userMenuOpen: false, settingsOpen: true }),
+      settingsOpen: s.settingsOpen, openSettings: () => this.set({ settingsOpen: true }),
+      closeSettings: () => this.set({ settingsOpen: false }), stop: (e) => e.stopPropagation(),
+      providers: this.PROVIDERS.map(p => { const sel = p.id === s.provider; const connected = !!(s.keys[p.id] && s.keys[p.id].trim());
+        return { name: p.name, sub: p.sub, connected, onSelect: () => this.set({ provider: p.id }),
+          dotStyle: `width:9px;height:9px;border-radius:3px;flex-shrink:0;background:${p.dot}`,
+          style: provRowBase + (sel ? 'background:var(--accent-soft);border-color:var(--border-strong)' : 'background:transparent') }; }),
+      activeProvider: ap, activeDotStyle: `width:11px;height:11px;border-radius:3px;background:${ap.dot}`,
+      currentKey: s.keys[s.provider] || '',
+      onKeyInput: (e) => this.setState(st => ({ keys: { ...st.keys, [st.provider]: e.target.value } })),
+      saveKey: () => this.forceUpdate(),
+      activeStatusLabel: apConnected ? 'Connected' : 'Not connected',
+      activeStatusStyle: 'margin-left:auto;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border-radius:6px;' + (apConnected ? 'background:rgba(63,200,164,.15);color:var(--ok)' : 'background:var(--surface-3);color:var(--text-faint)'),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from engine.chat.effort import ChatEffort
-from engine.chat.skill_router import select_skills
+from engine.research_workflow.skill_router import select_skills
 from engine.tools import TOOL_REGISTRY
 from engine.tools.contracts import TOOL_ARGUMENT_MODELS, ChatToolInvocation
 
@@ -23,6 +23,7 @@ TOOL_ARGUMENT_QUERY_TOOLS = frozenset(
 
 from .caps import RunCaps
 from .dag import ResearchNode
+from .evidence import rank_evidence
 from .runtime import ResearchInfrastructureError
 
 
@@ -118,8 +119,24 @@ class BoundedResearchResolver:
         self.max_search_variants = max(1, min(max_search_variants, 3))
         self.progress_reporter = progress_reporter
 
+    # Resolver statuses that describe a single tool invocation's lifecycle. The
+    # UI renders these as a tool chip / web_search card; the remaining statuses
+    # (node_started, node_completed, source_unavailable) describe the node and
+    # default to the generic "phase" kind.
+    _TOOL_CALL_STATUSES = frozenset({
+        "tool_dispatched", "tool_routed", "tool_reformulating",
+        "tool_completed", "tool_failed", "tool_retry",
+    })
+
     async def _progress(self, **event: Any) -> None:
         if self.progress_reporter is not None:
+            # Stamp a stable ``kind`` so the frontend can route each event to one
+            # component. Tool-lifecycle statuses become "tool_call"; everything
+            # else is a node-level "phase" event.
+            event.setdefault(
+                "kind",
+                "tool_call" if event.get("status") in self._TOOL_CALL_STATUSES else "phase",
+            )
             result = self.progress_reporter(event)
             if isawaitable(result):
                 await result
@@ -291,13 +308,16 @@ class BoundedResearchResolver:
         # A research answer is only useful to the writer when it has a
         # citable, extracted source.  Do not turn an empty search result into
         # a plausible-but-unsupported synthetic answer. Redact credential-like
-        # tokens from tool output before it reaches an LLM prompt.
-        evidence = [
+        # tokens from tool output before it reaches an LLM prompt. Rank the
+        # surviving records (full-text fetches ahead of snippets, deduplicated
+        # by URL) because the answerer truncates to its evidence budget and
+        # must not lose the fetched pages to a flood of earlier snippets.
+        evidence = rank_evidence([
             _redact(item)
             for item in evidence
             if str(item.get("content", "")).strip()
             and str(item.get("url", "")).startswith(("https://", "http://"))
-        ]
+        ])
         if not evidence:
             result = {
                 "answered": False,

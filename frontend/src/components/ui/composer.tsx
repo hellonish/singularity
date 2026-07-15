@@ -6,7 +6,7 @@ import { INTENSITIES, PROVIDERS } from '@/lib/dummy-data';
 import { useWorkspace } from '@/components/workspace-provider';
 
 export function Composer() {
-  const { mode, intensity, modelId, view, activeChatId, openMenu, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
+  const { mode, intensity, modelId, view, activeChatId, openMenu, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setActiveRunId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
   const { createAndSendChat, sendChat, startResearch, activeCredential, availableModels, modelsLoading, setDefaultModel, clearError, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
@@ -85,10 +85,11 @@ export function Composer() {
       } else {
         const strength = intensity === 'instant' ? 1 : intensity === 'medium' ? 2 : 3;
         const run = await startResearch(content, strength, selectedModel?.id);
-        if (run.report_id) {
-          setActiveReportId(run.report_id);
-          setView('report');
-        }
+        // Open the live Research Run view; the report is linked but not yet
+        // written, so the run view drives progress and links out on completion.
+        setActiveRunId(run.id);
+        if (run.report_id) setActiveReportId(run.report_id);
+        setView('run');
       }
       setQuery('');
       setComposerDraft('');
@@ -117,7 +118,7 @@ export function Composer() {
       <form
         data-tour="composer"
         onSubmit={handleSubmit}
-        style={{ maxWidth: '720px', margin: '0 auto', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '20px', boxShadow: 'var(--shadow)', position: 'relative' }}
+        style={{ maxWidth: '900px', margin: '0 auto', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '20px', boxShadow: 'var(--shadow)', position: 'relative' }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', padding: '14px 14px 6px' }}>
           <textarea
@@ -249,7 +250,7 @@ export function Composer() {
         </div>
         {openMenu && <div onClick={() => setOpenMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>}
       </form>
-      <div className="sg-mono" style={{ maxWidth: '720px', margin: '9px auto 0', fontSize: '10.5px', color: 'var(--text-faint)', textAlign: 'center' }}>
+      <div className="sg-mono" style={{ maxWidth: '900px', margin: '9px auto 0', fontSize: '10.5px', color: 'var(--text-faint)', textAlign: 'center' }}>
         {!activeCredential ? 'Add a provider key in Settings to send messages.' : hintLine}
       </div>
 
@@ -264,7 +265,7 @@ export function Composer() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: '400px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '18px', boxShadow: 'var(--shadow)', padding: '22px' }}
           >
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 600, color: 'var(--text)' }}>Start a new chat?</div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 500, color: 'var(--text)' }}>Start a new chat?</div>
             <div style={{ marginTop: '9px', fontSize: '14px', lineHeight: 1.5, color: 'var(--text-dim)' }}>Research requires a new chat.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '9px', marginTop: '22px' }}>
               <button

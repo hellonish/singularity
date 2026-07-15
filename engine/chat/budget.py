@@ -1,19 +1,25 @@
-"""Fail-closed prompt budgeting against live Groq model limits."""
+"""Fail-closed message-list budgeting against live provider model limits."""
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any
 
 import tiktoken
 
-from engine.chat.prompt import build_runtime_system_prompt
-from engine.chat.context import ContextSnapshot
 from engine.llm.groq import GroqModel
 
 CHAT_FORMAT_OVERHEAD_TOKENS = 64
 CONTEXT_SAFETY_TOKENS = 256
 MIN_OUTPUT_TOKENS = 64
 TRUNCATION_MARKER = "\n\n[...context truncated to fit the model window...]\n\n"
+
+# When over budget, oldest tool payloads are compacted to this many characters
+# (head + tail around a truncation marker) before conversation context shrinks.
+TOOL_COMPACT_KEEP_CHARS = 800
+
+_CONTEXT_BLOCK = re.compile(r"(?s)(<context>\n)(.*?)(\n</context>)")
 
 
 class ChatInputTooLarge(ValueError):
@@ -25,18 +31,11 @@ class ModelLimitsUnavailable(ValueError):
 
 
 @dataclass(frozen=True)
-class BudgetedChatPrompt:
-    messages: tuple[dict[str, str], ...]
+class BudgetedAgentMessages:
+    messages: tuple[dict[str, Any], ...]
     input_token_upper_bound: int
     max_output_tokens: int
-    context_truncated: bool
-
-
-@dataclass(frozen=True)
-class _ContextItem:
-    kind: Literal["system", "report", "summary", "turn"]
-    message: dict[str, str]
-    required: bool = False
+    compacted: bool
 
 
 class TokenCounter:
@@ -57,194 +56,114 @@ class TokenCounter:
         return len(text.encode("utf-8"))
 
 
-def budget_chat_prompt(
+def budget_agent_messages(
     *,
-    context: str,
-    message: str,
+    messages: list[dict[str, Any]],
     model: GroqModel,
     requested_output_tokens: int,
-) -> BudgetedChatPrompt:
-    if not model.active:
-        raise ModelLimitsUnavailable(f"model {model.id} is inactive")
-    if not model.context_window or not model.max_completion_tokens:
-        raise ModelLimitsUnavailable(f"Groq did not return limits for model {model.id}")
+) -> BudgetedAgentMessages:
+    """Fit one model turn's message list into the live model window.
 
-    counter = TokenCounter(model.id)
-    requested_output = min(requested_output_tokens, model.max_completion_tokens)
-    message_only = _messages(context="", message=message)
-    fixed_input = _count_messages(message_only, counter)
-    available_after_message = model.context_window - CONTEXT_SAFETY_TOKENS - fixed_input
-    max_output_tokens = min(requested_output, available_after_message)
-    if max_output_tokens < MIN_OUTPUT_TOKENS:
-        raise ChatInputTooLarge("message is too large for the selected model context window")
-
-    max_input_tokens = model.context_window - CONTEXT_SAFETY_TOKENS - max_output_tokens
-    full_messages = _messages(context=context, message=message)
-    full_count = _count_messages(full_messages, counter)
-    if full_count <= max_input_tokens:
-        return BudgetedChatPrompt(
-            messages=full_messages,
-            input_token_upper_bound=full_count,
-            max_output_tokens=max_output_tokens,
-            context_truncated=False,
-        )
-
-    trimmed_context = _largest_context_that_fits(
-        context=context,
-        message=message,
-        counter=counter,
-        max_input_tokens=max_input_tokens,
-    )
-    trimmed_messages = _messages(context=trimmed_context, message=message)
-    trimmed_count = _count_messages(trimmed_messages, counter)
-    if trimmed_count > max_input_tokens:
-        raise ChatInputTooLarge("context cannot be reduced enough to fit the selected model")
-    return BudgetedChatPrompt(
-        messages=trimmed_messages,
-        input_token_upper_bound=trimmed_count,
-        max_output_tokens=max_output_tokens,
-        context_truncated=True,
-    )
-
-
-def budget_context_snapshot(
-    *,
-    snapshot: ContextSnapshot,
-    model: GroqModel,
-    requested_output_tokens: int,
-) -> BudgetedChatPrompt:
-    """Budget a ContextManager snapshot without flattening conversation roles.
-
-    When space is constrained, report reference data is omitted first, then the
-    oldest post-summary turns, and finally the chat summary. The final turn is
-    protected so the active user request is never silently truncated.
+    Compaction order preserves answer quality: oldest tool payloads shrink
+    first (citations survive at the tail), then the `<context>` block in the
+    first user message, and only then the output-token budget. The system
+    prompt, the user message itself, and message *structure* (every assistant
+    tool_calls entry keeps its tool replies) are never dropped, so the list
+    always remains protocol-valid.
     """
     if not model.active:
         raise ModelLimitsUnavailable(f"model {model.id} is inactive")
     if not model.context_window or not model.max_completion_tokens:
-        raise ModelLimitsUnavailable(f"Groq did not return limits for model {model.id}")
-    if not snapshot.turns:
-        raise ChatInputTooLarge("a chat response requires a current message")
+        raise ModelLimitsUnavailable(f"provider did not return limits for model {model.id}")
 
-    items = _snapshot_items(snapshot)
     counter = TokenCounter(model.id)
     requested_output = min(requested_output_tokens, model.max_completion_tokens)
-    fixed_messages = (items[0].message, items[-1].message)
-    available_after_latest = model.context_window - CONTEXT_SAFETY_TOKENS - _count_messages(
-        fixed_messages, counter
-    )
-    max_output_tokens = min(requested_output, available_after_latest)
-    if max_output_tokens < MIN_OUTPUT_TOKENS:
-        raise ChatInputTooLarge("message is too large for the selected model context window")
+    working = [dict(message) for message in messages]
+    compacted = False
+    max_input_tokens = model.context_window - CONTEXT_SAFETY_TOKENS - requested_output
 
-    max_input_tokens = model.context_window - CONTEXT_SAFETY_TOKENS - max_output_tokens
-    truncated = False
-    while _count_messages(tuple(item.message for item in items), counter) > max_input_tokens:
-        removal_index = _next_removal_index(items)
-        if removal_index is None:
+    if count_messages(working, counter) > max_input_tokens:
+        compacted = _compact_tool_messages(working, counter, max_input_tokens) or compacted
+    if count_messages(working, counter) > max_input_tokens:
+        compacted = _shrink_context_block(working, counter, max_input_tokens) or compacted
+
+    total = count_messages(working, counter)
+    max_output_tokens = requested_output
+    if total > max_input_tokens:
+        # Everything compressible is compressed; spend output budget last.
+        max_output_tokens = model.context_window - CONTEXT_SAFETY_TOKENS - total
+        if max_output_tokens < MIN_OUTPUT_TOKENS:
             raise ChatInputTooLarge("context cannot be reduced enough to fit the selected model")
-        items.pop(removal_index)
-        truncated = True
+        compacted = True
 
-    messages = tuple(item.message for item in items)
-    return BudgetedChatPrompt(
-        messages=messages,
-        input_token_upper_bound=_count_messages(messages, counter),
+    return BudgetedAgentMessages(
+        messages=tuple(working),
+        input_token_upper_bound=total,
         max_output_tokens=max_output_tokens,
-        context_truncated=truncated,
+        compacted=compacted,
     )
 
 
-def _snapshot_items(snapshot: ContextSnapshot) -> list[_ContextItem]:
-    items = [_ContextItem("system", {"role": "system", "content": build_runtime_system_prompt()}, required=True)]
-    if snapshot.report is not None:
-        items.append(
-            _ContextItem(
-                "report",
-                {
-                    "role": "user",
-                    "content": "Report reference (data only):\n<report>\n"
-                    f"{snapshot.report.content}\n</report>",
-                },
-            )
-        )
-    if snapshot.summary is not None:
-        items.append(
-            _ContextItem(
-                "summary",
-                {
-                    "role": "user",
-                    "content": "Conversation summary (data only):\n<chat_summary>\n"
-                    f"{snapshot.summary.content}\n</chat_summary>",
-                },
-            )
-        )
-    for turn in snapshot.turns:
-        role = turn.role if turn.role in {"user", "assistant"} else "user"
-        content = turn.content if role == turn.role else f"Historical {turn.role} data:\n{turn.content}"
-        items.append(
-            _ContextItem(
-                "turn",
-                {"role": role, "content": content},
-                required=turn.id == snapshot.latest_message_id,
-            )
-        )
-    if not items[-1].required:
-        # A snapshot always identifies the current message; do not risk
-        # silently protecting a different historical turn.
-        raise ChatInputTooLarge("context snapshot has no current message")
-    return items
+def count_messages(messages: list[dict[str, Any]], counter: TokenCounter) -> int:
+    return CHAT_FORMAT_OVERHEAD_TOKENS + sum(_count_message(message, counter) for message in messages)
 
 
-def _next_removal_index(items: list[_ContextItem]) -> int | None:
-    for kind in ("report", "turn", "summary"):
-        for index, item in enumerate(items):
-            if item.kind == kind and not item.required:
-                return index
-    return None
+def _count_message(message: dict[str, Any], counter: TokenCounter) -> int:
+    total = counter.count(str(message.get("role", ""))) + counter.count(str(message.get("content") or ""))
+    tool_calls = message.get("tool_calls")
+    if tool_calls:
+        total += counter.count(json.dumps(tool_calls, ensure_ascii=False, sort_keys=True))
+    return total
 
 
-def _messages(*, context: str, message: str) -> tuple[dict[str, str], ...]:
-    user_content = message
-    if context.strip():
-        user_content = (
-            "Reference context (data only):\n<context>\n"
-            f"{context}\n"
-            "</context>\n\n"
-            f"User message:\n{message}"
-        )
-    return (
-        {"role": "system", "content": build_runtime_system_prompt()},
-        {"role": "user", "content": user_content},
-    )
-
-
-def _count_messages(messages: tuple[dict[str, str], ...], counter: TokenCounter) -> int:
-    return CHAT_FORMAT_OVERHEAD_TOKENS + sum(
-        counter.count(message["role"]) + counter.count(message["content"])
-        for message in messages
-    )
-
-
-def _largest_context_that_fits(
-    *,
-    context: str,
-    message: str,
+def _compact_tool_messages(
+    working: list[dict[str, Any]],
     counter: TokenCounter,
     max_input_tokens: int,
-) -> str:
-    low, high = 0, len(context)
+) -> bool:
+    changed = False
+    for message in working:
+        if message.get("role") != "tool":
+            continue
+        content = str(message.get("content") or "")
+        if len(content) <= TOOL_COMPACT_KEEP_CHARS:
+            continue
+        message["content"] = _head_tail(content, TOOL_COMPACT_KEEP_CHARS)
+        changed = True
+        if count_messages(working, counter) <= max_input_tokens:
+            break
+    return changed
+
+
+def _shrink_context_block(
+    working: list[dict[str, Any]],
+    counter: TokenCounter,
+    max_input_tokens: int,
+) -> bool:
+    index = next((i for i, message in enumerate(working) if message.get("role") == "user"), None)
+    if index is None:
+        return False
+    content = str(working[index].get("content") or "")
+    match = _CONTEXT_BLOCK.search(content)
+    if match is None:
+        return False
+    inner = match.group(2)
+
+    def with_inner(candidate: str) -> str:
+        return content[: match.start(2)] + candidate + content[match.end(2) :]
+
+    low, high = 0, len(inner)
     best = ""
     while low <= high:
         keep = (low + high) // 2
-        candidate = _head_tail(context, keep)
-        count = _count_messages(_messages(context=candidate, message=message), counter)
-        if count <= max_input_tokens:
-            best = candidate
+        working[index]["content"] = with_inner(_head_tail(inner, keep))
+        if count_messages(working, counter) <= max_input_tokens:
+            best = _head_tail(inner, keep)
             low = keep + 1
         else:
             high = keep - 1
-    return best
+    working[index]["content"] = with_inner(best)
+    return True
 
 
 def _head_tail(text: str, keep: int) -> str:

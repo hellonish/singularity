@@ -11,6 +11,7 @@ from engine.utils.json_parser import extract_object
 
 from .dag import ResearchDAG, ResearchNode, ResearchNodeStatus
 from .document import DocumentSection, ParagraphBlock, ReferenceTag, ResearchDocument, validate_document
+from .evidence import rank_evidence
 from engine.llm.groq import ProviderError
 
 logger = logging.getLogger(__name__)
@@ -138,10 +139,16 @@ class LLMLead:
         # bound; add_node raises once it is reached, so this only widens intake.
         proposal_count = max(1, len(proposals))
         per_perspective = max(3, -(-caps.max_nodes // proposal_count))
+        proposed = 0
         for proposal in proposals:
             for raw in proposal.get("nodes", [])[:per_perspective]:
-                question = str(raw.get("question", "")).strip()
+                proposed += 1
+                question = str(raw.get("question", "") if isinstance(raw, dict) else "").strip()
                 if not question:
+                    logger.warning(
+                        "research lead rejected a %r planner node without a question",
+                        proposal.get("perspective"),
+                    )
                     continue
                 digest = hashlib.sha256(f"{proposal.get('perspective')}:{question}".encode()).hexdigest()[:10]
                 try:
@@ -154,8 +161,18 @@ class LLMLead:
                         acceptance_criteria=[str(item) for item in raw.get("acceptance_criteria", [])][:4],
                         expected_evidence=[str(item) for item in raw.get("expected_evidence", [])][:4],
                     ), caps)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError) as exc:
+                    # Dropped nodes shrink the whole report, so every rejection
+                    # must be visible when a run needs root-causing.
+                    logger.warning(
+                        "research lead rejected planner node %r (%s: %s)",
+                        question[:120], type(exc).__name__, exc,
+                    )
                     continue
+        logger.info(
+            "research lead merged %d of %d proposed nodes from %d perspectives",
+            len(dag.nodes), proposed, proposal_count,
+        )
         if not dag.nodes:
             dag.add_node(ResearchNode(
                 node_id="n_root",
@@ -178,14 +195,22 @@ class LLMAnswerer:
         self._answer_tokens = getattr(caps, "answer_completion_tokens", 1_200)
 
     async def __call__(self, node: ResearchNode, evidence: list[dict[str, Any]]) -> dict[str, Any]:
-        bounded = evidence[:self._max_evidence]
+        # Rank before truncating so a fetched full-text page is never displaced
+        # by earlier search snippets. The resolver already ranks its output;
+        # ranking again keeps direct callers (tests, other runtimes) safe.
+        bounded = rank_evidence(evidence)[:self._max_evidence]
         excerpts = "\n\n".join(
             f"SOURCE {index + 1}: {item.get('title', '')} | {item.get('url', '')}\n{str(item.get('content', ''))[:self._max_source_chars]}"
             for index, item in enumerate(bounded)
         )
+        # The writer sees only this answer text (source records carry no
+        # content), so the report can never be richer than these notes.
         response = await self.model.complete(
             "Return JSON only: {\"answer\": string, \"unresolved_gaps\": [string]}. "
-            "Answer only from the supplied sources; do not invent citations. "
+            "Write comprehensive research notes that answer the question using only the supplied sources; "
+            "do not invent citations or facts. Capture every relevant finding, figure, date, named entity, "
+            "and comparison the sources support, in several detailed paragraphs, and note which SOURCE "
+            "number supports each point. State disagreements between sources explicitly. "
             f"Question: {node.question}\n\nEvidence:\n{excerpts}",
             max_output_tokens=self._answer_tokens,
         )
@@ -257,7 +282,7 @@ class LLMWriter:
         section_tokens = getattr(caps, "section_completion_tokens", 2_000)
         subsection_tokens = getattr(caps, "subsection_completion_tokens", 1_500)
         max_parallel = getattr(caps, "max_parallel_research_calls", 6)
-        nodes = list(dag.nodes.values())
+        nodes = _writable_nodes(dag)
         facts = [
             node.model_dump(include={"node_id", "question", "answer", "source_records", "unresolved_gaps"})
             for node in nodes
@@ -328,17 +353,41 @@ class LLMWriter:
             )
             return _fallback_document(dag, query)
 
+    async def _complete_with_repair(
+        self,
+        prompt: str,
+        *,
+        max_output_tokens: int,
+        parse: Callable[[str], Any],
+    ) -> Any:
+        """One completion plus a single repair retry on unparseable output.
+
+        The model adapter already retries provider-level failures; this retry
+        targets output that arrived but failed to parse or validate — most
+        often a truncated or malformed JSON body, which previously dropped the
+        section or outline outright. The retry only spends tokens on the
+        failure path.
+        """
+        try:
+            return parse(await self.model.complete(prompt, max_output_tokens=max_output_tokens))
+        except ValueError as exc:
+            repair_prompt = (
+                f"{prompt}\n\nYour previous response was rejected: {str(exc)[:500]}. "
+                "Return the complete, corrected JSON object only."
+            )
+            return parse(await self.model.complete(repair_prompt, max_output_tokens=max_output_tokens))
+
     async def _outline(self, query: str, facts: list[dict[str, Any]]) -> dict[str, Any] | None:
         try:
-            response = await self.model.complete(
+            return await self._complete_with_repair(
                 "Return JSON only: {\"title\": string, \"limitations\": [string], "
                 "\"sections\": [{\"section_id\": string, \"title\": string, \"node_ids\": [string]}]}. "
                 "Design a coherent report outline that groups the verified research nodes into ordered sections. "
                 "Every section_id must be unique; assign each relevant node_id to exactly one section. "
                 f"Research query: {query}\nVerified node records: {facts}",
                 max_output_tokens=1_200,
+                parse=_json,
             )
-            return _json(response)
         except (ProviderError, TimeoutError, ValueError) as exc:
             # Falling back to the single-call writer. Log why so a degraded run
             # can be root-caused instead of silently producing a fallback report.
@@ -359,8 +408,19 @@ class LLMWriter:
         allowed_tags: list[str],
         max_output_tokens: int,
     ) -> DocumentSection | None:
+        def parse(response: str) -> DocumentSection:
+            payload = _json(response)
+            payload.setdefault("section_id", section_id)
+            payload.setdefault("title", section_title)
+            section = DocumentSection.model_validate(payload)
+            # A heading with no body reads as a broken report; reject it here
+            # so the repair retry gets a chance to fill it in.
+            if not section.blocks and not section.children:
+                raise ValueError("section must contain at least one block or subsection")
+            return section
+
         try:
-            response = await self.model.complete(
+            return await self._complete_with_repair(
                 "Return JSON only: a single ResearchDocumentV1 section object "
                 "{\"section_id\": string, \"title\": string, \"blocks\": [block], \"children\": [section]}. "
                 f"{_BLOCK_SCHEMA_SPEC} "
@@ -376,11 +436,8 @@ class LLMWriter:
                 f"Research query: {query}\nSection id: {section_id}\nSection title: {section_title}\n"
                 f"Verified node records for this section: {facts}",
                 max_output_tokens=max_output_tokens,
+                parse=parse,
             )
-            payload = _json(response)
-            payload.setdefault("section_id", section_id)
-            payload.setdefault("title", section_title)
-            return DocumentSection.model_validate(payload)
         except (ProviderError, TimeoutError, ValueError) as exc:
             logger.warning(
                 "research writer section %r failed (%s); dropping section",
@@ -392,9 +449,12 @@ class LLMWriter:
 
     async def _write_single_call(self, dag: ResearchDAG, query: str, max_output_tokens: int) -> dict[str, Any]:
         """Original one-shot writer, retained as the outline-failure fallback."""
-        facts = [node.model_dump(include={"question", "answer", "source_records", "unresolved_gaps"}) for node in dag.nodes.values()]
+        facts = [
+            node.model_dump(include={"question", "answer", "source_records", "unresolved_gaps"})
+            for node in _writable_nodes(dag)
+        ]
         try:
-            response = await self.model.complete(
+            document = await self._complete_with_repair(
                 "Return a JSON ResearchDocumentV1 object only. Use schema_version research-document-v1; include title, query, "
                 "sections, references, and limitations. Every section object MUST contain `section_id` (never `id`), `title`, "
                 "and `blocks`. "
@@ -403,8 +463,8 @@ class LLMWriter:
                 "must reference an existing tag. Use at most two stat items per stats block and labels of at most two words. "
                 f"Research query: {query}\nVerified node records: {facts}",
                 max_output_tokens=max(max_output_tokens, 3_000),
+                parse=lambda response: ResearchDocument.model_validate(_json(response)),
             )
-            document = ResearchDocument.model_validate(_json(response))
         except (ProviderError, TimeoutError, ValueError) as exc:
             logger.warning(
                 "research single-call writer completion failed (%s); using fallback assembly",
@@ -443,6 +503,18 @@ class LLMWriter:
                     source_type=source["source_type"],
                     date=source.get("date"),
                 ))
+
+
+def _writable_nodes(dag: ResearchDAG) -> list[ResearchNode]:
+    """The nodes whose findings the writer should narrate.
+
+    Unanswered nodes — failed research, or QA gap suggestions that were never
+    resolved — carry no evidence and would only dilute the writer prompt with
+    ``answer: None`` records. Fall back to every node when nothing was
+    answered so a degraded run still produces its fallback report.
+    """
+    answered = [node for node in dag.nodes.values() if node.answer]
+    return answered or list(dag.nodes.values())
 
 
 def _fallback_document(dag: ResearchDAG, query: str) -> dict[str, Any]:

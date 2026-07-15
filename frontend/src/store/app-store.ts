@@ -13,7 +13,7 @@ export const ACCENT_COLORS = [
 ];
 
 export type Theme = 'light' | 'dark' | 'system';
-export type ViewMode = 'grid' | 'chat' | 'report';
+export type ViewMode = 'grid' | 'chat' | 'report' | 'run';
 export type SearchMode = 'research' | 'chat';
 export type Intensity = 'instant' | 'medium' | 'high' | 'ultra';
 export type MenuType = 'mode' | 'effort' | 'model' | 'thread' | 'rmodel' | null;
@@ -42,6 +42,7 @@ interface AppState {
   composerDraft: string;
   activeReportId: string | null;
   activeChatId: string | null;
+  activeRunId: string | null;
 
   setTheme: (theme: Theme) => void;
   setAccent: (accent: string) => void;
@@ -67,6 +68,7 @@ interface AppState {
   setComposerDraft: (draft: string) => void;
   setActiveReportId: (id: string | null) => void;
   setActiveChatId: (id: string | null) => void;
+  setActiveRunId: (id: string | null) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -94,6 +96,7 @@ export const useAppStore = create<AppState>()(
   composerDraft: '',
   activeReportId: null,
   activeChatId: null,
+  activeRunId: null,
 
   setTheme: (theme) => {
     set({ theme });
@@ -135,6 +138,7 @@ export const useAppStore = create<AppState>()(
   setComposerDraft: (composerDraft) => set({ composerDraft }),
   setActiveReportId: (activeReportId) => set({ activeReportId }),
   setActiveChatId: (activeChatId) => set({ activeChatId }),
+  setActiveRunId: (activeRunId) => set({ activeRunId }),
     }),
     {
       name: 'singularity-storage',

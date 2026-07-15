@@ -2,9 +2,8 @@ from io import StringIO
 
 from rich.console import Console
 
+from engine.chat.agent_loop import tool_message_content
 from engine.chat.modal_tools import ChatToolResult
-from engine.chat.runtime import format_tool_context
-from engine.chat.tool_loop import ExecutedToolCall
 from engine.cli.ui import TerminalUI, _highlighted_value
 from prompt_toolkit.widgets import RadioList
 
@@ -67,29 +66,23 @@ def test_redirected_answer_stream_is_emitted_once_without_final_duplicate() -> N
     assert output.getvalue().count("An **AML system**") == 1
 
 
-def test_tool_context_includes_bounded_source_references() -> None:
-    calls = (
-        ExecutedToolCall(
-            skill_id="medical_research",
-            tool_name="pubmed",
-            result=ChatToolResult(
-                content="Study result",
-                sources=[
-                    {"title": "Study A", "url": "https://example.test/a", "credibility_base": 0.9},
-                    {"title": "Study B", "url": "https://example.test/b", "credibility_base": 0.8},
-                ],
-                credibility_base=0.8,
-                error=None,
-            ),
-        ),
+def test_tool_message_includes_bounded_source_references() -> None:
+    result = ChatToolResult(
+        content="Study result",
+        sources=[
+            {"title": "Study A", "url": "https://example.test/a", "credibility_base": 0.9},
+            {"title": "Study B", "url": "https://example.test/b", "credibility_base": 0.8},
+        ],
+        credibility_base=0.8,
+        error=None,
     )
 
-    context = format_tool_context(calls, max_citations=1)
+    content = tool_message_content(result, max_sources=1)
 
-    assert "Study result" in context
-    assert "Study A" in context
-    assert "Study B" not in context
-    assert "credibility=0.9" in context
+    assert "Study result" in content
+    assert "Study A" in content
+    assert "Study B" not in content
+    assert "credibility=0.9" in content
 
 
 def test_tool_lifecycle_shows_the_actual_validated_call() -> None:

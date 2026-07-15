@@ -143,6 +143,11 @@ DocumentSection.model_rebuild()
 def validate_document(document: ResearchDocument) -> ResearchDocument:
     refs = {ref.tag for ref in document.references}
     for section in _sections(document.sections):
+        # A heading with neither blocks nor subsections renders as an empty
+        # shell; rejecting it here routes the writer to its fallback instead
+        # of shipping a hollow report.
+        if not section.blocks and not section.children:
+            raise ValueError(f"section {section.section_id} has no content")
         for block in section.blocks:
             ids = _reference_ids(block)
             if not ids:

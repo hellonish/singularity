@@ -21,7 +21,7 @@ from api.services.chat_stream import build_stream, generate_chat_title
 from api.services.report_context_errors import ReportContextError
 from api.sse import SSE_HEADERS, encode_sse
 from engine.llm.groq import GroqProviderError
-from engine.chat.runtime import ChatRuntimeLimitExceeded, ToolEvidenceUnavailable
+from engine.chat.agent_loop import ChatRuntimeLimitExceeded, ToolEvidenceUnavailable
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
@@ -88,7 +88,7 @@ async def stream_message(
 ) -> StreamingResponse:
     """Stream a real engine chat reply through the backend SSE contract.
 
-    The user message is persisted, the engine ChatAgent streams live deltas,
+    The user message is persisted, the unified agent loop streams live deltas,
     and the assistant reply is persisted before the stream closes so
     ``GET /chats/{id}/messages`` returns the full turn. Provider failures are
     surfaced as a terminal ``message.error`` event rather than a torn stream.

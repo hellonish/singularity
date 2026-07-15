@@ -1,7 +1,8 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, AvailableModel, Chat, Message, ProviderCredential, Report, ResearchRun, requestSSE, SSEEvent } from '@/lib/api';
+import { api, ApiError, AvailableModel, Chat, humanizeProgress, Message, ProviderCredential, Report, ResearchProgressPayload, ResearchRun, RunProgress, requestSSE, SSEEvent } from '@/lib/api';
+import { emptyRunProgress, reduceProgress } from '@/lib/research-feed';
 
 type RunActivity = { phase?: string; status?: string; message?: string; error?: string };
 
@@ -54,6 +55,8 @@ interface WorkspaceData {
   streamingChatIds: string[];
   reportContent: Record<string, string>;
   runActivity: Record<string, RunActivity>;
+  /** Rich per-run progress (feed, telemetry, pipeline) for the Research Run view. */
+  runProgress: Record<string, RunProgress>;
   loading: boolean;
   error: string | null;
   activeCredential: ProviderCredential | null;
@@ -93,6 +96,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [reportContent, setReportContent] = useState<Record<string, string>>({});
   const [runActivity, setRunActivity] = useState<Record<string, RunActivity>>({});
+  const [runProgress, setRunProgress] = useState<Record<string, RunProgress>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const runControllers = useRef(new Map<string, AbortController>());
@@ -216,6 +220,29 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
     try {
       await api.streamMessage(chatId, content, effort, (event: SSEEvent) => {
+        if (event.event === 'message.progress') {
+          const kind = typeof event.data.kind === 'string' ? event.data.kind : '';
+          const raw = typeof event.data.message === 'string' ? event.data.message : '';
+          const elapsedSeconds = typeof event.data.elapsed_seconds === 'number' ? event.data.elapsed_seconds : undefined;
+          const label = humanizeProgress(kind, raw);
+          const failed = kind === 'tool_failed';
+          const done = kind === 'tool_completed' || failed;
+          setMessages((current) => ({ ...current, [chatId]: (current[chatId] ?? []).map((message) => {
+            if (message.id !== placeholderId) return message;
+            const steps = [...(message.progress ?? [])];
+            // A tool_completed/failed event closes out the pending tool_start for
+            // the same query instead of adding a second, near-duplicate line.
+            if (done) {
+              const openIndex = steps.findIndex((step) => step.kind === 'tool_start' && !step.done);
+              if (openIndex !== -1) {
+                steps[openIndex] = { ...steps[openIndex], kind, label, elapsedSeconds, done: true, failed };
+                return { ...message, progress: steps };
+              }
+            }
+            steps.push({ kind, label, elapsedSeconds, done, failed });
+            return { ...message, progress: steps };
+          }) }));
+        }
         if (event.event === 'message.delta') {
           const delta = typeof event.data.delta === 'string' ? event.data.delta : '';
           setMessages((current) => ({ ...current, [chatId]: (current[chatId] ?? []).map((message) =>
@@ -324,6 +351,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
             if (event.id) cursor = event.id;
             if (event.event === 'research.heartbeat') return;
             const status = typeof event.data.status === 'string' ? event.data.status : undefined;
+            // Fold progress events into the rich per-run feed/telemetry/pipeline.
+            // Phase-node events (research.phase) and progress events both name a
+            // phase, so both advance the rail; only research.progress carries a
+            // feed-worthy `kind`.
+            if (event.event === 'research.progress' || event.event === 'research.phase') {
+              setRunProgress((current) => ({
+                ...current,
+                [run.id]: reduceProgress(current[run.id] ?? emptyRunProgress(), event.data as ResearchProgressPayload),
+              }));
+            }
             setRunActivity((current) => ({ ...current, [run.id]: {
               phase: typeof event.data.phase === 'string' ? event.data.phase : current[run.id]?.phase,
               status: typeof event.data.status === 'string' ? event.data.status : current[run.id]?.status,
@@ -344,6 +381,18 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       }
       const finalRun = await api.getRun(run.id);
       setRuns((current) => current.map((item) => item.id === run.id ? finalRun : item));
+      // On success, mark the whole pipeline done so the rail and status kicker
+      // settle on "Report ready" even though no phase event names that stage.
+      if (finalRun.status === 'completed') {
+        setRunProgress((current) => {
+          const existing = current[run.id] ?? emptyRunProgress();
+          return { ...current, [run.id]: {
+            ...existing,
+            currentPhase: 'report',
+            phases: { scoping: 'done', planning: 'done', researching: 'done', reviewing: 'done', writing: 'done', report: 'done' },
+          } };
+        });
+      }
       if (finalRun.status === 'failed') setError(finalRun.error_message || 'Research failed.');
       if (finalRun.report_id) {
         await loadReport(finalRun.report_id);
@@ -369,6 +418,17 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       throw new Error(message);
     }
   }, [requireCredential, streamResearch]);
+
+  // Resume progress streams for any run that is still active but has no live
+  // stream — e.g. after a page reload, or a run started in another tab. Without
+  // this, the Research Run view would sit empty for an in-flight run.
+  useEffect(() => {
+    for (const run of runs) {
+      if (['completed', 'failed', 'cancelled'].includes(run.status)) continue;
+      if (runControllers.current.has(run.id)) continue;
+      void streamResearch(run);
+    }
+  }, [runs, streamResearch]);
 
   const cancelResearch = useCallback(async (runId: string) => {
     try {
@@ -437,10 +497,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<WorkspaceData>(() => ({
-    chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, loading, error, activeCredential,
+    chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential,
     refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential,
     clearError,
-  }), [chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
+  }), [chats, reports, runs, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

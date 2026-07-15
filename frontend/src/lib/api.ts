@@ -11,6 +11,20 @@ export interface Chat {
   updated_at: string;
 }
 
+/** One live step the agent reported while a turn was still thinking. */
+export interface ProgressStep {
+  /** Engine progress_kind, e.g. 'routing' | 'tool_start' | 'tool_completed'. */
+  kind: string;
+  /** Humanized, user-facing description of the step. */
+  label: string;
+  /** Wall time the underlying tool call took, when the engine reports it. */
+  elapsedSeconds?: number;
+  /** True once the step's underlying action finished (success or failure). */
+  done: boolean;
+  /** True when the step represents a failure the model had to recover from. */
+  failed: boolean;
+}
+
 export interface Message {
   id: string;
   chat_id: string;
@@ -20,6 +34,47 @@ export interface Message {
   created_at: string;
   /** Client-only: true while an optimistic assistant turn is waiting for its first token. */
   pending?: boolean;
+  /** Client-only: live agent progress steps streamed before the answer began. */
+  progress?: ProgressStep[];
+}
+
+/** Raw engine tool labels look like: `web_search(query='foo bar', arguments={...})`. */
+const TOOL_LABEL = /^(\w+)\(query=(['"])([\s\S]*?)\2/;
+
+/** Turn one engine progress event into a user-facing step description.
+ *
+ * The engine speaks in tool-call syntax and budget notes; this maps the parts a
+ * reader cares about (which tool, what query, how many sources) into a sentence,
+ * and falls back to the raw message for kinds we do not specifically dress up.
+ */
+export function humanizeProgress(kind: string, message: string): string {
+  const toolName = (raw: string) => raw.replace(/_/g, ' ').replace(/\bweb search\b/i, 'web search');
+  const match = message.match(TOOL_LABEL);
+  const query = match?.[3]?.trim();
+  const tool = match?.[1];
+  // `tool_completed` labels carry a trailing "— N source(s)" suffix.
+  const sources = message.match(/—\s*(\d+)\s*source/);
+
+  switch (kind) {
+    case 'routing':
+      return message;
+    case 'agent_budget':
+      return 'Planning the approach';
+    case 'tool_planning_start':
+      return 'Deciding what to look up';
+    case 'tool_start':
+      if (tool === 'web_search' && query) return `Searching the web for “${query}”`;
+      if (query) return `Running ${toolName(tool ?? 'a tool')} for “${query}”`;
+      return `Running ${toolName(tool ?? 'a tool')}`;
+    case 'tool_completed':
+      if (tool === 'web_search' && sources) return `Found ${sources[1]} source${sources[1] === '1' ? '' : 's'} for “${query ?? '…'}”`;
+      if (sources) return `${toolName(tool ?? 'Tool')} returned ${sources[1]} source${sources[1] === '1' ? '' : 's'}`;
+      return `Finished ${toolName(tool ?? 'a tool')}`;
+    case 'tool_failed':
+      return query ? `Search for “${query}” didn’t return results` : `${toolName(tool ?? 'A tool')} didn’t return results`;
+    default:
+      return message;
+  }
 }
 
 export interface Report {
@@ -40,6 +95,89 @@ export interface ResearchRun {
   finished_at: string | null;
   error_message: string | null;
   run_data: Record<string, unknown>;
+}
+
+/** The six pipeline phases shown in the Research Run rail, in order. */
+export const RESEARCH_PHASES = [
+  { key: 'scoping', label: 'Scoping', cap: 'Define the objective' },
+  { key: 'planning', label: 'Planning', cap: 'Decompose workstreams' },
+  { key: 'researching', label: 'Researching', cap: 'Gather & run tools' },
+  { key: 'reviewing', label: 'Reviewing', cap: 'Verify every claim' },
+  { key: 'writing', label: 'Writing', cap: 'Compose the report' },
+  { key: 'report', label: 'Report ready', cap: 'Cited & delivered' },
+] as const;
+
+export type ResearchPhaseKey = (typeof RESEARCH_PHASES)[number]['key'];
+export type PhaseState = 'queued' | 'live' | 'done';
+
+/** One live feed item derived from a `research.progress` event. Discriminated by
+ * `kind` — each maps to exactly one Research Run feed component. */
+export type RunFeedItem =
+  | { id: string; kind: 'phase'; label: string }
+  | { id: string; kind: 'thought'; text: string }
+  | { id: string; kind: 'scope'; objective: string; mustHaves: string[]; deliverable: string }
+  | { id: string; kind: 'agent_dispatch'; nodeId: string; question: string }
+  | { id: string; kind: 'tool_call'; tool: string; nodeId?: string; status: string; query?: string; sourceCount?: number; elapsedSeconds?: number; running: boolean; failed: boolean }
+  | { id: string; kind: 'source_added'; title: string; url: string; sourceType: string }
+  | { id: string; kind: 'section_written'; title: string };
+
+/** Derived counters for the Live telemetry tiles. Sandboxes stays 0 until the
+ * workflow emits real container/sandbox events; tokens is a display estimate. */
+export interface RunTelemetry {
+  sources: number;
+  toolCalls: number;
+  sandboxes: number;
+  tokens: number;
+}
+
+/** Everything the Research Run view needs for one run, accumulated from its
+ * event stream. `activity` mirrors the thin summary the report view still uses. */
+export interface RunProgress {
+  feed: RunFeedItem[];
+  telemetry: RunTelemetry;
+  /** phase key -> state, driving the pipeline rail. */
+  phases: Record<ResearchPhaseKey, PhaseState>;
+  /** The phase currently live, for the status kicker. */
+  currentPhase: ResearchPhaseKey;
+  activity: { phase?: string; status?: string; message?: string; error?: string };
+}
+
+/** Raw shape of a `research.progress` SSE payload (all fields optional; `kind`
+ * discriminates). The backend always includes `kind`, `phase`, `status`. */
+export interface ResearchProgressPayload {
+  kind?: string;
+  phase?: string;
+  status?: string;
+  message?: string;
+  node_id?: string;
+  question?: string;
+  tool_name?: string;
+  source_count?: number;
+  elapsed_seconds?: number;
+  title?: string;
+  url?: string;
+  source_type?: string;
+  objective?: string;
+  must_haves?: string[];
+  deliverable?: string;
+  section_title?: string;
+  error?: string;
+  cycle?: number;
+  [key: string]: unknown;
+}
+
+/** Map a backend `phase` string to a rail phase key. Scoping and planning both
+ * arrive under the "planning" backend phase; the scope event promotes to
+ * scoping, everything else after it is planning. */
+export function railPhaseKey(backendPhase: string | undefined, kind: string | undefined): ResearchPhaseKey {
+  if (kind === 'scope') return 'scoping';
+  switch (backendPhase) {
+    case 'planning': return 'planning';
+    case 'researching': return 'researching';
+    case 'reviewing': return 'reviewing';
+    case 'writing': return 'writing';
+    default: return 'scoping';
+  }
 }
 
 export interface ProviderCredential {

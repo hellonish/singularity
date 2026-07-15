@@ -49,6 +49,24 @@ function ChatIcon() {
   );
 }
 
+function SectionChevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ flexShrink: 0, transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' }}
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
 export function Sidebar() {
   const { sidebarOpen, toggleSidebar, activeReportId, activeChatId, view, setView, setActiveReportId, setActiveChatId, setMode } = useAppStore();
   const { reports, chats, deleteChat, deleteReport } = useWorkspace();
@@ -61,6 +79,8 @@ export function Sidebar() {
   const [reportMenuAnchor, setReportMenuAnchor] = useState<{ top: number; right: number } | null>(null);
   const [visibleChatCount, setVisibleChatCount] = useState(CHATS_PAGE_SIZE);
   const [visibleReportCount, setVisibleReportCount] = useState(REPORTS_PAGE_SIZE);
+  const [researchCollapsed, setResearchCollapsed] = useState(false);
+  const [chatsCollapsed, setChatsCollapsed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const reportMenuRef = useRef<HTMLDivElement>(null);
   const directChats = chats.filter((chat) => !chat.report_id);
@@ -105,7 +125,7 @@ export function Sidebar() {
       {sidebarOpen ? (
         <>
           <AppLogoMark width={32} height={32} />
-          <span style={{ fontSize: '18px', fontWeight: 500 }}>Singularity</span>
+          <span style={{ fontSize: '18px', fontWeight: 600 }}>Singularity</span>
           <button onClick={toggleSidebar} title="Collapse sidebar" style={{ marginLeft: 'auto', width: '30px', height: '30px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             ‹
           </button>
@@ -128,8 +148,17 @@ export function Sidebar() {
     </div>
     <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, padding: '2px 8px 12px' }}>
       <div style={{ flexShrink: 0, overflowY: 'auto', maxHeight: '40%' }}>
-        {sidebarOpen && <div className="sg-mono" style={{ padding: '6px 10px', fontSize: '10px', color: 'var(--text-faint)' }}>RESEARCH</div>}
-        {reports.slice(0, visibleReportCount).map((report) => (
+        {sidebarOpen && (
+          <button
+            onClick={() => setResearchCollapsed((value) => !value)}
+            className="sg-mono"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', padding: '6px 10px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '10px', color: 'var(--text-faint)', textAlign: 'left', letterSpacing: 'inherit' }}
+          >
+            <SectionChevron collapsed={researchCollapsed} />
+            RESEARCH
+          </button>
+        )}
+        {!(sidebarOpen && researchCollapsed) && reports.slice(0, visibleReportCount).map((report) => (
           <div
             key={report.id}
             style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '4px' }}
@@ -161,8 +190,8 @@ export function Sidebar() {
             )}
           </div>
         ))}
-        {sidebarOpen && reports.length === 0 && <div style={{ padding: '4px 10px', fontSize: '13px', color: 'var(--text-faint)' }}>No Research Work</div>}
-        {sidebarOpen && reports.length > visibleReportCount && (
+        {sidebarOpen && !researchCollapsed && reports.length === 0 && <div style={{ padding: '4px 10px', fontSize: '13px', color: 'var(--text-faint)' }}>No Research Work</div>}
+        {sidebarOpen && !researchCollapsed && reports.length > visibleReportCount && (
           <button
             onClick={() => setVisibleReportCount((count) => count + REPORTS_PAGE_SIZE)}
             style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: 'transparent', color: 'var(--text-faint)', fontSize: '13px' }}
@@ -171,9 +200,18 @@ export function Sidebar() {
           </button>
         )}
       </div>
-      {sidebarOpen && <div className="sg-mono" style={{ padding: '14px 10px 6px', fontSize: '10px', color: 'var(--text-faint)', flexShrink: 0 }}>CHATS</div>}
+      {sidebarOpen && (
+        <button
+          onClick={() => setChatsCollapsed((value) => !value)}
+          className="sg-mono"
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', width: '100%', padding: '14px 10px 6px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: '10px', color: 'var(--text-faint)', textAlign: 'left', letterSpacing: 'inherit', flexShrink: 0 }}
+        >
+          <SectionChevron collapsed={chatsCollapsed} />
+          CHATS
+        </button>
+      )}
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        {directChats.slice(0, visibleChatCount).map((chat) => (
+        {!(sidebarOpen && chatsCollapsed) && directChats.slice(0, visibleChatCount).map((chat) => (
           <div
             key={chat.id}
             style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '4px' }}
@@ -205,8 +243,8 @@ export function Sidebar() {
             )}
           </div>
         ))}
-        {sidebarOpen && directChats.length === 0 && <div style={{ padding: '4px 10px', fontSize: '13px', color: 'var(--text-faint)' }}>No Chats</div>}
-        {sidebarOpen && directChats.length > visibleChatCount && (
+        {sidebarOpen && !chatsCollapsed && directChats.length === 0 && <div style={{ padding: '4px 10px', fontSize: '13px', color: 'var(--text-faint)' }}>No Chats</div>}
+        {sidebarOpen && !chatsCollapsed && directChats.length > visibleChatCount && (
           <button
             onClick={() => setVisibleChatCount((count) => count + CHATS_PAGE_SIZE)}
             style={{ width: '100%', textAlign: 'left', padding: '9px 10px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: 'transparent', color: 'var(--text-faint)', fontSize: '13px' }}

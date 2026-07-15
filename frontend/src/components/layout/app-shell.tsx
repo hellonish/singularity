@@ -27,6 +27,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div
       ref={themeRef}
+      className="dashboard-root"
       style={{
         display: 'flex',
         height: '100vh',
@@ -34,7 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         overflow: 'hidden',
         backgroundColor: 'var(--bg)',
         color: 'var(--text)',
-        fontFamily: 'var(--font-serif)',
+        fontFamily: 'var(--font-sans)',
         transition: 'background 0.3s, color 0.3s'
       }}
     >

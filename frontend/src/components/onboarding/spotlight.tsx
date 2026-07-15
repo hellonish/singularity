@@ -262,7 +262,7 @@ export function Spotlight() {
 
       {obStep === 0 && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 67, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }} className="animate-sg-pop">
-          <h1 style={{ color: '#fff', fontSize: '32px', fontWeight: 300, fontStyle: 'italic', marginBottom: '16px', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
+          <h1 style={{ color: '#fff', fontSize: '32px', fontWeight: 400, fontStyle: 'italic', marginBottom: '16px', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>
             Welcome to Singularity, Nishant
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '18px', textAlign: 'center', textShadow: '0 2px 10px rgba(0,0,0,0.5)' }}>

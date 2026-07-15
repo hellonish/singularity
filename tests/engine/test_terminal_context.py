@@ -59,7 +59,8 @@ def test_context_selector_reports_when_local_history_reaches_compaction_threshol
     assert selection.compaction_required is True
 
 
-def test_local_compaction_preserves_raw_history_and_prior_summary_on_failure() -> None:
+def test_local_compaction_preserves_raw_history_and_prior_summary_on_failure(monkeypatch) -> None:
+    monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     session = _session()
     session.history = [TerminalHistoryTurn(role="user", content="topic " * 2_500)]
     agent = ChatTerminalAgent(provider=_FakeProvider(), summary_generator=_SummaryGenerator())

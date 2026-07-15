@@ -158,7 +158,7 @@ export function SettingsModal() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
           <div>
             <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.15em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '5px' }}>Settings</div>
-            <h2 style={{ margin: 0, fontSize: '23px', fontWeight: 300, fontStyle: 'italic', letterSpacing: '-.01em' }}>{activeSettingsTab === 'models' ? 'Model providers' : 'Appearance'}</h2>
+            <h2 style={{ margin: 0, fontSize: '23px', fontWeight: 400, letterSpacing: '-.01em' }}>{activeSettingsTab === 'models' ? 'Model providers' : 'Appearance'}</h2>
           </div>
           <button
             onClick={() => setSettingsOpen(false)}
@@ -205,7 +205,7 @@ export function SettingsModal() {
                   <div data-tour="keysetup" key={detail.id} className="animate-sg-pop" style={{ padding: '20px', border: '1px solid var(--border-strong)', borderRadius: '16px', backgroundColor: 'var(--surface-2)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '6px' }}>
                       <ProviderLogo p={detail} size={22} />
-                      <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 400 }}>{detail.name}</h3>
+                      <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 500 }}>{detail.name}</h3>
                       {activeCredential?.provider === detail.id ? (
                         <span className="sg-mono" style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', backgroundColor: 'var(--surface-3)', color: 'var(--text)' }}>Active</span>
                       ) : detailCredential ? (

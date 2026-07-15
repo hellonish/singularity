@@ -1,4 +1,4 @@
-from engine.chat.skill_router import select_skills
+from engine.research_workflow.skill_router import select_skills
 from engine.tools.contracts import chat_planner_tool_schemas
 
 

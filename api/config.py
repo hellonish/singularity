@@ -22,7 +22,25 @@ class Settings(BaseSettings):
 
     app_name: str = "Singularity API"
     environment: str = Field(default="development", validation_alias=AliasChoices("SINGULARITY_ENVIRONMENT", "ENVIRONMENT"))
-    database_url: str = Field(default="sqlite+aiosqlite:///./singularity.db", validation_alias=AliasChoices("SINGULARITY_DATABASE_URL", "DATABASE_URL"))
+
+    # Database selection. Production defaults to PostgreSQL so the prod
+    # environment needs no extra flags. Local development sets
+    # ``SINGULARITY_USE_SQLITE=true`` to opt into the SQLite file instead.
+    #
+    # Precedence (see the ``database_url`` property):
+    #   1. an explicit SINGULARITY_DATABASE_URL always wins (full override);
+    #   2. else use_sqlite=true  -> the local SQLite file;
+    #   3. else                  -> the PostgreSQL URL (the default).
+    use_sqlite: bool = Field(default=False, validation_alias=AliasChoices("SINGULARITY_USE_SQLITE", "USE_SQLITE"))
+    database_url_override: str | None = Field(default=None, validation_alias=AliasChoices("SINGULARITY_DATABASE_URL", "DATABASE_URL"))
+    postgres_url: str = Field(
+        default="postgresql+asyncpg://singularity:loremipsum@localhost:5432/singularity",
+        validation_alias=AliasChoices("SINGULARITY_POSTGRES_URL", "POSTGRES_URL"),
+    )
+    sqlite_url: str = Field(
+        default="sqlite+aiosqlite:///./singularity.db",
+        validation_alias=AliasChoices("SINGULARITY_SQLITE_URL", "SQLITE_URL"),
+    )
     auto_create_schema: bool = True
     storage_backend: str = "local"
     storage_root: str = "./data/objects"
@@ -84,6 +102,18 @@ class Settings(BaseSettings):
     # a plain string here (pydantic-settings would otherwise JSON-parse a list
     # field) and split by ``cors_allow_origins``.
     cors_allow_origins_raw: str = Field(default="", validation_alias=AliasChoices("SINGULARITY_CORS_ALLOW_ORIGINS", "CORS_ALLOW_ORIGINS"))
+
+    @property
+    def database_url(self) -> str:
+        """Effective async database URL.
+
+        An explicit ``SINGULARITY_DATABASE_URL`` overrides everything; otherwise
+        SQLite is used only when ``SINGULARITY_USE_SQLITE`` is set, and PostgreSQL
+        is the default so production requires no flag.
+        """
+        if self.database_url_override:
+            return self.database_url_override
+        return self.sqlite_url if self.use_sqlite else self.postgres_url
 
     @property
     def cors_allow_origins(self) -> list[str]:
