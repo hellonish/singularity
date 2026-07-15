@@ -117,19 +117,19 @@ export default function LandingPage() {
       </header>
 
       {/* ===== HERO ===== */}
-      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
         <canvas ref={waveRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}></canvas>
-        <div style={{ position: 'relative', zIndex: 1, maxWidth: 1080, margin: '0 auto', padding: 'clamp(56px,10vw,120px) clamp(20px,5vw,44px) clamp(40px,6vw,72px)', textAlign: 'center' }}>
-          <div className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--text-faint)', border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 999, padding: '7px 15px', marginBottom: 30, animation: 'lp-rise .5s ease both' }}>
+        <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 1080, margin: '0 auto', padding: 'clamp(24px,4vw,56px) clamp(20px,5vw,44px) clamp(32px,5vw,64px)', textAlign: 'center' }}>
+          <div className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--text-faint)', border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 999, padding: '7px 15px', marginBottom: 'clamp(16px,2.5vw,30px)', animation: 'lp-rise .5s ease both' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }}></span>Research + chat workspace
           </div>
-          <h1 style={{ margin: '0 auto', maxWidth: '15ch', fontSize: 'clamp(42px,7vw,84px)', fontWeight: 300, lineHeight: 1.02, letterSpacing: '-.03em', textWrap: 'balance', animation: 'lp-rise .5s ease both .04s', animationFillMode: 'both' }}>
+          <h1 style={{ margin: '0 auto', maxWidth: '15ch', fontSize: 'clamp(40px,6vw,76px)', fontWeight: 300, lineHeight: 1.04, letterSpacing: '-.03em', textWrap: 'balance', animation: 'lp-rise .5s ease both .04s', animationFillMode: 'both' }}>
             Ask a hard question.<br />Get a <span style={{ fontStyle: 'italic', color: 'var(--accent)' }}>sourced</span> answer.
           </h1>
-          <p style={{ margin: '26px auto 0', maxWidth: '56ch', fontSize: 'clamp(17px,2.2vw,21px)', fontWeight: 400, lineHeight: 1.6, color: 'var(--text)', textWrap: 'pretty', animation: 'lp-rise .5s ease both .1s' }}>
+          <p style={{ margin: 'clamp(16px,2.2vw,26px) auto 0', maxWidth: '56ch', fontSize: 'clamp(17px,2.2vw,21px)', fontWeight: 400, lineHeight: 1.6, color: 'var(--text)', textWrap: 'pretty', animation: 'lp-rise .5s ease both .1s' }}>
             Singularity turns one prompt into a long, cited research report — or a quick chat when you just need to think out loud. Bring your own model keys, and keep every source.
           </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 36, animation: 'lp-rise .5s ease both .16s' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginTop: 'clamp(22px,3vw,36px)', animation: 'lp-rise .5s ease both .16s' }}>
             <button onClick={goDashboard} className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 26px', border: 'none', borderRadius: 999, background: 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 500, cursor: 'pointer', boxShadow: 'var(--shadow-sm)' }}>
               Get started
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
@@ -138,16 +138,16 @@ export default function LandingPage() {
               See a sample report
             </a>
           </div>
-          <div className="lp-mono" style={{ marginTop: 18, fontSize: 11.5, color: 'var(--text-faint)', animation: 'lp-rise .5s ease both .2s' }}>No credit card · Your keys, your usage</div>
+          <div className="lp-mono" style={{ marginTop: 14, fontSize: 11.5, color: 'var(--text-faint)', animation: 'lp-rise .5s ease both .2s' }}>No credit card · Your keys, your usage</div>
 
           {/* composer mock */}
-          <div style={{ maxWidth: 660, margin: 'clamp(44px,7vw,76px) auto 0', textAlign: 'left', animation: 'lp-rise .6s ease both .26s' }}>
-            <div style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 22, boxShadow: 'var(--shadow)', padding: '20px 20px 12px' }}>
-              <div style={{ fontSize: 19, fontWeight: 300, lineHeight: 1.5, color: 'var(--text)', padding: '4px 4px 14px' }}>Compare solid-state and LFP battery cost curves through 2027, with sources.</div>
+          <div style={{ maxWidth: 660, margin: 'clamp(20px,3vw,36px) auto 0', textAlign: 'left', animation: 'lp-rise .6s ease both .26s' }}>
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: 22, boxShadow: 'var(--shadow)', padding: '16px 20px 12px' }}>
+              <div style={{ fontSize: 19, fontWeight: 300, lineHeight: 1.5, color: 'var(--text)', padding: '2px 4px 12px' }}>Compare solid-state and LFP battery cost curves through 2027, with sources.</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }}></span>Research</span>
                 <span className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}>High</span>
-                <span className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d97757' }}></span>Claude Sonnet 4.5</span>
+                <span className="lp-mono" style={{ display: 'flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 10, fontSize: 12, color: 'var(--text)' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#d97757' }}></span>ChatGPT 5.6 Sol</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, borderRadius: 11, background: 'var(--accent)', color: '#fff' }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></span>
               </div>
             </div>

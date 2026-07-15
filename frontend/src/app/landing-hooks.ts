@@ -79,7 +79,7 @@ export function useWaveAnimation(waveRef: RefObject<HTMLCanvasElement | null>, a
       const [cr, cg, cb] = col;
       const isoA = Math.PI / 6;
       const ax = Math.cos(isoA), ay = Math.sin(isoA);
-      const baseL = h * 0.80, baseR = h * 0.50;
+      const baseL = h * 0.88, baseR = h * 0.58;
       const tw = h * 0.072;
       const amp = h * 0.10;
 

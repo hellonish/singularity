@@ -95,7 +95,7 @@ export function ReportView() {
     <section style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '100px min(8vw, 96px) 48px' }}>
       <article style={{ maxWidth: '820px', margin: '0 auto' }}>
         <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '14px' }}>Research report</div>
-        <h1 style={{ margin: '0 0 14px', fontSize: '36px', fontWeight: 300, fontStyle: 'italic' }}>{report?.title || 'Research report'}</h1>
+        <h1 style={{ margin: '0 0 14px', fontSize: '36px', fontWeight: 400, fontStyle: 'italic' }}>{report?.title || 'Research report'}</h1>
         {running && <div style={{ margin: '20px 0', padding: '15px 17px', border: '1px solid var(--border-strong)', borderRadius: '12px', background: 'var(--surface)' }}>
           <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.1em', color: 'var(--accent-2)', textTransform: 'uppercase' }}>{activity?.phase || run.status}</div>
           <div style={{ marginTop: '6px', color: 'var(--text-dim)' }}>{activity?.message || 'Research is working…'}</div>

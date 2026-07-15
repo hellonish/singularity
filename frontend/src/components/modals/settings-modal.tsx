@@ -66,7 +66,7 @@ function ProviderDropdown({
           <>
             <ProviderLogo p={selected} />
             <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: '15px', fontWeight: 500 }}>{selected.name}</span>
+              <span style={{ fontSize: '15px', fontWeight: 600 }}>{selected.name}</span>
               <span className="sg-mono" style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{selected.sub}</span>
             </span>
             {connectedIds.has(selected.id) && (
@@ -111,7 +111,7 @@ function ProviderDropdown({
                 >
                   <ProviderLogo p={p} />
                   <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                    <span style={{ fontSize: '14px', fontWeight: 500 }}>{p.name}</span>
+                    <span style={{ fontSize: '14px', fontWeight: 600 }}>{p.name}</span>
                     <span className="sg-mono" style={{ fontSize: '10.5px', color: 'var(--text-faint)' }}>{p.sub}</span>
                   </span>
                   {connectedIds.has(p.id) && (
@@ -158,7 +158,7 @@ export function SettingsModal() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '20px 24px', borderBottom: '1px solid var(--border)' }}>
           <div>
             <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.15em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '5px' }}>Settings</div>
-            <h2 style={{ margin: 0, fontSize: '23px', fontWeight: 300, fontStyle: 'italic', letterSpacing: '-.01em' }}>{activeSettingsTab === 'models' ? 'Model providers' : 'Appearance'}</h2>
+            <h2 style={{ margin: 0, fontSize: '23px', fontWeight: 400, fontStyle: 'italic', letterSpacing: '-.01em' }}>{activeSettingsTab === 'models' ? 'Model providers' : 'Appearance'}</h2>
           </div>
           <button
             onClick={() => setSettingsOpen(false)}
@@ -174,14 +174,14 @@ export function SettingsModal() {
               style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '9px 10px', borderRadius: '11px', cursor: 'pointer', transition: 'all .15s', border: '1px solid transparent', color: 'var(--text)', backgroundColor: activeSettingsTab === 'models' ? 'var(--surface-2)' : 'transparent', borderColor: activeSettingsTab === 'models' ? 'var(--border)' : 'transparent' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Models</span>
+              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Models</span>
             </button>
             <button
               onClick={() => setActiveSettingsTab('appearance')}
               style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '9px 10px', borderRadius: '11px', cursor: 'pointer', transition: 'all .15s', border: '1px solid transparent', color: 'var(--text)', backgroundColor: activeSettingsTab === 'appearance' ? 'var(--surface-2)' : 'transparent', borderColor: activeSettingsTab === 'appearance' ? 'var(--border)' : 'transparent' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
-              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Appearance</span>
+              <span style={{ flex: 1, minWidth: 0, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Appearance</span>
             </button>
           </div>
           <div style={{ flex: 1, minWidth: 0, padding: '24px', overflowY: 'auto' }}>
@@ -205,7 +205,7 @@ export function SettingsModal() {
                   <div data-tour="keysetup" key={detail.id} className="animate-sg-pop" style={{ padding: '20px', border: '1px solid var(--border-strong)', borderRadius: '16px', backgroundColor: 'var(--surface-2)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '6px' }}>
                       <ProviderLogo p={detail} size={22} />
-                      <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 400 }}>{detail.name}</h3>
+                      <h3 style={{ margin: 0, fontSize: '19px', fontWeight: 500 }}>{detail.name}</h3>
                       {activeCredential?.provider === detail.id ? (
                         <span className="sg-mono" style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', backgroundColor: 'var(--surface-3)', color: 'var(--text)' }}>Active</span>
                       ) : detailCredential ? (
@@ -261,7 +261,7 @@ export function SettingsModal() {
                             // The shared error dialog already contains the user-facing failure.
                           } finally { setSaving(false); }
                         }}
-                        style={{ height: '42px', padding: '0 18px', border: 'none', borderRadius: '10px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer' }}
+                        style={{ height: '42px', padding: '0 18px', border: 'none', borderRadius: '10px', backgroundColor: 'var(--accent)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}
                       >
                         {saving ? 'Saving…' : 'Save'}
                       </button>
@@ -304,7 +304,7 @@ export function SettingsModal() {
                           color: theme === t ? 'var(--text)' : 'var(--text-dim)',
                           borderRadius: '10px',
                           fontSize: '13.5px',
-                          fontWeight: 500,
+                          fontWeight: 600,
                           cursor: 'pointer',
                           textTransform: 'capitalize'
                         }}

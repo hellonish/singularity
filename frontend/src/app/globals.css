@@ -86,6 +86,16 @@
     -webkit-font-smoothing: antialiased;
     transition: background 0.3s, color 0.3s;
   }
+
+  /* Dashboard uses Clash Grotesk everywhere; the landing page keeps Newsreader.
+     Redefining the vars here so both inline `var(--font-*)` usages and the
+     base font-family inherit Clash Grotesk across the whole dashboard subtree.
+     --font-mono is intentionally left untouched. */
+  .dashboard-root {
+    --font-sans: var(--font-clash-grotesk), 'ClashGrotesk-Variable', system-ui, sans-serif;
+    --font-serif: var(--font-clash-grotesk), 'ClashGrotesk-Variable', system-ui, sans-serif;
+    font-family: var(--font-sans);
+  }
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -221,9 +231,24 @@
 .animate-sg-pop { animation: sg-pop .16s ease both; }
 .animate-sg-grow { animation: sg-grow .3s ease both; transform-origin: bottom; }
 
+/* Research Run live feed animations */
+@keyframes rn-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes rn-inx{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+@keyframes rn-spin{to{transform:rotate(360deg)}}
+@keyframes rn-dot{0%,60%,100%{opacity:.3}30%{opacity:1}}
+@keyframes rn-rise{from{opacity:0;transform:translateY(18px) scale(.99)}to{opacity:1;transform:none}}
+.rn-in { animation: rn-in .4s ease both; }
+.rn-inx { animation: rn-inx .3s ease both; }
+.rn-spin { animation: rn-spin .7s linear infinite; }
+.rn-dot { animation: rn-dot 1.4s ease-in-out infinite; }
+.rn-rise { animation: rn-rise .6s cubic-bezier(.2,.8,.2,1) both; }
+
 /* Assistant "thinking" indicator shown until the first streamed token lands */
 .sg-thinking { display: inline-flex; align-items: center; gap: 5px; padding: 8px 0; }
 .sg-thinking span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); animation: sg-thinking 1.2s ease-in-out infinite; }
 .sg-thinking span:nth-child(2) { animation-delay: .18s; }
 .sg-thinking span:nth-child(3) { animation-delay: .36s; }
 @keyframes sg-thinking { 0%, 60%, 100% { opacity: .25; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
+/* Compact dots used inline alongside the live progress status line */
+.sg-thinking-inline { padding: 0; gap: 3px; }
+.sg-thinking-inline span { width: 4px; height: 4px; }

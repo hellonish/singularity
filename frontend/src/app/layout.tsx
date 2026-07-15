@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Newsreader } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
+
+const clashGrotesk = localFont({
+  src: "./fonts/ClashGrotesk-Variable.woff2",
+  weight: "200 700",
+  display: "swap",
+  variable: "--font-clash-grotesk",
+});
 
 
 const newsreader = Newsreader({
@@ -29,7 +37,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${newsreader.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${newsreader.variable} ${jetbrainsMono.variable} ${clashGrotesk.variable}`}>
       <body className="antialiased">
         {children}
       </body>

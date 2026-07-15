@@ -52,7 +52,7 @@ export function TopChrome() {
             data-tour="settings"
             onClick={() => setUserMenuOpen(!userMenuOpen)}
             title="Account"
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '999px', backgroundColor: 'var(--accent-soft)', color: 'var(--accent-2)', fontWeight: 500, fontSize: '15px', cursor: 'pointer', border: '1px solid var(--border)', paddingTop: '2px' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '999px', backgroundColor: 'var(--accent-soft)', color: 'var(--accent-2)', fontWeight: 600, fontSize: '15px', cursor: 'pointer', border: '1px solid var(--border)', paddingTop: '2px' }}
           >
             {accountInitial(accountName)}
           </button>
@@ -61,7 +61,7 @@ export function TopChrome() {
               <div onClick={() => setUserMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>
               <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: '236px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '14px', boxShadow: 'var(--shadow)', padding: '6px', zIndex: 50 }} className="animate-sg-pop">
                 <div style={{ padding: '10px 11px 11px', borderBottom: '1px solid var(--border)', marginBottom: '5px' }}>
-                  <div style={{ fontSize: '14.5px', fontWeight: 500, color: 'var(--text)' }}>{accountName}</div>
+                  <div style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--text)' }}>{accountName}</div>
                   {accountEmail && (
                     <div className="sg-mono" style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: '2px' }}>{accountEmail}</div>
                   )}

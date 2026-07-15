@@ -6,7 +6,7 @@ import { INTENSITIES, PROVIDERS } from '@/lib/dummy-data';
 import { useWorkspace } from '@/components/workspace-provider';
 
 export function Composer() {
-  const { mode, intensity, modelId, view, activeChatId, openMenu, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
+  const { mode, intensity, modelId, view, activeChatId, openMenu, setOpenMenu, setMode, setIntensity, setModelId, composerDraft, setActiveChatId, setActiveReportId, setActiveRunId, setView, setComposerDraft, setSettingsOpen, setActiveSettingsTab } = useAppStore();
   const { createAndSendChat, sendChat, startResearch, activeCredential, availableModels, modelsLoading, setDefaultModel, clearError, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
@@ -85,10 +85,11 @@ export function Composer() {
       } else {
         const strength = intensity === 'instant' ? 1 : intensity === 'medium' ? 2 : 3;
         const run = await startResearch(content, strength, selectedModel?.id);
-        if (run.report_id) {
-          setActiveReportId(run.report_id);
-          setView('report');
-        }
+        // Open the live Research Run view; the report is linked but not yet
+        // written, so the run view drives progress and links out on completion.
+        setActiveRunId(run.id);
+        if (run.report_id) setActiveReportId(run.report_id);
+        setView('run');
       }
       setQuery('');
       setComposerDraft('');
@@ -117,7 +118,7 @@ export function Composer() {
       <form
         data-tour="composer"
         onSubmit={handleSubmit}
-        style={{ maxWidth: '720px', margin: '0 auto', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '20px', boxShadow: 'var(--shadow)', position: 'relative' }}
+        style={{ maxWidth: '900px', margin: '0 auto', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '20px', boxShadow: 'var(--shadow)', position: 'relative' }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', padding: '14px 14px 6px' }}>
           <textarea
@@ -148,12 +149,12 @@ export function Composer() {
                 <div className="sg-mono" style={{ fontSize: '9.5px', letterSpacing: '.13em', textTransform: 'uppercase', color: 'var(--text-faint)', padding: '3px 6px 7px' }}>Mode</div>
                 <button type="button" onClick={() => { setMode('chat'); setOpenMenu(null); }} style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: mode === 'chat' ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ flexShrink: 0 }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Chat</span>
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Chat</span>
                   {mode === 'chat' && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
                 </button>
                 <button type="button" onClick={selectResearchMode} style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: mode === 'research' ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ flexShrink: 0 }}><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 500 }}>Research</span>
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: '14px', fontWeight: 600 }}>Research</span>
                   {mode === 'research' && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4"><polyline points="20 6 9 17 4 12" /></svg>}
                 </button>
               </div>
@@ -180,7 +181,7 @@ export function Composer() {
                     onClick={() => { setIntensity(it.id as Intensity); setOpenMenu(null); }}
                     style={{ display: 'flex', alignItems: 'center', gap: '11px', width: '100%', padding: '9px 10px', borderRadius: '10px', cursor: 'pointer', border: '1px solid transparent', backgroundColor: intensity === it.id ? 'var(--accent-soft)' : 'transparent', color: 'var(--text)' }}
                   >
-                    <span style={{ flex: 1, textAlign: 'left', fontSize: '14.5px', fontWeight: 500 }}>{it.name}</span>
+                    <span style={{ flex: 1, textAlign: 'left', fontSize: '14.5px', fontWeight: 600 }}>{it.name}</span>
                     {intensity === it.id && <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2.4" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12" /></svg>}
                   </button>
                 ))}
@@ -249,7 +250,7 @@ export function Composer() {
         </div>
         {openMenu && <div onClick={() => setOpenMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 40 }}></div>}
       </form>
-      <div className="sg-mono" style={{ maxWidth: '720px', margin: '9px auto 0', fontSize: '10.5px', color: 'var(--text-faint)', textAlign: 'center' }}>
+      <div className="sg-mono" style={{ maxWidth: '900px', margin: '9px auto 0', fontSize: '10.5px', color: 'var(--text-faint)', textAlign: 'center' }}>
         {!activeCredential ? 'Add a provider key in Settings to send messages.' : hintLine}
       </div>
 
@@ -264,7 +265,7 @@ export function Composer() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: '400px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '18px', boxShadow: 'var(--shadow)', padding: '22px' }}
           >
-            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 600, color: 'var(--text)' }}>Start a new chat?</div>
+            <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>Start a new chat?</div>
             <div style={{ marginTop: '9px', fontSize: '14px', lineHeight: 1.5, color: 'var(--text-dim)' }}>Research requires a new chat.</div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '9px', marginTop: '22px' }}>
               <button
