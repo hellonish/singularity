@@ -9,6 +9,7 @@ from typing import Callable
 from uuid import uuid4
 
 from engine.chat.effort import ChatEffort, get_chat_effort_profile
+from engine.chat.capability_router import sandbox_enabled, trusted_function_enabled
 from engine.cli.api_client import SingularityAPIClient, SingularityAPIError
 from engine.cli.banner import COMMANDS, LOGO
 from engine.cli.models import TerminalSession
@@ -459,7 +460,10 @@ class EngineREPL:
         self.ui.info(f"{display_name} key validated and saved in the global configuration.")
 
     def _status(self) -> None:
-        modal = "enabled" if os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1" else "disabled"
+        modal_master = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
+        modal = "enabled" if modal_master else "disabled"
+        trusted_modal = "enabled" if trusted_function_enabled(modal_master) else "disabled"
+        sandbox_modal = "enabled" if sandbox_enabled(modal_master) else "disabled"
         langsmith = "enabled" if os.getenv("LANGSMITH_TRACING", "false").lower() in {"1", "true", "yes"} else "disabled"
         self.ui.table(title="Session status", rows=[
             ("Agent", self.session.agent_name),
@@ -471,6 +475,8 @@ class EngineREPL:
             ("API URL", self._api_client.base_url if self._use_hosted_api else "n/a"),
             ("History turns", str(len(self.session.history))),
             ("Modal tools", "server-managed" if self._use_hosted_api else modal),
+            ("Modal trusted Function", "server-managed" if self._use_hosted_api else trusted_modal),
+            ("Modal Sandbox", "server-managed" if self._use_hosted_api else sandbox_modal),
             ("LangSmith", langsmith),
             ("Max output tokens", str(self.session.max_output_tokens)),
         ])

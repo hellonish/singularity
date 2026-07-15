@@ -37,6 +37,7 @@ class _BaseProvider:
         self._turns = list(turns or [])
         self._deltas = list(deltas)
         self.tool_turn_messages: list[list[dict]] = []
+        self.tool_schemas: list[list[dict]] = []
         self.chat_messages: list[list[dict]] = []
 
     async def retrieve_model(self, *, api_key, model_id):
@@ -49,6 +50,7 @@ class _BaseProvider:
 
     async def stream_with_tools(self, *, api_key, config, messages, tools, end_user_id=None):
         self.tool_turn_messages.append(list(messages))
+        self.tool_schemas.append(list(tools))
         turn = self._turns.pop(0) if self._turns else [LLMStreamEvent(kind="delta", delta="Fallback answer.")]
         for event in turn:
             yield event
@@ -105,11 +107,175 @@ def test_conversational_turn_is_one_model_call_with_no_tool_machinery() -> None:
     assert "You have no tools available" in system
 
 
-def test_explicit_tool_request_fails_closed_when_tools_are_disabled() -> None:
+def test_non_sandbox_tool_request_still_fails_closed_when_tools_disabled() -> None:
+    # A non-sandbox explicit tool request (e.g. live web lookup) with all tools
+    # off has no code to hand back, so it still fails closed rather than degrade.
     loop_agent = UnifiedChatAgentLoop(provider=_BaseProvider())
 
     with pytest.raises(ToolEvidenceUnavailable):
-        asyncio.run(_collect(loop_agent, "Run code to sort this list", modal_enabled=False))
+        asyncio.run(_collect(
+            loop_agent, "Look up the PubMed article on aspirin", modal_enabled=False
+        ))
+
+
+def test_required_sandbox_with_tools_disabled_degrades_gracefully() -> None:
+    # The Sandbox cannot run with tools off. Rather than a hard error in chat,
+    # the model answers directly (returns the code and guidance to run it).
+    provider = _BaseProvider(deltas=("Could not run it; here is the code…",))
+    loop_agent = UnifiedChatAgentLoop(provider=provider)
+
+    events = asyncio.run(_collect(loop_agent, "Run code to sort this list", modal_enabled=False))
+
+    assert events[-1].type == "completed"
+    assert events[-1].content == "Could not run it; here is the code…"
+    # The degraded turn is text-only and seeded with the degradation note.
+    system_notes = [
+        message["content"]
+        for message in provider.chat_messages[0]
+        if message.get("role") == "system"
+    ]
+    assert any("could not run this request" in note for note in system_notes)
+
+
+def test_repository_request_preloads_only_relevant_sandbox_schemas() -> None:
+    provider = _BaseProvider(turns=[
+        [LLMStreamEvent(kind="tool_calls", tool_calls=(
+            _call(
+                "repository_inspection__repository_inspection",
+                "inspect repository",
+                {"repository_url": "https://github.com/openai/openai-python", "operations": ["files"]},
+            ),
+        ))],
+        [LLMStreamEvent(kind="delta", delta="Repository-grounded answer.")],
+    ])
+    executor = _RecordingExecutor()
+    loop_agent = UnifiedChatAgentLoop(provider=provider, executor_factory=lambda: executor)
+
+    events = asyncio.run(_collect(
+        loop_agent,
+        "Inspect https://github.com/openai/openai-python",
+        modal_enabled=True,
+        effort=ChatEffort.MEDIUM,
+    ))
+
+    names = {schema["function"]["name"] for schema in provider.tool_schemas[0]}
+    assert "repository_inspection__repository_inspection" in names
+    assert "sandbox_workspace__sandbox_create" in names
+    assert "medical_research__pubmed" not in names
+    assert "load_skill" in names
+    assert executor.invocations[0].tool_name == "repository_inspection"
+    assert events[-1].content == "Repository-grounded answer."
+    system = provider.tool_turn_messages[0][0]["content"]
+    assert "Repository-specific claims require evidence from a Modal Sandbox" in system
+
+
+def test_required_evidence_degrades_gracefully_after_sandbox_error() -> None:
+    # The Sandbox was attempted and failed (no usable evidence). The model's
+    # unsupported answer is discarded and the turn degrades: a text-only reply
+    # that explains it could not run, returns the code, and points to resources.
+    provider = _BaseProvider(
+        turns=[
+            [LLMStreamEvent(kind="tool_calls", tool_calls=(
+                _call(
+                    "repository_inspection__repository_inspection",
+                    "inspect repository",
+                    {"repository_url": "https://github.com/openai/openai-python", "operations": ["files"]},
+                ),
+            ))],
+            [LLMStreamEvent(kind="delta", delta="Unsupported answer.")],
+        ],
+        deltas=("I could not inspect it; here is how to run it yourself…",),
+    )
+    executor = _RecordingExecutor(error="sandbox unavailable")
+    loop_agent = UnifiedChatAgentLoop(provider=provider, executor_factory=lambda: executor)
+
+    events = asyncio.run(_collect(
+        loop_agent,
+        "Inspect https://github.com/openai/openai-python",
+        modal_enabled=True,
+        effort=ChatEffort.MEDIUM,
+    ))
+
+    assert events[-1].type == "completed"
+    assert events[-1].content == "I could not inspect it; here is how to run it yourself…"
+    # The unsupported model answer never reached the user.
+    assert all(event.content != "Unsupported answer." for event in events if event.type == "completed")
+    # The failed workspace was closed before degrading.
+    assert executor.closed is True
+    system_notes = [
+        message["content"]
+        for message in provider.chat_messages[0]
+        if message.get("role") == "system"
+    ]
+    assert any("could not run this request" in note for note in system_notes)
+
+
+class _SandboxExecutor:
+    """Executor whose sandbox actually runs the command (executed=True)."""
+
+    def __init__(self, *, error: str | None, content: str = "{}") -> None:
+        self._error = error
+        self._content = content
+        self.invocations: list = []
+        self.closed = False
+
+    async def execute(self, invocation):
+        self.invocations.append(invocation)
+        return ChatToolResult(
+            content=self._content,
+            sources=[{
+                "title": "Validated isolated code execution",
+                "url": "",
+                "source_type": "sandbox_execution",
+                "credibility_base": 1.0,
+            }],
+            credibility_base=1.0 if self._error is None else 0.0,
+            error=self._error,
+            executed=True,
+        )
+
+    async def aclose(self):
+        self.closed = True
+
+
+def test_code_level_sandbox_error_is_evidence_and_turn_answers() -> None:
+    # The Sandbox ran the code and it exited non-zero (e.g. ModuleNotFoundError).
+    # That is verifiable evidence: the model must be allowed to react and answer
+    # instead of the whole turn failing closed.
+    provider = _BaseProvider(turns=[
+        [LLMStreamEvent(kind="tool_calls", tool_calls=(
+            _call(
+                "code_execution__code_execution",
+                "run the script",
+                {"files": {"main.py": "import numpy"}, "command": ["python", "main.py"]},
+            ),
+        ))],
+        [LLMStreamEvent(
+            kind="delta",
+            delta="The script failed with ModuleNotFoundError: No module named 'numpy'.",
+        )],
+    ])
+    executor = _SandboxExecutor(
+        error="code execution exited with code 1",
+        content='{"exit_code": 1, "stderr": "ModuleNotFoundError: No module named \'numpy\'"}',
+    )
+    loop_agent = UnifiedChatAgentLoop(provider=provider, executor_factory=lambda: executor)
+
+    events = asyncio.run(_collect(
+        loop_agent,
+        "Run this python code and show the output",
+        modal_enabled=True,
+        effort=ChatEffort.MEDIUM,
+    ))
+
+    assert executor.invocations[0].tool_name == "code_execution"
+    assert events[-1].content == (
+        "The script failed with ModuleNotFoundError: No module named 'numpy'."
+    )
+    error_reply = next(
+        message for message in provider.tool_turn_messages[1] if message.get("role") == "tool"
+    )
+    assert "ModuleNotFoundError" in error_reply["content"]
 
 
 def test_time_sensitive_turn_degrades_with_disclosure_when_tools_are_disabled() -> None:
@@ -234,6 +400,10 @@ def test_load_skill_returns_instructions_without_spending_tool_actions() -> None
     second_turn = provider.tool_turn_messages[1]
     reply = next(m for m in second_turn if m.get("role") == "tool")
     assert reply["content"].startswith("Skill medical_research:")
+    first_names = {schema["function"]["name"] for schema in provider.tool_schemas[0]}
+    second_names = {schema["function"]["name"] for schema in provider.tool_schemas[1]}
+    assert "medical_research__pubmed" not in first_names
+    assert "medical_research__pubmed" in second_names
 
 
 def test_action_budget_exhaustion_is_reported_to_the_model() -> None:

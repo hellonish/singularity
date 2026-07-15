@@ -43,7 +43,7 @@ async def execute_chat_tool(task: dict) -> dict:
     # chance with back-off before the call is spent. The graph's four-call
     # budget still governs how many *distinct* logical attempts a node makes;
     # this retry re-runs the same query rather than consuming a new call.
-    retries = 1 if invocation.run_id.startswith("research-node:") else 2
+    retries = 1 if invocation.run_id.startswith(("research-node:", "research-run:")) else 2
     result = await tool.call_with_retry(
         invocation.query,
         max_retries=retries,

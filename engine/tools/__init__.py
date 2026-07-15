@@ -28,7 +28,11 @@ from .web_fetch import WebFetchTool
 from .calculator import CalculatorTool
 from .current_time import CurrentTimeTool
 from .browser_render import BrowserRenderTool
-from .sandbox_tools import CodeExecutionTool, DatasetAnalysisTool, RepositoryInspectionTool
+from .sandbox_tools import (
+    CodeExecutionTool, DatasetAnalysisTool, RepositoryInspectionTool,
+    SandboxCloseTool, SandboxCreateTool, SandboxExecTool, SandboxListTool,
+    SandboxReadTool, SandboxStatusTool, SandboxWriteTool,
+)
 from .production_retrieval import ProductionRetrievalTool
 from .arxiv_api import ArxivTool
 from .pubmed_api import PubMedTool
@@ -54,6 +58,13 @@ for _tool_class in (
     RepositoryInspectionTool,
     DatasetAnalysisTool,
     CodeExecutionTool,
+    SandboxCreateTool,
+    SandboxExecTool,
+    SandboxListTool,
+    SandboxReadTool,
+    SandboxWriteTool,
+    SandboxStatusTool,
+    SandboxCloseTool,
     ProductionRetrievalTool,
     ArxivTool,
     PubMedTool,
@@ -81,6 +92,13 @@ __all__ = [
     "RepositoryInspectionTool",
     "DatasetAnalysisTool",
     "CodeExecutionTool",
+    "SandboxCreateTool",
+    "SandboxExecTool",
+    "SandboxListTool",
+    "SandboxReadTool",
+    "SandboxWriteTool",
+    "SandboxStatusTool",
+    "SandboxCloseTool",
     "ProductionRetrievalTool",
     "ArxivTool",
     "PubMedTool",

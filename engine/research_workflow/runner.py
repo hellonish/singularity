@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from inspect import isawaitable
@@ -16,8 +17,9 @@ from pathlib import Path
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from engine.chat.effort import reasoning_effort_for_strength
-from engine.chat.modal_tools import ModalToolExecutor
+from engine.chat.effort import ChatEffort, reasoning_effort_for_strength
+from engine.chat.capability_router import sandbox_enabled, trusted_function_enabled
+from engine.chat.execution import RoutedChatToolExecutor
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import ProviderError
 from engine.llm.providers import LLMProvider, provider_for
@@ -35,6 +37,7 @@ from .agents import (
 )
 from .markdown import to_markdown
 from .resolver import BoundedResearchResolver
+from .preparation import validated_execution_requirements
 from .workflow import ResearchWorkflow
 
 
@@ -113,7 +116,7 @@ async def run_research(
     provider_name: str = "groq",
     model_id: str,
     provider: LLMProvider | None = None,
-    executor: ModalToolExecutor | None = None,
+    executor: Any | None = None,
     on_progress: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
 ) -> str:
     """Run real provider-and-Modal research and return terminal-ready Markdown."""
@@ -139,6 +142,16 @@ async def run_research(
                 await result
 
     caps = RunCaps.for_strength(strength)
+    execution_requirements = validated_execution_requirements(query)
+    modal_master = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
+    if executor is None and not trusted_function_enabled(modal_master):
+        raise ValueError("Local research requires the trusted Modal Function tier")
+    if (
+        executor is None
+        and execution_requirements
+        and not sandbox_enabled(modal_master)
+    ):
+        raise ValueError("This research request requires Modal Sandbox, but it is disabled")
     record({
         "phase": "run",
         "status": "started",
@@ -160,12 +173,15 @@ async def run_research(
     )
     answerer = LLMAnswerer(model, caps)
     owns_executor = executor is None
-    tool_executor = executor or ModalToolExecutor()
+    tool_executor = executor or RoutedChatToolExecutor()
     resolver = BoundedResearchResolver(
         tool_executor,
         answerer,
         max_fetches=caps.max_fetches,
         progress_reporter=report_progress,
+        execution_requirements=[item.model_dump(mode="json") for item in execution_requirements],
+        run_id=run_id,
+        effort=ChatEffort.MEDIUM if strength <= 1 else ChatEffort.HIGH if strength == 2 else ChatEffort.ULTRA,
     )
 
     async def persistable_resolver(node, max_tool_calls: int) -> dict[str, Any]:

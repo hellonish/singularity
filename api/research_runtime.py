@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,8 +21,11 @@ from api.services.report_context_errors import ReportContextError
 from api.services.reports import create_version
 from api.services.research import RunEventPublisher
 from api.storage.factory import get_object_store
-from engine.chat.effort import reasoning_effort_for_strength
-from engine.chat.modal_tools import ModalToolExecutor
+from engine.chat.effort import ChatEffort, reasoning_effort_for_strength
+from engine.chat.capability_router import sandbox_enabled, trusted_function_enabled
+from engine.chat.execution import RoutedChatToolExecutor
+from engine.chat.modal_sandbox import ModalSandboxExecutor
+from engine.chat.sandbox_workspace import SandboxWorkspaceManager
 from engine.entity_resolution import EntityScope, lightweight_chat_scope
 from engine.llm.config import LLMRequestConfig
 from engine.llm.groq import ProviderError
@@ -41,7 +45,8 @@ from engine.research_workflow.agents import (
 from engine.research_workflow.markdown import to_markdown
 from engine.research_workflow.document import ResearchDocument
 from engine.research_workflow.resolver import BoundedResearchResolver
-from engine.research_workflow.runtime import ResearchCancelled
+from engine.research_workflow.preparation import ExecutionRequirement, validated_execution_requirements
+from engine.research_workflow.runtime import ResearchCancelled, ResearchInfrastructureError
 from engine.research_workflow.workflow import ResearchWorkflow
 from vector_store.client import VectorStoreClient
 from vector_store.models import RetrievalScope
@@ -189,7 +194,7 @@ def _as_log_payload(value: Any) -> Any:
 class LoggedToolExecutor:
     """Log trusted tool calls without changing the engine's tool contract."""
 
-    def __init__(self, executor: ModalToolExecutor, step_logger: StepLogger) -> None:
+    def __init__(self, executor: Any, step_logger: StepLogger) -> None:
         self._executor = executor
         self._step_logger = step_logger
 
@@ -216,6 +221,15 @@ class LoggedToolExecutor:
     async def aclose(self) -> None:
         await self._executor.aclose()
 
+    def sandbox_workspace_states(self) -> list[dict[str, Any]]:
+        getter = getattr(self._executor, "sandbox_workspace_states", None)
+        return list(getter() if getter is not None else [])
+
+    async def restore_sandbox_workspace_states(self, states: list[dict[str, Any]]) -> None:
+        restore = getattr(self._executor, "restore_sandbox_workspace_states", None)
+        if restore is not None:
+            await restore(states)
+
 
 async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> None:
     """Run the same LangGraph workflow used by CLI, with real BYOK and Modal tools."""
@@ -228,7 +242,15 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
     step_log.step(
         "run",
         phase="start",
-        inputs={"query": run.query, "run_data": run.run_data},
+        inputs={
+            "query": run.query,
+            "run_data": {
+                key: value
+                for key, value in run.run_data.items()
+                if key != "sandbox_workspaces"
+            },
+            "restorable_sandbox_count": len(run.run_data.get("sandbox_workspaces") or []),
+        },
     )
     credential_id = str(run.run_data.get("provider_credential_id") or "")
     if not credential_id:
@@ -254,6 +276,29 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
     )
     search_variants = 1 if test_mode else 3
     research_brief = dict(run.run_data.get("research_brief") or {})
+    execution_requirements = [
+        ExecutionRequirement.model_validate(item).model_dump(mode="json")
+        for item in list(research_brief.get("execution_requirements") or [])
+    ]
+    if not execution_requirements:
+        execution_requirements = [
+            item.model_dump(mode="json")
+            for item in validated_execution_requirements(
+                run.query, list(research_brief.get("plan_points") or [])
+            )
+        ]
+        if execution_requirements:
+            research_brief = {
+                **research_brief,
+                "execution_requirements": execution_requirements,
+            }
+            run.run_data = {**run.run_data, "research_brief": research_brief}
+            await session.commit()
+    modal_master = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
+    if not trusted_function_enabled(modal_master):
+        raise ValueError("This research run requires the trusted Modal Function tier, but it is disabled")
+    if any(item.get("required", True) for item in execution_requirements) and not sandbox_enabled(modal_master):
+        raise ValueError("This research run requires Modal Sandbox, but Sandbox execution is disabled")
     entity_scope = EntityScope.model_validate(research_brief.get("entity_scope") or {})
     if not research_brief:
         # Compatibility callers may still create a run directly. They cannot
@@ -291,7 +336,22 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         )
         await event_publisher.append("research.progress", event)
 
-    tool_executor = LoggedToolExecutor(ModalToolExecutor(), step_log)
+    async def persist_workspace_states(states: list[dict[str, Any]]) -> None:
+        async with session_lock:
+            await session.refresh(run)
+            run.run_data = {**run.run_data, "sandbox_workspaces": states}
+            await session.commit()
+
+    workspace_manager = SandboxWorkspaceManager(state_reporter=persist_workspace_states)
+    tool_executor = LoggedToolExecutor(
+        RoutedChatToolExecutor(
+            sandbox=ModalSandboxExecutor(workspace_manager=workspace_manager)
+        ),
+        step_log,
+    )
+    await tool_executor.restore_sandbox_workspace_states(
+        list(run.run_data.get("sandbox_workspaces") or [])
+    )
     bounded_resolver = BoundedResearchResolver(
         tool_executor,
         answerer,
@@ -299,6 +359,15 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         max_search_variants=search_variants,
         progress_reporter=publish_progress,
         entity_scope=entity_scope,
+        execution_requirements=execution_requirements,
+        run_id=run.id,
+        effort=(
+            ChatEffort.MEDIUM
+            if int(run.run_data.get("strength", 2)) <= 1
+            else ChatEffort.HIGH
+            if int(run.run_data.get("strength", 2)) == 2
+            else ChatEffort.ULTRA
+        ),
     )
 
     async def resolver(node, max_tool_calls: int) -> dict[str, Any]:
@@ -311,9 +380,15 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         )
         async with session_lock:
             await session.refresh(run)
-            if run.status == "cancelled":
+            if run.status == "cancelled" or run.run_data.get("cancellation_requested"):
                 raise ResearchCancelled("research run was cancelled")
         result = await bounded_resolver(node, max_tool_calls)
+        workspace_states = tool_executor.sandbox_workspace_states()
+        if workspace_states:
+            async with session_lock:
+                await session.refresh(run)
+                run.run_data = {**run.run_data, "sandbox_workspaces": workspace_states}
+                await session.commit()
         persistence = persist_evidence(
             vector_store=vector_store,
             scope=scope,
@@ -361,6 +436,7 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         )
         return result
 
+    cleanup_error: Exception | None = None
     try:
         async with checkpoint_context(settings.database_url) as checkpointer:
             workflow = ResearchWorkflow(
@@ -410,7 +486,31 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
         # The shared executor owns the Modal gRPC client. Closing it on both
         # success and failure prevents the worker from leaking input-plane
         # channels after a timed-out tool call.
-        await tool_executor.aclose()
+        try:
+            await tool_executor.aclose()
+        except Exception as exc:
+            logger.warning("research tool cleanup failed", exc_info=True)
+            # Trusted Function client shutdown is best-effort and must not
+            # invalidate a completed report. A remaining private Sandbox state,
+            # however, means termination failed and its cleanup handle must be
+            # retained instead of marking the run complete.
+            if tool_executor.sandbox_workspace_states():
+                cleanup_error = exc
+        if execution_requirements and cleanup_error is None:
+            try:
+                await publish_progress({
+                    "kind": "sandbox",
+                    "phase": "researching",
+                    "status": "sandbox_closed",
+                    "message": "Task-scoped Sandbox workspace closed",
+                })
+            except Exception:
+                logger.warning("research Sandbox close progress could not be persisted", exc_info=True)
+
+    if cleanup_error is not None:
+        raise ResearchInfrastructureError(
+            "Research completed but its task-scoped Sandbox could not be terminated safely"
+        ) from cleanup_error
 
     report = await session.get(Report, run.report_id)
     if report is None:
@@ -449,8 +549,11 @@ async def execute_research_run(*, run: ResearchRun, session: AsyncSession) -> No
     report.status = "ready"
     run.status = "completed"
     run.finished_at = datetime.now(timezone.utc)
+    retained_run_data = {
+        key: value for key, value in run.run_data.items() if key != "sandbox_workspaces"
+    }
     run.run_data = {
-        **run.run_data,
+        **retained_run_data,
         "graph_events": state.get("events", []),
         "qa_reviews": state.get("qa_reviews", []),
         "checkpoint_started": True,

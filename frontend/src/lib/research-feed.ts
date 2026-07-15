@@ -113,6 +113,47 @@ export function reduceProgress(prev: RunProgress, payload: ResearchProgressPaylo
       }
       break;
     }
+    case 'sandbox': {
+      const status = String(payload.status || '');
+      const tool = String(payload.tool_name || 'sandbox');
+      const nodeId = payload.node_id ? String(payload.node_id) : undefined;
+      if (status === 'sandbox_created') next.telemetry.sandboxes += 1;
+      const terminal = ['sandbox_ready', 'sandbox_command_completed', 'sandbox_failed', 'sandbox_closed'].includes(status);
+      const failed = status === 'sandbox_failed';
+      const idx = [...prev.feed].reverse().findIndex((item) =>
+        item.kind === 'sandbox' && item.running && item.tool === tool && item.nodeId === nodeId,
+      );
+      if (idx >= 0 && terminal) {
+        const realIdx = prev.feed.length - 1 - idx;
+        const existing = prev.feed[realIdx] as Extract<RunFeedItem, { kind: 'sandbox' }>;
+        const updated: RunFeedItem = {
+          ...existing, status, running: false, failed,
+          elapsedSeconds: typeof payload.elapsed_seconds === 'number' ? payload.elapsed_seconds : existing.elapsedSeconds,
+          exitCode: typeof payload.exit_code === 'number' ? payload.exit_code : existing.exitCode,
+          truncated: typeof payload.truncated === 'boolean' ? payload.truncated : existing.truncated,
+        };
+        next.feed = prev.feed.map((item, index) => index === realIdx ? updated : item);
+      } else if (['sandbox_created', 'sandbox_command_started'].includes(status)) {
+        push({
+          id: nextId(), kind: 'sandbox', tool, nodeId, status,
+          profile: typeof payload.profile === 'string' ? payload.profile : undefined,
+          elapsedSeconds: typeof payload.elapsed_seconds === 'number' ? payload.elapsed_seconds : undefined,
+          exitCode: typeof payload.exit_code === 'number' ? payload.exit_code : undefined,
+          truncated: typeof payload.truncated === 'boolean' ? payload.truncated : undefined,
+          running: true, failed: false,
+        });
+      } else if (terminal) {
+        push({
+          id: nextId(), kind: 'sandbox', tool, nodeId, status,
+          profile: typeof payload.profile === 'string' ? payload.profile : undefined,
+          elapsedSeconds: typeof payload.elapsed_seconds === 'number' ? payload.elapsed_seconds : undefined,
+          exitCode: typeof payload.exit_code === 'number' ? payload.exit_code : undefined,
+          truncated: typeof payload.truncated === 'boolean' ? payload.truncated : undefined,
+          running: false, failed,
+        });
+      }
+      break;
+    }
     case 'phase':
     default: {
       // Thought lines: only the human-readable "started" transitions read well

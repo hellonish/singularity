@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ from api.logging_config import configure_logging
 from api.middleware.rate_limit import ChatReportRateLimitMiddleware
 from api.routers import auth, chats, llm, reports, research, storage, users, walkthroughs
 from api.schemas import HealthRead
+from engine.chat.capability_router import sandbox_enabled, trusted_function_enabled
 
 
 @asynccontextmanager
@@ -51,7 +53,15 @@ if settings.cors_allow_origins:
 
 @app.get("/health", response_model=HealthRead, tags=["system"])
 async def health() -> HealthRead:
-    return HealthRead(status="ok", database=settings.database_url.split(":", 1)[0], version=__version__)
+    master = os.getenv("SINGULARITY_MODAL_ENABLED", "0") == "1"
+    return HealthRead(
+        status="ok",
+        database=settings.database_url.split(":", 1)[0],
+        version=__version__,
+        modal_enabled=master,
+        modal_trusted_function_enabled=trusted_function_enabled(master),
+        modal_sandbox_enabled=sandbox_enabled(master),
+    )
 
 
 app.include_router(auth.router)

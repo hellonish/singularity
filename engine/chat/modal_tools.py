@@ -26,6 +26,12 @@ class ChatToolResult:
     sources: list[dict[str, Any]]
     credibility_base: float
     error: str | None
+    # True only when a Sandbox actually ran the requested command and captured
+    # its output — including non-zero exits from the user's own program. Left
+    # False for web tools and for Sandbox failures that never reached execution
+    # (provisioning, clone, timeout), so a code-level error still counts as
+    # verified evidence the model may react to, while infra failures do not.
+    executed: bool = False
 
 
 class ChatToolExecutor(Protocol):

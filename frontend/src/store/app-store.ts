@@ -151,7 +151,15 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'singularity-storage',
-      partialize: (state) => ({ theme: state.theme, accent: state.accent, settingsOpen: state.settingsOpen, activeSettingsTab: state.activeSettingsTab, researchApprovalMode: state.researchApprovalMode, activePreparationId: state.activePreparationId }),
+      partialize: (state) => ({
+        theme: state.theme,
+        accent: state.accent,
+        settingsOpen: state.settingsOpen,
+        activeSettingsTab: state.activeSettingsTab,
+        researchApprovalMode: state.researchApprovalMode,
+        activePreparationId: state.activePreparationId,
+        activeRunId: state.activeRunId,
+      }),
     }
   )
 );

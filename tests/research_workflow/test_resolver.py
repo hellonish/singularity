@@ -158,6 +158,149 @@ def test_resolver_rejects_namesake_before_fetch_and_persistence():
     assert {item["url"] for item in result["evidence"]} == {"https://right.example"}
 
 
+def test_auto_mode_recovers_from_missing_entity_anchor_mid_research():
+    class AutoEntityExecutor:
+        def __init__(self):
+            self.urls = []
+
+        async def execute(self, invocation):
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(content="results", sources=[
+                    {"title": "Acme quarterly results", "url": "https://acme.example/results", "snippet": "Acme revenue grew"},
+                    {"title": "Other company results", "url": "https://other.example", "snippet": "Unrelated revenue"},
+                ])
+            self.urls.append(invocation.arguments["url"])
+            return SimpleNamespace(
+                content="Acme official quarterly filing",
+                sources=[{"title": "Acme filing", "url": invocation.arguments["url"], "snippet": "Acme filing"}],
+            )
+
+    executor = AutoEntityExecutor()
+    events = []
+
+    async def answerer(node, evidence):
+        return {"answer": "answer", "answered": True}
+
+    scope = EntityScope(
+        status=EntityResolutionStatus.RESOLVED,
+        entities=[EntityRef(
+            entity_id="acme-tech", mention="Acme", canonical_name="Acme",
+            entity_type="company", anchors=["technology"], confidence=0.7,
+        )],
+        resolution_mode="auto",
+    )
+    result = asyncio.run(BoundedResearchResolver(
+        executor, answerer, max_fetches=2, entity_scope=scope, progress_reporter=events.append,
+    )(ResearchNode(node_id="n1", question="latest results", section_id="s1", level=0), 4))
+
+    assert executor.urls == ["https://acme.example/results"]
+    assert result["answered"] is True
+    assert all(item["entity_match"].get("auto_resolved") for item in result["evidence"])
+    assert any(event["status"] == "source_entity_auto_resolved" for event in events)
+
+
+def test_repository_requirement_runs_sandbox_before_web_and_keeps_commit_provenance():
+    class RoutedExecutor:
+        def __init__(self):
+            self.invocations = []
+
+        async def execute(self, invocation):
+            self.invocations.append(invocation)
+            if invocation.tool_name == "repository_inspection":
+                return SimpleNamespace(
+                    content="pyproject.toml\nsrc/client.py",
+                    error=None,
+                    sources=[{
+                        "title": "openai-python",
+                        "url": "https://github.com/openai/openai-python/tree/abc123",
+                        "snippet": "pyproject.toml src/client.py",
+                        "source_type": "repository",
+                        "metadata": {"commit_sha": "abc123"},
+                    }],
+                )
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(content="", error=None, sources=[])
+            raise AssertionError(invocation.tool_name)
+
+    executor = RoutedExecutor()
+    events = []
+
+    async def answerer(node, evidence):
+        return {"answer": "answer", "answered": True}
+
+    requirement = {
+        "kind": "repository", "required": True,
+        "resource_reference": "https://github.com/openai/openai-python",
+        "profile": "repository_build", "actions": ["clone", "inspect_files", "run_checks"],
+    }
+    resolver = BoundedResearchResolver(
+        executor, answerer, execution_requirements=[requirement], run_id="run_123",
+        max_fetches=0, max_search_variants=1, progress_reporter=events.append,
+    )
+
+    async def scenario():
+        first = await resolver(
+            ResearchNode(node_id="n1", question="How is the client structured?", section_id="s1", level=0),
+            4,
+        )
+        await resolver(
+            ResearchNode(node_id="n2", question="Which checks pass?", section_id="s1", level=0),
+            4,
+        )
+        return first
+
+    result = asyncio.run(scenario())
+
+    assert [item.tool_name for item in executor.invocations][:2] == ["repository_inspection", "web_search"]
+    repository_calls = [item for item in executor.invocations if item.tool_name == "repository_inspection"]
+    assert len(repository_calls) == 1
+    assert repository_calls[0].arguments["operations"] == ["files", "git_summary", "tests"]
+    assert executor.invocations[0].run_id == "research-run:run_123"
+    repository_evidence = next(item for item in result["evidence"] if item["source_type"] == "repository")
+    assert repository_evidence["metadata"]["commit_sha"] == "abc123"
+    assert any(event["status"] == "sandbox_created" for event in events)
+    assert any(event["status"] == "sandbox_command_completed" for event in events)
+
+
+def test_inline_code_requirement_executes_in_sandbox_before_web() -> None:
+    class CodeExecutor:
+        def __init__(self):
+            self.invocations = []
+
+        async def execute(self, invocation):
+            self.invocations.append(invocation)
+            if invocation.tool_name == "code_execution":
+                content = '{"exit_code":0,"stdout":"42\\n","stderr":"","elapsed_seconds":0.1,"truncated":false}'
+                return SimpleNamespace(content=content, error=None, sources=[{
+                    "title": "Validated isolated code execution", "url": "",
+                    "snippet": content, "source_type": "sandbox_execution",
+                }])
+            if invocation.tool_name == "web_search":
+                return SimpleNamespace(content="", error=None, sources=[])
+            raise AssertionError(invocation.tool_name)
+
+    executor = CodeExecutor()
+
+    async def answerer(node, evidence):
+        assert any(item["source_type"] == "sandbox_execution" for item in evidence)
+        return {"answer": "The program printed 42.", "answered": True}
+
+    requirement = {
+        "kind": "code", "required": True, "profile": "code",
+        "resource_reference": "inline://sha256/" + "a" * 64,
+        "validated_arguments": {
+            "files": {"main.py": "print(42)"}, "command": ["python", "main.py"],
+        },
+    }
+    result = asyncio.run(BoundedResearchResolver(
+        executor, answerer, execution_requirements=[requirement],
+        max_fetches=0, max_search_variants=1,
+    )(ResearchNode(node_id="n1", question="What does it print?", section_id="s1", level=0), 4))
+
+    assert [item.tool_name for item in executor.invocations] == ["code_execution", "web_search"]
+    assert result["answered"] is True
+
+
 def test_resolver_rejects_out_of_range_budget():
     async def answerer(node, evidence):
         return {"answer": "answer"}

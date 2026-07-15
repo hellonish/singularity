@@ -28,9 +28,7 @@ services:
       retries: 10
 
   qdrant:
-    # v1.14.2 was never published to Docker Hub; keep the compatible 1.14
-    # patch release so a fresh local stack can actually start.
-    image: qdrant/qdrant:v1.14.1
+    image: qdrant/qdrant:v1.18.2
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"

@@ -241,15 +241,18 @@ def test_chat_stream_without_credential_returns_422(
     assert response.status_code == 422, response.text
 
 
-def test_explicit_tool_request_fails_closed_when_hosted_tools_are_disabled(
+def test_required_sandbox_degrades_to_code_and_guidance_when_hosted_tools_disabled(
     client: TestClient,
     current_user: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An explicit, unsimulatable tool command must never silently degrade."""
+    """A code request with the Sandbox off returns the code and guidance, not an error."""
     chat_id = _make_chat_with_credential(client, current_user)
     monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
-    monkeypatch.setattr("api.services.chat_stream.provider_for", lambda name: _FakeProvider(["unsupported"]))
+    monkeypatch.setattr(
+        "api.services.chat_stream.provider_for",
+        lambda name: _FakeProvider(["I couldn't run it; ", "here's the code to run yourself."]),
+    )
 
     with client.stream(
         "POST",
@@ -260,9 +263,8 @@ def test_explicit_tool_request_fails_closed_when_hosted_tools_are_disabled(
         assert response.status_code == 200, response.text
         events = parse_sse(response.read().decode())
 
-    assert events[-1]["event"] == "message.error"
-    assert events[-1]["data"]["code"] == "tool_evidence_unavailable"
-    assert "Modal tools are disabled" in events[-1]["data"]["message"]
+    assert events[-1]["event"] == "message.completed"
+    assert events[-1]["data"]["content"] == "I couldn't run it; here's the code to run yourself."
 
 
 def test_time_sensitive_request_degrades_with_disclosure_when_tools_are_disabled(

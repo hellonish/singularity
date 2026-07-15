@@ -20,7 +20,7 @@ function relativeTime(value: string): string {
 
 export function GridView() {
   const { reports, runs, loading } = useWorkspace();
-  const { setView, setActiveReportId, setActiveRunId } = useAppStore();
+  const { setView, setActiveReportId, setActiveRunId, setActivePreparationId } = useAppStore();
   const { user } = useAuthSession();
 
   const [greetingMessage, setGreetingMessage] = useState<{ prefix: string; suffix: string } | null>(null);
@@ -78,6 +78,7 @@ export function GridView() {
     const run = runId ? runs.find((item) => item.id === runId) : undefined;
     setActiveReportId(reportId);
     if (run && ['queued', 'running'].includes(run.status)) {
+      setActivePreparationId(null);
       setActiveRunId(run.id);
       setView('run');
       return;
@@ -104,12 +105,12 @@ export function GridView() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(268px, 1fr))', gap: '16px' }}>
               {reports.map((report) => {
                 const run = runs.find((item) => item.report_id === report.id);
-                return <button key={report.id} onClick={() => handleOpenProject(report.id, run?.id)} className="animate-sg-rise" style={{ position: 'relative', cursor: 'pointer', textAlign: 'left', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px 18px 15px', boxShadow: 'var(--shadow-sm)', color: 'var(--text)' }}>
+                return <button key={report.id} onClick={() => handleOpenProject(report.id, run?.id)} className="animate-sg-rise" style={{ position: 'relative', minWidth: 0, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px 18px 15px', boxShadow: 'var(--shadow-sm)', color: 'var(--text)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
                     <span className="sg-mono" style={{ marginLeft: 'auto', fontSize: '10px', padding: '2px 7px', borderRadius: '5px', backgroundColor: report.status === 'ready' ? 'var(--accent-soft)' : 'var(--surface-3)', color: 'var(--accent-2)' }}>{run?.status ?? report.status}</span>
                   </div>
-                  <h3 style={{ margin: '0 0 12px', fontSize: '17px', fontWeight: 500, lineHeight: 1.3 }}>{report.title || 'Untitled research'}</h3>
-                  <div className="sg-mono" style={{ display: 'flex', gap: '12px', fontSize: '11px', color: 'var(--text-dim)' }}><span>{relativeTime(report.updated_at)}</span><span style={{ marginLeft: 'auto' }}>{report.source || 'research'}</span></div>
+                  <h3 style={{ margin: '0 0 12px', fontSize: '17px', fontWeight: 500, lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>{report.title || 'Untitled research'}</h3>
+                  <div className="sg-mono" style={{ display: 'flex', gap: '12px', fontSize: '11px', color: 'var(--text-dim)', minWidth: 0 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{relativeTime(report.updated_at)}</span><span style={{ marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{report.source || 'research'}</span></div>
                 </button>;
               })}
             </div>

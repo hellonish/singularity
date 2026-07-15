@@ -26,6 +26,7 @@ EXPECTED_SKILLS = {
     "dataset_analysis",
     "code_execution",
     "production_retrieval",
+    "sandbox_workspace",
 }
 
 

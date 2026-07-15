@@ -23,6 +23,8 @@ export interface ProgressStep {
   done: boolean;
   /** True when the step represents a failure the model had to recover from. */
   failed: boolean;
+  /** Stable redacted label used to collapse one Sandbox command lifecycle. */
+  commandLabel?: string;
 }
 
 export interface Message {
@@ -72,6 +74,18 @@ export function humanizeProgress(kind: string, message: string): string {
       return `Finished ${toolName(tool ?? 'a tool')}`;
     case 'tool_failed':
       return query ? `Search for “${query}” didn’t return results` : `${toolName(tool ?? 'A tool')} didn’t return results`;
+    case 'sandbox_created':
+      return 'Creating an isolated Sandbox workspace';
+    case 'sandbox_ready':
+      return 'Sandbox workspace is ready';
+    case 'sandbox_command_started':
+      return query ? `Running an isolated command for “${query}”` : 'Running an isolated Sandbox command';
+    case 'sandbox_command_completed':
+      return 'Sandbox command completed';
+    case 'sandbox_failed':
+      return 'Sandbox execution failed';
+    case 'sandbox_closed':
+      return 'Sandbox workspace closed';
     default:
       return message;
   }
@@ -112,6 +126,15 @@ export interface ResearchBrief {
   deliverable: string;
   assumptions: string[];
   entity_scope: Record<string, unknown>;
+  execution_requirements: Array<{
+    kind: 'repository' | 'code' | 'dataset' | 'service' | 'gpu';
+    required: boolean;
+    resource_reference?: string | null;
+    objectives: string[];
+    actions: string[];
+    profile: 'repository' | 'repository_build' | 'code' | 'data' | 'service' | 'gpu';
+    validated_arguments?: Record<string, unknown>;
+  }>;
 }
 
 export interface ResearchPreparation {
@@ -157,6 +180,7 @@ export type RunFeedItem =
   | { id: string; kind: 'research_plan'; points: string[] }
   | { id: string; kind: 'agent_dispatch'; nodeId: string; question: string }
   | { id: string; kind: 'tool_call'; tool: string; nodeId?: string; status: string; query?: string; sourceCount?: number; elapsedSeconds?: number; running: boolean; failed: boolean }
+  | { id: string; kind: 'sandbox'; tool: string; nodeId?: string; status: string; profile?: string; elapsedSeconds?: number; exitCode?: number; truncated?: boolean; running: boolean; failed: boolean }
   | { id: string; kind: 'source_added'; title: string; url: string; sourceType: string }
   | { id: string; kind: 'section_written'; title: string };
 
@@ -202,6 +226,10 @@ export interface ResearchProgressPayload {
   plan_points?: string[];
   section_title?: string;
   error?: string;
+  profile?: string;
+  exit_code?: number;
+  truncated?: boolean;
+  safe_command_label?: string;
   cycle?: number;
   [key: string]: unknown;
 }
@@ -375,6 +403,7 @@ export const api = {
   getRun: (runId: string) => request<ResearchRun>(`/research/runs/${runId}`),
   createPreparation: (body: { query: string; approval_mode: 'ask' | 'auto'; provider_credential_id: string; model_id?: string; strength: number }) =>
     request<ResearchPreparationResult>('/research/preparations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+  getActivePreparation: () => request<ResearchPreparation | null>('/research/preparations/active'),
   getPreparation: (preparationId: string) => request<ResearchPreparation>(`/research/preparations/${preparationId}`),
   answerPreparation: (preparationId: string, questionId: string, answer: string) =>
     request<ResearchPreparation>(`/research/preparations/${preparationId}/answers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question_id: questionId, answer }) }),

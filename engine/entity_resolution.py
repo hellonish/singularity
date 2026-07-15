@@ -147,7 +147,7 @@ class SourceEntityVerdict(BaseModel):
 _TOKEN = re.compile(r"[a-z0-9]+")
 _CAPITALIZED = re.compile(r"\b(?:[A-Z][A-Za-z0-9&.'-]*)(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,3}\b")
 _QUOTED = re.compile(r"[\"']([^\"']{2,120})[\"']")
-_DOMAIN = re.compile(r"\b(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)\b", re.IGNORECASE)
+_DOMAIN = re.compile(r"\b(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})\b", re.IGNORECASE)
 _TICKER = re.compile(r"(?<!\w)\$[A-Z]{1,6}\b")
 _GENERIC_FIRST = {
     "Can", "Could", "Find", "Give", "How", "Latest", "List", "Look", "Please",
@@ -253,6 +253,7 @@ def lightweight_chat_scope(message: str, *, context: str = "") -> EntityScope:
     mentions = list(dict.fromkeys(mentions))[:4]
     identifiers = [match.group(1) for match in _DOMAIN.finditer(combined)]
     identifiers.extend(match.group(0) for match in _TICKER.finditer(combined))
+    identifiers = list(dict.fromkeys(identifiers))[:12]
     if not mentions and not identifiers:
         return EntityScope(status=EntityResolutionStatus.NONE, resolution_mode="chat")
 

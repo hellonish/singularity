@@ -26,6 +26,7 @@ from engine.research_workflow.preparation import (
     final_brief_prompt,
     initial_brief_prompt,
     parse_brief,
+    with_validated_execution_requirements,
 )
 from engine.tools.contracts import ChatToolInvocation
 
@@ -145,9 +146,7 @@ async def create_preparation(
             initial_brief_prompt(query=preparation.query, approval_mode=preparation.approval_mode)
         )
         stage = "initial_parse"
-        draft = parse_brief(
-            initial_response
-        )
+        draft = with_validated_execution_requirements(parse_brief(initial_response), preparation.query)
         if preparation.approval_mode == "ask":
             draft = ensure_ask_question(draft)
             stage = "store_ask_brief"
@@ -160,6 +159,12 @@ async def create_preparation(
         final = draft
         if draft.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
             stage = "entity_discovery"
+            await research_service.update_preparation_progress(
+                session,
+                preparation,
+                stage="entity_resolution",
+                plan_data=draft.model_dump(mode="json"),
+            )
             candidates = await _entity_discovery(preparation)
             stage = "final_completion"
             final_response = await model.complete(
@@ -172,7 +177,7 @@ async def create_preparation(
                 )
             )
             stage = "final_parse"
-            final = parse_brief(final_response)
+            final = with_validated_execution_requirements(parse_brief(final_response), preparation.query)
         if final.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
             selected_entities = final.entity_scope.entities or draft.entity_scope.entities
             if not selected_entities and candidates:
@@ -203,6 +208,9 @@ async def create_preparation(
                 ],
             })
         final = final.model_copy(update={"questions": []})
+        await research_service.update_preparation_progress(
+            session, preparation, stage="finalizing_plan"
+        )
         stage = "store_auto_brief"
         await research_service.store_preparation_brief(
             session,
@@ -213,9 +221,10 @@ async def create_preparation(
             },
             final=True,
         )
-        stage = "start_auto_run"
-        run = await research_service.start_preparation(session, user, preparation)
-        return preparation, run
+        # Auto controls how ambiguity is resolved; it never grants permission
+        # to spend the full research budget. Both modes pause at a ready plan
+        # until the user explicitly approves it through the start endpoint.
+        return preparation, None
     except Exception as exc:
         logger.error(
             "research preparation failed preparation_id=%s stage=%s error_type=%s detail=%s",
@@ -238,7 +247,7 @@ async def finalize_after_answers(
     try:
         model = await _model_for(session, user, preparation)
         draft = ResearchBrief.model_validate(preparation.plan_data)
-        final = parse_brief(
+        final = with_validated_execution_requirements(parse_brief(
             await model.complete(
                 final_brief_prompt(
                     query=preparation.query,
@@ -247,7 +256,7 @@ async def finalize_after_answers(
                     approval_mode="ask",
                 )
             )
-        )
+        ), preparation.query)
     except Exception as exc:
         await research_service.fail_preparation(
             session, preparation, "Research preparation could not finalize the approved scope."

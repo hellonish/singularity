@@ -3,8 +3,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, AvailableModel, Chat, humanizeProgress, Message, ProviderCredential, Report, ResearchPreparation, ResearchPreparationResult, ResearchProgressPayload, ResearchRun, RunProgress, requestSSE, SSEEvent } from '@/lib/api';
 import { emptyRunProgress, reduceProgress } from '@/lib/research-feed';
+import { useAppStore } from '@/store/app-store';
 
 type RunActivity = { phase?: string; status?: string; message?: string; error?: string };
+type ResearchPreparationActivity = {
+  query: string;
+  approvalMode: 'ask' | 'auto';
+  status: 'preparing' | 'failed';
+  message?: string;
+};
 
 function userErrorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
@@ -51,6 +58,7 @@ interface WorkspaceData {
   reports: Report[];
   runs: ResearchRun[];
   preparations: Record<string, ResearchPreparation>;
+  preparationActivity: ResearchPreparationActivity | null;
   credentials: ProviderCredential[];
   availableModels: AvailableModel[];
   modelsLoading: boolean;
@@ -99,6 +107,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [reports, setReports] = useState<Report[]>([]);
   const [runs, setRuns] = useState<ResearchRun[]>([]);
   const [preparations, setPreparations] = useState<Record<string, ResearchPreparation>>({});
+  const [preparationActivity, setPreparationActivity] = useState<ResearchPreparationActivity | null>(null);
   const [credentials, setCredentials] = useState<ProviderCredential[]>([]);
   const [selectedCredentialId, setSelectedCredentialId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
@@ -128,14 +137,42 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextReports, nextChats, nextCredentials, nextRuns, selection] = await Promise.all([
-        api.listReports(), api.listChats(), api.listCredentials(), api.listRuns(), api.getCredentialSelection(),
+      const [nextReports, nextChats, nextCredentials, nextRuns, selection, activePreparation] = await Promise.all([
+        api.listReports(), api.listChats(), api.listCredentials(), api.listRuns(), api.getCredentialSelection(), api.getActivePreparation(),
       ]);
       setReports(nextReports);
       setChats(nextChats);
       setCredentials(nextCredentials);
       setSelectedCredentialId(selection.credential_id);
       setRuns(nextRuns);
+      const app = useAppStore.getState();
+      const persistedRun = nextRuns.find((run) => run.id === app.activeRunId);
+      const activeRun = persistedRun && ['queued', 'running'].includes(persistedRun.status)
+        ? persistedRun
+        : nextRuns.find((run) => ['queued', 'running'].includes(run.status));
+      if (activeRun) {
+        // A live run is past preparation and owns the workspace. It must win
+        // over abandoned/duplicate draft preparations after a hard refresh.
+        app.setActivePreparationId(null);
+        app.setActiveRunId(activeRun.id);
+        if (activeRun.report_id) app.setActiveReportId(activeRun.report_id);
+        app.setView('run');
+      } else if (persistedRun?.report_id && ['completed', 'failed'].includes(persistedRun.status)) {
+        // If the selected run finished while this page was away, continue to
+        // its terminal report instead of reopening an unrelated preparation.
+        app.setActivePreparationId(null);
+        app.setActiveRunId(null);
+        app.setActiveReportId(persistedRun.report_id);
+        app.setView('report');
+      } else if (activePreparation) {
+        setPreparations((current) => ({ ...current, [activePreparation.id]: activePreparation }));
+        app.setActiveRunId(null);
+        app.setActivePreparationId(activePreparation.id);
+        app.setView('prepare');
+      } else {
+        app.setActiveRunId(null);
+        app.setActivePreparationId(null);
+      }
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load your workspace.');
@@ -234,22 +271,27 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
           const kind = typeof event.data.kind === 'string' ? event.data.kind : '';
           const raw = typeof event.data.message === 'string' ? event.data.message : '';
           const elapsedSeconds = typeof event.data.elapsed_seconds === 'number' ? event.data.elapsed_seconds : undefined;
+          const commandLabel = typeof event.data.safe_command_label === 'string' ? event.data.safe_command_label : undefined;
           const label = humanizeProgress(kind, raw);
-          const failed = kind === 'tool_failed';
-          const done = kind === 'tool_completed' || failed;
+          const failed = kind === 'tool_failed' || kind === 'sandbox_failed';
+          const done = ['tool_completed', 'sandbox_command_completed', 'sandbox_closed'].includes(kind) || failed;
           setMessages((current) => ({ ...current, [chatId]: (current[chatId] ?? []).map((message) => {
             if (message.id !== placeholderId) return message;
             const steps = [...(message.progress ?? [])];
             // A tool_completed/failed event closes out the pending tool_start for
             // the same query instead of adding a second, near-duplicate line.
             if (done) {
-              const openIndex = steps.findIndex((step) => step.kind === 'tool_start' && !step.done);
+              const openIndex = steps.findIndex((step) =>
+                ['tool_start', 'sandbox_created', 'sandbox_command_started'].includes(step.kind)
+                && !step.done
+                && (!commandLabel || !step.commandLabel || step.commandLabel === commandLabel),
+              );
               if (openIndex !== -1) {
-                steps[openIndex] = { ...steps[openIndex], kind, label, elapsedSeconds, done: true, failed };
+                steps[openIndex] = { ...steps[openIndex], kind, label, elapsedSeconds, done: true, failed, commandLabel };
                 return { ...message, progress: steps };
               }
             }
-            steps.push({ kind, label, elapsedSeconds, done, failed });
+            steps.push({ kind, label, elapsedSeconds, done, failed, commandLabel });
             return { ...message, progress: steps };
           }) }));
         }
@@ -439,13 +481,16 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
 
   const prepareResearch = useCallback(async (query: string, strength: number, approvalMode: 'ask' | 'auto', modelId?: string) => {
     const credential = requireCredential();
+    setPreparationActivity({ query, approvalMode, status: 'preparing' });
     try {
       const result = await api.createPreparation({ query, approval_mode: approvalMode, provider_credential_id: credential.id, model_id: modelId ?? credential.default_model_id ?? undefined, strength });
       setPreparations((current) => ({ ...current, [result.preparation.id]: result.preparation }));
+      setPreparationActivity(null);
       if (result.run) registerRun(result.run, query);
       return result;
     } catch (cause) {
       const message = researchErrorMessage(cause);
+      setPreparationActivity({ query, approvalMode, status: 'failed', message });
       setError(message);
       throw new Error(message);
     }
@@ -476,6 +521,11 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setPreparations((current) => current[preparationId]
         ? { ...current, [preparationId]: { ...current[preparationId], status: 'started' } }
         : current);
+      const app = useAppStore.getState();
+      app.setActivePreparationId(null);
+      app.setActiveRunId(run.id);
+      if (run.report_id) app.setActiveReportId(run.report_id);
+      app.setView('run');
       return run;
     } catch (cause) {
       setError(userErrorMessage(cause, 'Could not start this research run.'));
@@ -571,10 +621,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const clearError = useCallback(() => setError(null), []);
 
   const value = useMemo<WorkspaceData>(() => ({
-    chats, reports, runs, preparations, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential,
+    chats, reports, runs, preparations, preparationActivity, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential,
     refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, prepareResearch, loadResearchPreparation, answerResearchPreparation, startPreparedResearch, cancelResearchPreparation, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential,
     clearError,
-  }), [chats, reports, runs, preparations, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, prepareResearch, loadResearchPreparation, answerResearchPreparation, startPreparedResearch, cancelResearchPreparation, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
+  }), [chats, reports, runs, preparations, preparationActivity, credentials, availableModels, modelsLoading, messages, streamingChatIds, reportContent, runActivity, runProgress, loading, error, activeCredential, refresh, loadMessages, loadReport, createChat, createAndSendChat, sendChat, deleteChat, deleteReport, startResearch, prepareResearch, loadResearchPreparation, answerResearchPreparation, startPreparedResearch, cancelResearchPreparation, cancelResearch, selectCredential, saveCredential, setDefaultModel, disableCredential, clearError]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }

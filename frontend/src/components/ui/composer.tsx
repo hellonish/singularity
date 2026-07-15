@@ -99,6 +99,16 @@ export function Composer() {
         }
       } else {
         const strength = intensity === 'instant' ? 1 : intensity === 'medium' ? 2 : 3;
+        // Move to the preparation surface before the model scopes the request.
+        // The workspace provider publishes the in-flight preparation activity,
+        // so the user can see what is happening during the slow API call.
+        setActivePreparationId(null);
+        setActiveRunId(null);
+        setActiveReportId(null);
+        setView('prepare');
+        setQuery('');
+        setComposerDraft('');
+        setOpenMenu(null);
         const result = await prepareResearch(content, strength, researchApprovalMode, selectedModel?.id);
         setActivePreparationId(result.preparation.id);
         if (result.run) {
@@ -109,9 +119,11 @@ export function Composer() {
           setView('prepare');
         }
       }
-      setQuery('');
-      setComposerDraft('');
-      setOpenMenu(null);
+      if (mode === 'chat') {
+        setQuery('');
+        setComposerDraft('');
+        setOpenMenu(null);
+      }
     } catch {
       // Workspace state opens the human-readable error modal.
     } finally {
@@ -194,7 +206,7 @@ export function Composer() {
                 <div className="animate-sg-pop" style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: 0, width: '260px', backgroundColor: 'var(--surface)', border: '1px solid var(--border-strong)', borderRadius: '14px', boxShadow: 'var(--shadow)', padding: '8px', zIndex: 50 }}>
                   {([
                     ['ask', 'Ask for approval', 'Show the plan and ask only essential questions before searching.'],
-                    ['auto', 'Auto mode', 'Resolve the likely entity and begin research immediately.'],
+                    ['auto', 'Auto mode', 'Resolve likely entities automatically, then wait for you to approve the plan.'],
                   ] as const).map(([id, label, description]) => (
                     <button key={id} type="button" onClick={() => { setResearchApprovalMode(id); setOpenMenu(null); }} style={{ display: 'block', width: '100%', padding: '10px', border: 'none', borderRadius: '10px', textAlign: 'left', cursor: 'pointer', color: 'var(--text)', background: researchApprovalMode === id ? 'var(--accent-soft)' : 'transparent' }}>
                       <span style={{ display: 'block', fontSize: '13.5px', fontWeight: 600 }}>{label}</span>

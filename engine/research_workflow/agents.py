@@ -209,8 +209,10 @@ class LLMAnswerer:
             "Return JSON only: {\"answer\": string, \"unresolved_gaps\": [string]}. "
             "Write comprehensive research notes that answer the question using only the supplied sources; "
             "do not invent citations or facts. Capture every relevant finding, figure, date, named entity, "
-            "and comparison the sources support, in several detailed paragraphs, and note which SOURCE "
-            "number supports each point. State disagreements between sources explicitly. "
+            "and comparison the sources support, in several detailed paragraphs. The SOURCE numbers below "
+            "are an internal index for your own use — never write the words 'SOURCE 1' (or any 'SOURCE N') "
+            "in the prose; citations are attached separately as links. State disagreements between sources "
+            "explicitly. "
             f"Question: {node.question}\n\nEvidence:\n{excerpts}",
             max_output_tokens=self._answer_tokens,
         )

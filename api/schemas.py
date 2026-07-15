@@ -335,6 +335,9 @@ class HealthRead(BaseModel):
     status: Literal["ok"]
     database: str
     version: str
+    modal_enabled: bool
+    modal_trusted_function_enabled: bool
+    modal_sandbox_enabled: bool
 
 
 class StorageHealthRead(BaseModel):

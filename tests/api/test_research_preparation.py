@@ -86,6 +86,10 @@ def test_ask_preparation_answers_only_current_question_and_becomes_ready(
     assert preparation["status"] == "awaiting_input"
     assert len(preparation["plan_data"]["plan_points"]) == 4
 
+    active = client.get("/research/preparations/active", headers=current_user)
+    assert active.status_code == 200, active.text
+    assert active.json()["id"] == preparation["id"]
+
     wrong = client.post(
         f"/research/preparations/{preparation['id']}/answers",
         json={"question_id": "not-current", "answer": "example.com"},
@@ -127,7 +131,7 @@ def test_preparation_failure_returns_cors_visible_gateway_error(
     assert response.json()["detail"] == "Research preparation could not resolve the request."
 
 
-def test_resolved_auto_preparation_uses_one_model_call_and_starts_run(
+def test_resolved_auto_preparation_uses_one_model_call_and_waits_for_approval(
     client: TestClient, current_user: dict[str, str], monkeypatch
 ) -> None:
     class FakeModel:
@@ -188,5 +192,16 @@ def test_resolved_auto_preparation_uses_one_model_call_and_starts_run(
 
     assert response.status_code == 202, response.text
     assert model.calls == 1
-    assert response.json()["preparation"]["status"] == "started"
-    assert response.json()["run"]["preparation_id"] == response.json()["preparation"]["id"]
+    assert response.json()["preparation"]["status"] == "ready"
+    assert response.json()["run"] is None
+
+    started = client.post(
+        f"/research/preparations/{response.json()['preparation']['id']}/start",
+        headers=current_user,
+    )
+    assert started.status_code == 202, started.text
+    assert started.json()["preparation_id"] == response.json()["preparation"]["id"]
+
+    active = client.get("/research/preparations/active", headers=current_user)
+    assert active.status_code == 200, active.text
+    assert active.json() is None

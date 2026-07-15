@@ -162,6 +162,10 @@ async def stream_message(
                             "kind": event.progress_kind,
                             "message": event.message,
                             "elapsed_seconds": event.elapsed_seconds,
+                            "profile": event.profile,
+                            "safe_command_label": event.safe_command_label,
+                            "exit_code": event.exit_code,
+                            "truncated": event.truncated,
                         },
                         kind=event.progress_kind,
                     )
@@ -174,6 +178,10 @@ async def stream_message(
                             "kind": event.progress_kind,
                             "message": event.message,
                             "elapsed_seconds": event.elapsed_seconds,
+                            "profile": event.profile,
+                            "safe_command_label": event.safe_command_label,
+                            "exit_code": event.exit_code,
+                            "truncated": event.truncated,
                         },
                     )
                 elif event.type == "started":

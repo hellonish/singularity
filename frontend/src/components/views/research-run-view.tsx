@@ -165,6 +165,17 @@ function FeedItem({ item }: { item: RunFeedItem }) {
         </div>
       );
     }
+    case 'sandbox':
+      return (
+        <div className="sg-mono" style={{ ...MONO, display: 'inline-flex', alignItems: 'center', gap: '9px', alignSelf: 'flex-start', padding: '8px 12px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px' }}>
+          {Icon.wrench}
+          <span style={{ color: 'var(--accent-2)' }}>Sandbox</span>
+          <span style={{ color: 'var(--text-dim)' }}>{item.profile || item.tool}</span>
+          {item.running ? <Spinner /> : item.failed
+            ? <span style={{ color: 'var(--warn)' }}>failed</span>
+            : <span style={{ color: 'var(--text-faint)' }}>{typeof item.exitCode === 'number' ? `exit ${item.exitCode}` : 'done'}{item.truncated ? ' · truncated' : ''}</span>}
+        </div>
+      );
     case 'source_added':
       return (
         <div className="sg-mono" style={{ ...MONO, display: 'inline-flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start', fontSize: '11.5px', color: 'var(--ok)' }}>

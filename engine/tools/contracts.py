@@ -84,6 +84,65 @@ class CodeExecutionArguments(_Arguments):
         return self
 
 
+class SandboxCreateArguments(_Arguments):
+    purpose: Literal["repository", "code", "data", "service", "gpu"]
+    profile: Literal["repository", "repository_build", "code", "data", "service", "gpu"]
+    repository_url: str | None = Field(
+        default=None,
+        pattern=r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$",
+    )
+    ref: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._/-]{1,200}$")
+
+    @model_validator(mode="after")
+    def repository_profile_requires_url(self) -> "SandboxCreateArguments":
+        if self.purpose == "repository" and not self.repository_url:
+            raise ValueError("repository Sandbox creation requires repository_url")
+        if self.repository_url and self.profile not in {"repository", "repository_build"}:
+            raise ValueError("repository_url requires a repository Sandbox profile")
+        allowed_profiles = {
+            "repository": {"repository", "repository_build"},
+            "code": {"code"},
+            "data": {"data"},
+            "service": {"service"},
+            "gpu": {"gpu"},
+        }
+        if self.profile not in allowed_profiles[self.purpose]:
+            raise ValueError(f"purpose {self.purpose!r} cannot use profile {self.profile!r}")
+        return self
+
+
+class SandboxExecArguments(_Arguments):
+    workspace_id: str = Field(pattern=r"^ws_[a-f0-9]{32}$")
+    argv: list[str] = Field(min_length=1, max_length=64)
+    workdir: str = Field(default="/workspace", min_length=1, max_length=500)
+    command_timeout_seconds: int = Field(default=60, ge=1, le=420)
+
+
+class SandboxListArguments(_Arguments):
+    workspace_id: str = Field(pattern=r"^ws_[a-f0-9]{32}$")
+    path: str = Field(default="/workspace", min_length=1, max_length=500)
+
+
+class SandboxReadArguments(SandboxListArguments):
+    offset: int = Field(default=0, ge=0, le=10_000_000)
+    limit: int = Field(default=50_000, ge=1, le=100_000)
+
+
+class SandboxWriteArguments(_Arguments):
+    workspace_id: str = Field(pattern=r"^ws_[a-f0-9]{32}$")
+    files: dict[str, str] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_files(self) -> "SandboxWriteArguments":
+        if sum(len(value.encode("utf-8")) for value in self.files.values()) > 500_000:
+            raise ValueError("Sandbox files exceed the 500 KB request limit")
+        return self
+
+
+class SandboxWorkspaceArguments(_Arguments):
+    workspace_id: str = Field(pattern=r"^ws_[a-f0-9]{32}$")
+
+
 class TranslationArguments(_Arguments):
     source_lang: str = Field(default="auto", min_length=2, max_length=16)
     target_lang: str = Field(default="en", min_length=2, max_length=16)
@@ -99,6 +158,13 @@ TOOL_ARGUMENT_MODELS: dict[str, type[BaseModel]] = {
     "repository_inspection": RepositoryInspectionArguments,
     "dataset_analysis": DatasetAnalysisArguments,
     "code_execution": CodeExecutionArguments,
+    "sandbox_create": SandboxCreateArguments,
+    "sandbox_exec": SandboxExecArguments,
+    "sandbox_list": SandboxListArguments,
+    "sandbox_read": SandboxReadArguments,
+    "sandbox_write": SandboxWriteArguments,
+    "sandbox_status": SandboxWorkspaceArguments,
+    "sandbox_close": SandboxWorkspaceArguments,
     "translation": TranslationArguments,
     "web_search": WebSearchArguments,
     **{

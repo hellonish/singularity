@@ -49,6 +49,15 @@ function ChatIcon() {
   );
 }
 
+function SettingsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
 function SectionChevron({ collapsed }: { collapsed: boolean }) {
   return (
     <svg
@@ -68,8 +77,8 @@ function SectionChevron({ collapsed }: { collapsed: boolean }) {
 }
 
 export function Sidebar() {
-  const { sidebarOpen, toggleSidebar, activeReportId, activeChatId, view, setView, setActiveReportId, setActiveChatId, setMode } = useAppStore();
-  const { reports, chats, deleteChat, deleteReport } = useWorkspace();
+  const { sidebarOpen, toggleSidebar, activeReportId, activeChatId, view, setView, setActiveReportId, setActiveChatId, setActiveRunId, setActivePreparationId, setMode, setSettingsOpen } = useAppStore();
+  const { reports, runs, chats, deleteChat, deleteReport } = useWorkspace();
   const [isHovered, setIsHovered] = useState(false);
   const [chatMenuOpenId, setChatMenuOpenId] = useState<string | null>(null);
   const [hoveredChatId, setHoveredChatId] = useState<string | null>(null);
@@ -103,7 +112,18 @@ export function Sidebar() {
     return () => document.removeEventListener('mousedown', onClickAway);
   }, [reportMenuOpenId]);
 
-  const openReport = (id: string) => { setActiveReportId(id); setView('report'); };
+  const openReport = (id: string) => {
+    const run = runs.find((item) => item.report_id === id);
+    setActiveReportId(id);
+    if (run && ['queued', 'running'].includes(run.status)) {
+      setActivePreparationId(null);
+      setActiveRunId(run.id);
+      setView('run');
+      return;
+    }
+    setActiveRunId(null);
+    setView('report');
+  };
   const openChat = (id: string) => { setActiveChatId(id); setView('chat'); };
   const onDeleteChat = async (id: string) => {
     setChatMenuOpenId(null);
@@ -175,7 +195,7 @@ export function Sidebar() {
             <button
               onClick={() => openReport(report.id)}
               title={report.title || 'Untitled report'}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '8px', width: '100%', textAlign: 'left', padding: '9px 8px', paddingRight: sidebarOpen ? '30px' : '8px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: view === 'report' && activeReportId === report.id ? 'var(--accent-soft)' : (hoveredReportId === report.id ? 'var(--surface-2)' : 'transparent'), transition: 'background 0.2s ease', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13.5px' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '8px', width: '100%', textAlign: 'left', padding: '9px 8px', paddingRight: sidebarOpen ? '30px' : '8px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: ['report', 'run'].includes(view) && activeReportId === report.id ? 'var(--accent-soft)' : (hoveredReportId === report.id ? 'var(--surface-2)' : 'transparent'), transition: 'background 0.2s ease', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13.5px' }}
             >
               <FileIcon />
               {sidebarOpen && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{report.title || 'Untitled report'}</span>}
@@ -261,6 +281,18 @@ export function Sidebar() {
         )}
       </div>
     </nav>
+    <div style={{ padding: '8px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+      <button
+        onClick={() => setSettingsOpen(true)}
+        title="Settings"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '10px', width: '100%', padding: '9px 10px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: 'transparent', color: 'var(--text-dim)', fontSize: '13.5px', transition: 'background 0.2s ease' }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--surface-2)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+      >
+        <SettingsIcon />
+        {sidebarOpen && 'Settings'}
+      </button>
+    </div>
     {reportMenuOpenId && reportMenuAnchor && (
       <div
         ref={reportMenuRef}

@@ -9,13 +9,25 @@ description = "Singularity hosted chat and bounded research CLI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "aiohttp>=3.12,<4",
   "httpx>=0.28,<1",
+  "jsonschema>=4.26,<5",
+  "langgraph>=0.4,<1",
+  "modal>=1.5,<2",
+  "openai>=1.109,<2",
   "prompt_toolkit>=3.0.52,<4",
+  "pydantic>=2.10,<3",
+  "python-dotenv>=1,<2",
+  "PyYAML>=6,<7",
   "rich>=14,<15",
+  "tiktoken>=0.12,<1",
 ]
 
 [project.scripts]
 singularity = "engine.cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["engine", "engine.cli", "engine.chat"]
+include = ["engine*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.md", "prompts/*.md"]

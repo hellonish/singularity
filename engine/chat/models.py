@@ -28,3 +28,7 @@ class ChatStreamEvent:
     progress_kind: str | None = None
     message: str | None = None
     elapsed_seconds: float | None = None
+    profile: str | None = None
+    safe_command_label: str | None = None
+    exit_code: int | None = None
+    truncated: bool | None = None

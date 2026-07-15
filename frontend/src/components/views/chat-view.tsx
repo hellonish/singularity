@@ -114,63 +114,145 @@ export function ChatView() {
       <div style={{ maxWidth: '900px', margin: '0 auto', padding: '90px 24px 24px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
         <h1 style={{ margin: '0 0 20px', fontSize: '24px', fontWeight: 400 }}>{chat?.title || 'New chat'}</h1>
         {hasMore && <div className="sg-mono" style={{ alignSelf: 'center', fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Scroll up for earlier messages</div>}
-        {visibleTurns.map((message) => <div key={message.id} data-message-id={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+        {visibleTurns.map((message, index) => {
+          // This assistant turn is actively streaming its answer when the chat
+          // stream is live, it's the final turn, its first token has landed
+          // (no longer pending) and it carries text. Used to keep the work trail
+          // alive and to soften the streaming answer's trailing edge.
+          const isLastTurn = index === visibleTurns.length - 1;
+          const answerStreaming = message.role === 'assistant' && isStreaming && isLastTurn && !message.pending && !!message.content;
+          return <div key={message.id} data-message-id={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
           <div className="sg-mono" style={{ fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '6px', textAlign: message.role === 'user' ? 'right' : 'left' }}>{message.role === 'user' ? 'You' : 'Singularity'}</div>
           {message.role === 'assistant' && message.progress?.length ? (
-            <ProgressTrail steps={message.progress} thinking={!!message.pending} />
+            <ProgressTrail steps={message.progress} thinking={!!message.pending} streaming={answerStreaming} />
           ) : null}
           {message.pending ? (
             message.progress?.length ? null : (
               <div className="sg-thinking" aria-label="Singularity is thinking"><span /><span /><span /></div>
             )
           ) : (
-            <div className="chat-message-content" style={{ padding: message.role === 'user' ? '12px 16px' : '4px 0', backgroundColor: message.role === 'user' ? 'var(--surface-3)' : 'transparent', borderRadius: '16px', borderTopRightRadius: message.role === 'user' ? '4px' : '16px', borderTopLeftRadius: message.role === 'user' ? '16px' : '4px', fontSize: '16px', lineHeight: 1.5 }}>{message.content ? <Markdown>{message.content}</Markdown> : '…'}</div>
+            <div className={`chat-message-content${answerStreaming ? ' chat-streaming' : ''}`} style={{ padding: message.role === 'user' ? '12px 16px' : '4px 0', backgroundColor: message.role === 'user' ? 'var(--surface-3)' : 'transparent', borderRadius: '16px', borderTopRightRadius: message.role === 'user' ? '4px' : '16px', borderTopLeftRadius: message.role === 'user' ? '16px' : '4px', fontSize: '16px', lineHeight: 1.5 }}>{message.content ? <Markdown>{message.content}</Markdown> : '…'}</div>
           )}
-        </div>)}
+        </div>;
+        })}
       </div>
     </div>
     <Composer />
   </div>;
 }
 
-/** Live agent activity: a status line while thinking, plus a collapsible feed of
- * every step (search queries, tool results) that stays available after the
- * answer starts streaming. */
-function ProgressTrail({ steps, thinking }: { steps: ProgressStep[]; thinking: boolean }) {
-  // While thinking, default the feed open so the work is visible; once the
-  // answer begins, collapse it behind the summary so it doesn't crowd the reply.
-  const [open, setOpen] = useState(thinking);
-  const latest = steps[steps.length - 1];
+/** The animated work trail: a live vertical rail with a "comet" that tracks
+ * progress and a shimmering "thinking" header while the turn is still working,
+ * collapsing into a "Thought for Ns · N steps" toggle once the answer streams.
+ * A faithful port of the Thinking Process design, driven by the real streamed
+ * ProgressStep[]. */
+function ProgressTrail({ steps, thinking, streaming = false }: { steps: ProgressStep[]; thinking: boolean; streaming?: boolean }) {
+  // While thinking, the trail is always expanded (no toggle); once the answer
+  // begins, it collapses behind the "Thought for Ns" summary but can be reopened.
+  const [expanded, setExpanded] = useState(false);
+  // The trail stays visually "alive" (accent rail, glowing comet) both while
+  // thinking and while the answer is still streaming, so it doesn't read as a
+  // dead, stale artifact sitting above live text; it settles once fully done.
+  const alive = thinking || streaming;
+  const showSteps = thinking || expanded;
+  const showToggle = !thinking;
+
+  // Wall-clock think time: captured when thinking begins and frozen the moment
+  // it ends, so "Thought for Ns" stays stable after the answer streams.
+  const startRef = useRef<number>(Date.now());
+  const [thoughtSecs, setThoughtSecs] = useState(0);
+  const wasThinking = useRef(thinking);
+  useEffect(() => {
+    if (wasThinking.current && !thinking) {
+      setThoughtSecs(Math.max(1, Math.round((Date.now() - startRef.current) / 1000)));
+    }
+    wasThinking.current = thinking;
+  }, [thinking]);
+
+  const total = steps.length;
+  const doneCount = steps.filter((step) => step.done || step.failed).length;
+  const frac = total ? doneCount / total : 0;
+  const pct = Math.round(frac * 100);
+  const latest = steps[total - 1];
+  // The single step the model is actively on: the last one that hasn't resolved.
+  const runningIndex = thinking ? steps.findIndex((step) => !step.done && !step.failed) : -1;
 
   return (
-    <div style={{ marginBottom: '8px', fontSize: '13px', color: 'var(--text-faint)' }}>
-      {thinking && latest ? (
-        <div className="sg-progress-live" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: open ? '8px' : 0 }}>
-          <span className="sg-thinking sg-thinking-inline" aria-hidden><span /><span /><span /></span>
-          <span>{latest.label}</span>
+    <div style={{ position: 'relative', padding: '2px 0 2px 18px', marginBottom: '10px' }}>
+      {/* base rail + progress fill */}
+      <span aria-hidden style={{ position: 'absolute', left: 0, top: 3, bottom: 3, width: 2, background: 'var(--border)', borderRadius: 2 }} />
+      <span aria-hidden style={{ position: 'absolute', left: 0, top: 3, width: 2, height: `${pct}%`, maxHeight: 'calc(100% - 6px)', background: alive ? 'var(--accent-2)' : 'var(--border-strong)', borderRadius: 2, transition: 'height .55s cubic-bezier(.4,0,.2,1)' }} />
+      {/* comet head + tail — visible while the turn is still working */}
+      {alive ? (
+        <>
+          <span aria-hidden style={{ position: 'absolute', left: 0, top: `calc(${pct}% - 26px)`, width: 2, height: 26, borderRadius: 2, background: 'linear-gradient(to bottom,transparent,var(--accent-2))', opacity: 0.55, transition: 'top .55s cubic-bezier(.4,0,.2,1)' }} />
+          <span aria-hidden style={{ position: 'absolute', left: -3, top: `calc(${pct}% - 1px)`, width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-2)', animation: 'tp-comet 1.4s ease-in-out infinite', transition: 'top .55s cubic-bezier(.4,0,.2,1)' }} />
+        </>
+      ) : null}
+
+      {/* thinking header */}
+      {thinking ? (
+        <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 11, marginBottom: 13 }}>
+          <span aria-hidden style={{ position: 'relative', width: 15, height: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent-2)', animation: 'tp-breathe 1.2s ease-in-out infinite' }} />
+            <span style={{ position: 'absolute', inset: 0, border: '1.5px solid transparent', borderTopColor: 'var(--accent-2)', borderRightColor: 'var(--accent-2)', borderRadius: '50%', animation: 'tp-spin 1s linear infinite', opacity: 0.7 }} />
+          </span>
+          <span className="tp-shimmer" style={{ fontSize: 15, fontStyle: 'italic' }}>Singularity is thinking</span>
+          {latest ? (
+            <span className="sg-mono" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '46%' }}>{latest.label}</span>
+          ) : null}
         </div>
       ) : null}
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="sg-mono"
-        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-faint)', fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase' }}
-        aria-expanded={open}
-      >
-        {open ? 'Hide work' : `Show work · ${steps.length} step${steps.length === 1 ? '' : 's'}`}
-      </button>
-      {open ? (
-        <ol style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          {steps.map((step, index) => (
-            <li key={index} style={{ display: 'flex', alignItems: 'baseline', gap: '8px', color: step.failed ? 'var(--text-faint)' : 'var(--text-secondary, var(--text-faint))' }}>
-              <span aria-hidden style={{ flexShrink: 0 }}>{step.failed ? '⚠' : step.done ? '✓' : '·'}</span>
-              <span style={{ flex: 1 }}>{step.label}</span>
-              {typeof step.elapsedSeconds === 'number' ? (
-                <span className="sg-mono" style={{ flexShrink: 0, fontSize: '10px' }}>{step.elapsedSeconds.toFixed(1)}s</span>
-              ) : null}
-            </li>
-          ))}
-        </ol>
+
+      {/* collapse toggle */}
+      {showToggle ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="sg-mono"
+          aria-expanded={expanded}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start', padding: '5px 11px 5px 9px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: 8, cursor: 'pointer', fontSize: 11.5, color: 'var(--text-dim)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} style={{ transition: 'transform .25s ease', transform: `rotate(${expanded ? 0 : -90}deg)` }}><polyline points="6 9 12 15 18 9" /></svg>
+          {expanded ? 'Hide work' : `Thought for ${thoughtSecs}s · ${total} step${total === 1 ? '' : 's'}`}
+        </button>
+      ) : null}
+
+      {/* step list */}
+      {showSteps ? (
+        <div style={{ display: 'flex', flexDirection: 'column', marginTop: thinking ? 2 : 10, animation: 'tp-collapse .3s ease both', overflow: 'hidden' }}>
+          {steps.map((step, index) => {
+            const running = index === runningIndex;
+            // Only finished steps carry a real duration; a running step has no
+            // per-step start timestamp in the stream, so we don't fake a timer.
+            const elapsed = !running && typeof step.elapsedSeconds === 'number' ? `${step.elapsedSeconds.toFixed(1)}s` : '';
+            return (
+              <div key={index} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '3px 0', animation: 'tp-inx .28s ease both' }}>
+                <span aria-hidden style={{ flexShrink: 0, width: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 3 }}>
+                  {running ? (
+                    <span style={{ position: 'relative', width: 13, height: 13, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent-2)', animation: 'tp-breathe 1.1s ease-in-out infinite' }} />
+                      <span style={{ position: 'absolute', inset: 0, border: '1.4px solid transparent', borderTopColor: 'var(--accent-2)', borderRadius: '50%', animation: 'tp-spin .8s linear infinite' }} />
+                    </span>
+                  ) : step.failed ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth={2.1}><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+                  ) : step.done ? (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth={2.6} style={{ animation: 'tp-pop .32s cubic-bezier(.2,.8,.2,1) both' }}><polyline points="20 6 9 17 4 12" /></svg>
+                  ) : (
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--text-faint)' }} />
+                  )}
+                </span>
+                <span
+                  className={running ? 'tp-shimmer' : undefined}
+                  style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontStyle: 'italic', lineHeight: 1.45, color: running ? undefined : step.failed ? 'var(--warn)' : 'var(--text-dim)' }}
+                >{step.label}</span>
+                {elapsed ? (
+                  <span className="sg-mono" style={{ flexShrink: 0, marginLeft: 'auto', paddingLeft: 10, fontSize: 11, color: 'var(--text-faint)' }}>{elapsed}</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );

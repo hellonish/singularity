@@ -39,7 +39,19 @@ async def run_research_job(ctx, run_id: str) -> None:
         if run is None or run.status in {"cancelled", "completed", "failed"}:
             return
         step_log = StepLogger("research_worker", user_id=run.user_id, run_id=run.id)
-        step_log.step("job", phase="start", inputs={"run_data": run.run_data, "query": run.query})
+        step_log.step(
+            "job",
+            phase="start",
+            inputs={
+                "run_data": {
+                    key: value
+                    for key, value in run.run_data.items()
+                    if key != "sandbox_workspaces"
+                },
+                "restorable_sandbox_count": len(run.run_data.get("sandbox_workspaces") or []),
+                "query": run.query,
+            },
+        )
         run.status = "running"
         run.started_at = run.started_at or datetime.now(timezone.utc)
         await session.commit()

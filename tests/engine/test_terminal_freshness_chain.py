@@ -3,7 +3,7 @@ import json
 
 from engine.chat.effort import ChatEffort
 from engine.chat.modal_tools import ChatToolResult
-from engine.cli.agents import ChatTerminalAgent, FreshnessEvidenceUnavailable
+from engine.cli.agents import ChatTerminalAgent
 from engine.cli.models import TerminalSession
 from engine.llm.groq import GroqModel, LLMStreamEvent, LLMToolCall
 
@@ -87,19 +87,27 @@ def test_failed_search_degrades_to_disclosed_answer_instead_of_failing(monkeypat
     assert error_payloads and all("error_kind" in payload for payload in error_payloads)
 
 
-def test_explicit_tool_request_fails_closed_without_modal(monkeypatch) -> None:
+def test_required_sandbox_without_modal_degrades_to_code_and_guidance(monkeypatch) -> None:
+    # With Modal off, a code-execution request cannot run in the Sandbox. Rather
+    # than dead-ending with an error, the terminal agent streams a degraded
+    # answer: the model explains it could not run it and hands back the code.
     monkeypatch.setenv("SINGULARITY_MODAL_ENABLED", "0")
     provider = CapturingProvider()
     agent = ChatTerminalAgent(provider=provider)
 
-    try:
-        asyncio.run(_collect(agent, "Run code to sort this list of numbers"))
-    except FreshnessEvidenceUnavailable as exc:
-        assert "Modal tools are disabled" in str(exc)
-    else:
-        raise AssertionError("expected an explicit tool request to fail closed")
+    outputs = asyncio.run(_collect(agent, "Run code to sort this list of numbers"))
 
-    assert provider.chat_messages == [] and provider.tool_turn_messages == []
+    assert any(output.kind == "delta" and output.content for output in outputs)
+    assert outputs[-1].kind == "completed"
+    # The degraded turn is text-only (no tool planning) and seeded with the note.
+    assert provider.tool_turn_messages == []
+    assert provider.chat_messages, "degraded model turn never ran"
+    system_notes = [
+        message["content"]
+        for message in provider.chat_messages[0]
+        if message.get("role") == "system"
+    ]
+    assert any("could not run this request" in note for note in system_notes)
 
 
 def test_job_search_and_retry_follow_up_dispatch_fresh_searches(monkeypatch) -> None:

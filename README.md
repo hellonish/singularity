@@ -353,16 +353,38 @@ bounded parallel bursts; completed evidence is retained when another action
 fails.
 
 Repository inspection, generated dataset analysis, and general code execution
-are deliberately excluded from the trusted Function. The skill router may
-select them, but the execution router sends them only to separate no-secret
-Modal Sandbox adapters: repository inspection permits only public GitHub clone
-traffic and predefined inspection operations, while dataset analysis has
-networking blocked and receives only a CSV plus generated Python. Code execution
-writes a bounded file set and runs one argv-style command in a network-blocked
-ephemeral workspace; nonzero exits are observations the planner may repair and
-rerun within the effort cap. Production
+are deliberately excluded from the trusted Function. A deterministic capability
+router preloads the matching skill and exposes only general plus selected tool
+schemas; the execution router sends arbitrary execution only to a task-scoped,
+no-secret Modal Sandbox. Repository work reuses one workspace across inspection,
+edits, builds, tests, and repair cycles. Dataset and generated-code profiles have
+networking blocked. Public repository profiles allow only GitHub, and build
+profiles additionally allow approved package registries. Production
 vector retrieval is also excluded from CLI and Modal; it executes through the
 authenticated API `RetrievalService` after relational ownership checks.
+
+Publish the named Images during deployment, never on a user request:
+
+```bash
+python -m engine.modal_app.sandbox_images
+```
+
+After deployment, the opt-in live smoke test clones a small public repository,
+reads and writes shared state, runs a check, and verifies cleanup:
+
+```bash
+SINGULARITY_RUN_MODAL_SANDBOX_TESTS=1 pytest -q \
+  tests/engine/test_modal_sandbox_live.py -m integration
+```
+
+Set the emitted names through `SINGULARITY_MODAL_SANDBOX_IMAGE_*`. If a CPU
+profile name is not configured, development falls back to an inline Image
+definition; GPU execution fails closed unless its named Image is configured. The
+Sandbox manager enforces policy profiles (CPU/memory request-limit pairs,
+network rules, idle and whole-workspace timeouts), roots files under
+`/workspace`, keeps Modal object IDs private, and terminates with wait before
+detaching on every terminal path. Private repositories and production secrets
+are intentionally unsupported.
 
 ## LangSmith observability
 
@@ -553,15 +575,16 @@ batch in one model turn instead of one per planning round-trip.
 
 ```mermaid
 flowchart LR
-    U([Message]) --> M1["Model turn 1:<br/>load_skill(code_execution)<br/>+ code_execution call"] --> E["sandbox execute"]
+    U([Message]) --> M1["Model turn 1:<br/>code skill preloaded<br/>+ Sandbox tool call"] --> E["stateful sandbox execute"]
     E -->|"nonzero exit (typed)"| M2["Model turn 2:<br/>repair + rerun<br/>(≤ repair cap)"] --> E
     E -->|success| A([Answer with results])
     classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
     class U,A terminal;
 ```
 
-Skill selection is the model's choice from the full catalog — no keyword gate
-required to reach arXiv, SEC, or sandbox tools.
+Specialized discovery skills remain progressively disclosed. High-confidence
+repository, code, and data requests use the deterministic capability router so
+the relevant Sandbox skill is available on the first model turn.
 
 **4. Degraded turn** (time-sensitive, but tools fail or are disabled):
 

@@ -14,6 +14,7 @@ from api.schemas import ResearchPreparationCreate, ResearchRunCreate
 from api.services.llm_credentials import get_credential, list_credentials
 from engine.llm.providers import provider_for
 from engine.research_workflow.caps import RunCaps
+from engine.research_workflow.runtime import ResearchCancelled
 
 
 async def _paid_research_alternatives(
@@ -105,6 +106,9 @@ class RunEventPublisher:
 
     async def append(self, event_type: str, payload: dict) -> ResearchRunEvent:
         async with self._lock:
+            await self._session.refresh(self._run)
+            if self._run.run_data.get("cancellation_requested"):
+                raise ResearchCancelled("research run cancellation was requested")
             return await append_event(self._session, self._run, event_type, payload)
 
 
@@ -137,6 +141,28 @@ async def get_preparation(
     return preparation
 
 
+async def get_active_preparation(
+    session: AsyncSession, user_id: str
+) -> ResearchPreparation | None:
+    """Return the newest preparation that still needs user attention.
+
+    ``draft`` is included because the model may still be breaking down the
+    request or resolving its entity when the browser leaves the page.  Keeping
+    that durable row discoverable lets a later dashboard visit resume the
+    preparation surface without relying on the original HTTP request.
+    """
+
+    return await session.scalar(
+        select(ResearchPreparation)
+        .where(
+            ResearchPreparation.user_id == user_id,
+            ResearchPreparation.status.in_(("draft", "awaiting_input", "ready")),
+        )
+        .order_by(ResearchPreparation.created_at.desc())
+        .limit(1)
+    )
+
+
 async def create_preparation(
     session: AsyncSession, user: User, body: ResearchPreparationCreate
 ) -> ResearchPreparation:
@@ -153,9 +179,31 @@ async def create_preparation(
             "audience": body.audience,
             "output_language": body.output_language,
             "provider_tier_checked": True,
+            "preparation_stage": "request_breakdown",
         },
     )
     session.add(preparation)
+    await session.commit()
+    await session.refresh(preparation)
+    return preparation
+
+
+async def update_preparation_progress(
+    session: AsyncSession,
+    preparation: ResearchPreparation,
+    *,
+    stage: str,
+    plan_data: dict | None = None,
+) -> ResearchPreparation:
+    """Persist an in-progress preparation stage without making it actionable."""
+
+    if preparation.status != "draft":
+        return preparation
+    preparation.plan_data = {
+        **preparation.plan_data,
+        **(plan_data or {}),
+        "preparation_stage": stage,
+    }
     await session.commit()
     await session.refresh(preparation)
     return preparation
@@ -323,6 +371,17 @@ async def create_run(session: AsyncSession, user: User, body: ResearchRunCreate)
 async def cancel_run(session: AsyncSession, run: ResearchRun) -> ResearchRun:
     if run.status in {"completed", "failed", "cancelled"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Research run is already terminal")
+    if run.status == "running":
+        # The worker owns active Sandbox handles. Signal it first; it closes
+        # every workspace in execute_research_run.finally before the worker
+        # persists the terminal cancelled state.
+        run.run_data = {**run.run_data, "cancellation_requested": True}
+        await session.commit()
+        await session.refresh(run)
+        await append_event(
+            session, run, "research.cancellation_requested", {"status": run.status}
+        )
+        return run
     run.status = "cancelled"
     run.finished_at = _now()
     await session.commit()

@@ -130,6 +130,41 @@ function ProviderDropdown({
   );
 }
 
+// Shown when no provider is expanded in the dropdown: a card for the provider
+// that is currently active. It surfaces only the non-secret key fingerprint —
+// the API never returns the raw key to the frontend — and clicking it opens
+// that provider's setup panel.
+function SelectedProviderCard({
+  provider,
+  credential,
+  onOpen,
+}: {
+  provider: Provider;
+  credential: ProviderCredential;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="animate-sg-pop"
+      style={{ display: 'flex', alignItems: 'center', gap: '13px', width: '100%', padding: '18px 20px', border: '1px solid var(--accent)', borderRadius: '16px', backgroundColor: 'var(--accent-soft)', cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}
+    >
+      <ProviderLogo p={provider} size={26} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+          <span style={{ fontSize: '16px', fontWeight: 500 }}>{provider.name}</span>
+          <span className="sg-mono" style={{ padding: '3px 8px', borderRadius: '999px', fontSize: '10px', letterSpacing: '.05em', backgroundColor: 'var(--surface-3)', color: 'var(--text)' }}>Active</span>
+        </div>
+        <div className="sg-mono" style={{ marginTop: '4px', fontSize: '11.5px', color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {credential.default_model_id ? credential.default_model_id : 'Key connected'}
+        </div>
+      </div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-2)" strokeWidth="2"><polyline points="9 6 15 12 9 18" /></svg>
+    </button>
+  );
+}
+
 export function SettingsModal() {
   const { settingsOpen, setSettingsOpen, openProvider, setOpenProvider, theme, setTheme, accent, setAccent, activeSettingsTab, setActiveSettingsTab, obAdvance, forceProviderMenuOpen, providerHighlight } = useAppStore();
   const [currentKeys, setCurrentKeys] = useState<Record<string, string>>({});
@@ -141,6 +176,9 @@ export function SettingsModal() {
   const detail = PROVIDERS.find((p) => p.id === openProvider) || null;
   const detailCredential = detail
     ? credentials.find((credential) => credential.provider === detail.id && credential.status === 'active')
+    : null;
+  const activeProvider = activeCredential
+    ? PROVIDERS.find((p) => p.id === activeCredential.provider) || null
     : null;
 
   return (
@@ -281,6 +319,12 @@ export function SettingsModal() {
                       </button>
                     )}
                   </div>
+                ) : activeProvider && activeCredential ? (
+                  <SelectedProviderCard
+                    provider={activeProvider}
+                    credential={activeCredential}
+                    onOpen={() => setOpenProvider(activeProvider.id)}
+                  />
                 ) : (
                   <div style={{ padding: '28px 20px', border: '1px dashed var(--border-strong)', borderRadius: '16px', textAlign: 'center', fontSize: '13.5px', color: 'var(--text-faint)' }}>
                     Choose a provider from the dropdown to see how to get its key.

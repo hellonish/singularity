@@ -59,7 +59,7 @@ async def create_research_preparation(
     session: SessionDep,
     current_user: CurrentUserDep,
 ) -> ResearchPreparationResult:
-    """Prepare a bounded plan, then pause in Ask mode or dispatch in Auto mode."""
+    """Prepare a bounded plan and pause for explicit approval in every mode."""
 
     _require_worker()
     try:
@@ -69,6 +69,16 @@ async def create_research_preparation(
     if run is not None:
         await _dispatch_run(session, run)
     return ResearchPreparationResult(preparation=preparation, run=run)
+
+
+@router.get("/preparations/active", response_model=ResearchPreparationRead | None)
+async def get_active_research_preparation(
+    session: SessionDep,
+    current_user: CurrentUserDep,
+) -> ResearchPreparationRead | None:
+    """Return the newest unfinished intake so the dashboard can resume it."""
+
+    return await research_service.get_active_preparation(session, current_user.id)
 
 
 @router.get("/preparations/{preparation_id}", response_model=ResearchPreparationRead)

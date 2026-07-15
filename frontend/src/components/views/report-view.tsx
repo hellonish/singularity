@@ -6,7 +6,7 @@ import { useWorkspace } from '@/components/workspace-provider';
 import { Markdown } from '@/components/ui/markdown';
 
 export function ReportView() {
-  const { activeReportId, activeChatId, setActiveChatId, chatCollapsed, toggleChatCollapsed } = useAppStore();
+  const { activeReportId, activeChatId, setActiveChatId, setActiveRunId, setView, chatCollapsed, toggleChatCollapsed } = useAppStore();
   const { reports, runs, chats, messages, reportContent, runActivity, loadReport, loadMessages, createAndSendChat, sendChat, cancelResearch, activeCredential, availableModels, modelsLoading, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
@@ -90,6 +90,16 @@ export function ReportView() {
   const content = activeReportId ? reportContent[activeReportId] : '';
   const activity = run ? runActivity[run.id] : undefined;
   const running = run && !['completed', 'failed', 'cancelled'].includes(run.status);
+
+  useEffect(() => {
+    if (!running) return;
+    setActiveRunId(run.id);
+    setView('run');
+  }, [run?.id, running, setActiveRunId, setView]);
+
+  // Never paint the legacy report workspace for an in-flight run. The effect
+  // above hands it to the live run surface on the next client commit.
+  if (running) return null;
 
   return <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
     <section style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '100px min(8vw, 96px) 48px' }}>

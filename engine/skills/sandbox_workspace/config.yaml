@@ -1,0 +1,14 @@
+id: sandbox_workspace
+version: "1.0"
+kind: core
+description: Create and operate a stateful, task-scoped Modal Sandbox for repository, code, data, service, or GPU work.
+tools:
+  - sandbox_create
+  - sandbox_exec
+  - sandbox_list
+  - sandbox_read
+  - sandbox_write
+  - sandbox_status
+  - sandbox_close
+instructions: instructions.md
+schemas: schemas.py

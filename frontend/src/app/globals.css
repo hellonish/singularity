@@ -252,3 +252,49 @@
 /* Compact dots used inline alongside the live progress status line */
 .sg-thinking-inline { padding: 0; gap: 3px; }
 .sg-thinking-inline span { width: 4px; height: 4px; }
+
+/* Thinking-process work trail: animated rail + comet, shimmer labels, step icons */
+@keyframes tp-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+@keyframes tp-inx{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+@keyframes tp-spin{to{transform:rotate(360deg)}}
+@keyframes tp-collapse{from{opacity:0}to{opacity:1}}
+@keyframes tp-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes tp-breathe{0%,100%{transform:scale(.65);opacity:.65}50%{transform:scale(1.15);opacity:1}}
+@keyframes tp-comet{0%,100%{box-shadow:0 0 6px 1px var(--accent-2);opacity:.85}50%{box-shadow:0 0 15px 4px var(--accent-2);opacity:1}}
+@keyframes tp-pop{0%{transform:scale(0) rotate(-25deg)}60%{transform:scale(1.25)}100%{transform:scale(1)}}
+.tp-shimmer{
+  background:linear-gradient(90deg,var(--text-dim),var(--text) 30%,var(--accent-2) 50%,var(--text) 70%,var(--text-dim));
+  background-size:220% 100%;-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;animation:tp-shimmer 2.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce){
+  .tp-shimmer{animation:none;-webkit-text-fill-color:currentColor;color:var(--text-dim);background:none}
+  .tp-breathe,.tp-spin,.tp-comet{animation:none !important}
+}
+
+/* Smooth token streaming: soften the trailing edge of the answer while it
+   streams so newly-arrived words fade up into place instead of snapping in.
+   The mask fades the last bit of content to transparent; as text grows past it,
+   each word passes through the fade, reading as a gentle reveal. A blinking
+   caret marks the live insertion point. */
+.chat-streaming {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4em), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.4em), transparent 100%);
+}
+.chat-streaming > *:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--accent-2);
+  opacity: 0.85;
+  animation: tp-caret 1s steps(1) infinite;
+}
+@keyframes tp-caret { 0%, 49% { opacity: 0.85; } 50%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce){
+  .chat-streaming { -webkit-mask-image: none; mask-image: none; }
+  .chat-streaming > *:last-child::after { animation: none; }
+}
