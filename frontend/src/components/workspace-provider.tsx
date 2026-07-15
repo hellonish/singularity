@@ -19,8 +19,9 @@ function userErrorMessage(cause: unknown, fallback: string): string {
  */
 function researchErrorMessage(cause: unknown): string {
   if (cause instanceof ApiError) {
-    // Log the precise cause for developers; keep it out of the UI.
-    console.error('startResearch failed', cause.status, cause.message);
+    // This failure is handled by the workspace banner. Keep diagnostics in the
+    // console without triggering Next's development error overlay.
+    console.warn('research request failed', cause.status, cause.message);
     switch (cause.status) {
       case 401:
         return 'Your session expired. Please sign in again.';
@@ -31,6 +32,8 @@ function researchErrorMessage(cause: unknown): string {
         return cause.message || 'Could not start research. Please try again.';
       case 429:
         return "You've started several research runs recently. Please wait a moment and try again.";
+      case 502:
+        return 'The selected model could not prepare a valid research plan. Try again or choose another model.';
       case 503:
         return 'Research is temporarily unavailable. Please try again in a moment.';
       default:
@@ -39,7 +42,7 @@ function researchErrorMessage(cause: unknown): string {
           : 'Could not start research. Please try again.';
     }
   }
-  console.error('startResearch failed', cause);
+  console.warn('research request failed', cause);
   return 'Could not start research. Please try again.';
 }
 

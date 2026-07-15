@@ -10,7 +10,7 @@ import re
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EntityResolutionStatus(StrEnum):
@@ -35,7 +35,9 @@ def _string_list(values: Any, *, keys: tuple[str, ...] = ("value", "name", "id",
 
 
 class EntityRef(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # This is a provider-output boundary. Ignore explanatory keys a model may
+    # add while still validating every field the resolver actually consumes.
+    model_config = ConfigDict(extra="ignore")
 
     entity_id: str = Field(min_length=1, max_length=80)
     mention: str = Field(min_length=1, max_length=240)
@@ -47,6 +49,30 @@ class EntityRef(BaseModel):
     selected_description: str = Field(default="", max_length=600)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_identity(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        canonical = data.get("canonical_name") or data.get("name") or data.get("mention")
+        mention = data.get("mention") or data.get("surface_name") or canonical
+        if canonical:
+            data["canonical_name"] = canonical
+        if mention:
+            data["mention"] = mention
+        if not data.get("entity_id") and canonical:
+            slug = re.sub(r"[^a-z0-9]+", "_", str(canonical).lower()).strip("_")
+            data["entity_id"] = (slug or "entity")[:80]
+        confidence = data.get("confidence")
+        if isinstance(confidence, str):
+            try:
+                parsed = float(confidence.rstrip("%"))
+                data["confidence"] = parsed / 100 if confidence.endswith("%") else parsed
+            except ValueError:
+                data["confidence"] = 0.0
+        return data
+
     @field_validator("aliases", "identifiers", "anchors", mode="before")
     @classmethod
     def normalize_values(cls, values: Any) -> list[str]:
@@ -55,13 +81,46 @@ class EntityRef(BaseModel):
 
 
 class EntityScope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     status: EntityResolutionStatus = EntityResolutionStatus.NONE
     entities: list[EntityRef] = Field(default_factory=list, max_length=12)
     relationship_constraints: list[str] = Field(default_factory=list, max_length=12)
     resolution_mode: str = Field(default="ask", pattern="^(ask|auto|chat)$")
     assumptions: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_scope(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        entities = data.get("entities", [])
+        if isinstance(entities, dict):
+            entities = list(entities.values()) if all(
+                isinstance(item, dict) for item in entities.values()
+            ) else [entities]
+        if not isinstance(entities, list):
+            entities = []
+        data["entities"] = entities[:12]
+
+        status = str(data.get("status") or "").strip().lower()
+        status_aliases = {
+            "uncertain": "ambiguous",
+            "unresolved": "ambiguous",
+            "needs_clarification": "ambiguous",
+            "identified": "resolved",
+            "confirmed": "resolved",
+            "not_applicable": "none",
+        }
+        status = status_aliases.get(status, status)
+        if status not in {member.value for member in EntityResolutionStatus}:
+            status = "ambiguous" if entities else "none"
+        data["status"] = status
+
+        mode = str(data.get("resolution_mode") or "ask").strip().lower()
+        data["resolution_mode"] = mode if mode in {"ask", "auto", "chat"} else "ask"
+        return data
 
     @field_validator("relationship_constraints", "assumptions", mode="before")
     @classmethod

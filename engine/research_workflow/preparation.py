@@ -14,7 +14,7 @@ class TextModel(Protocol):
 
 
 class ClarificationQuestion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     question_id: str = Field(min_length=1, max_length=80)
     text: str = Field(min_length=1, max_length=500)
@@ -22,7 +22,9 @@ class ClarificationQuestion(BaseModel):
 
 
 class ResearchBrief(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Models sometimes attach harmless rationale/metadata keys. The brief
+    # contract remains strict for consumed fields without rejecting those keys.
+    model_config = ConfigDict(extra="ignore")
 
     refined_objective: str = Field(min_length=1, max_length=10_000)
     plan_points: list[str] = Field(min_length=4, max_length=5)
@@ -44,9 +46,33 @@ class ResearchBrief(BaseModel):
             text = " ".join(str(value).split())[:220]
             if text:
                 cleaned.append(text)
+        cleaned = list(dict.fromkeys(cleaned))[:5]
         if not 4 <= len(cleaned) <= 5:
             raise ValueError("plan_points must contain four or five non-empty pointers")
         return cleaned
+
+    @field_validator("questions", mode="before")
+    @classmethod
+    def normalize_questions(cls, values: Any) -> list[dict[str, str]]:
+        if not isinstance(values, list):
+            return []
+        normalized: list[dict[str, str]] = []
+        for index, value in enumerate(values[:4], start=1):
+            if isinstance(value, ClarificationQuestion):
+                value = value.model_dump(mode="json")
+            if isinstance(value, str):
+                value = {"text": value}
+            if not isinstance(value, dict):
+                continue
+            text = value.get("text") or value.get("question") or value.get("prompt")
+            if not text:
+                continue
+            normalized.append({
+                "question_id": str(value.get("question_id") or value.get("id") or f"q{index}")[:80],
+                "text": " ".join(str(text).split())[:500],
+                "reason": " ".join(str(value.get("reason") or value.get("rationale") or "").split())[:300],
+            })
+        return normalized
 
     @field_validator("must_haves", "assumptions", mode="before")
     @classmethod
@@ -60,7 +86,14 @@ class ResearchBrief(BaseModel):
             text = " ".join(str(value).split())
             if text:
                 normalized.append(text)
-        return list(dict.fromkeys(normalized))
+        return list(dict.fromkeys(normalized))[:12]
+
+    @field_validator("deliverable", mode="before")
+    @classmethod
+    def normalize_deliverable(cls, value: Any) -> str:
+        if isinstance(value, dict):
+            value = value.get("text") or value.get("format") or value.get("value") or "Research report"
+        return " ".join(str(value or "Research report").split())[:500]
 
 def parse_brief(text: str) -> ResearchBrief:
     payload = extract_object(text)

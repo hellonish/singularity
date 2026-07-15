@@ -1,8 +1,10 @@
 """Request-scoped assembly for Research Ask and Auto preparation modes."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
@@ -30,6 +32,20 @@ from engine.tools.contracts import ChatToolInvocation
 
 class ResearchPreparationError(RuntimeError):
     """Safe public boundary for an upstream preparation-model failure."""
+
+
+logger = logging.getLogger(__name__)
+
+
+def _validation_summary(exc: Exception) -> str:
+    """Keep field-level diagnostics without logging provider output or prompts."""
+    if isinstance(exc, ValidationError):
+        return ",".join(
+            f"{'.'.join(str(part) for part in error['loc'])}:{error['type']}"
+            for error in exc.errors(include_input=False, include_url=False)
+        )[:1_000]
+    code = getattr(exc, "code", None)
+    return str(code or type(exc).__name__)[:1_000]
 
 
 class PreparationModel:
@@ -121,27 +137,32 @@ async def create_preparation(
     session: AsyncSession, user: User, body: ResearchPreparationCreate
 ) -> tuple[ResearchPreparation, ResearchRun | None]:
     preparation = await research_service.create_preparation(session, user, body)
+    stage = "model_setup"
     try:
         model = await _model_for(session, user, preparation)
+        stage = "initial_completion"
+        initial_response = await model.complete(
+            initial_brief_prompt(query=preparation.query, approval_mode=preparation.approval_mode)
+        )
+        stage = "initial_parse"
         draft = parse_brief(
-            await model.complete(
-                initial_brief_prompt(query=preparation.query, approval_mode=preparation.approval_mode)
-            )
+            initial_response
         )
         if preparation.approval_mode == "ask":
             draft = ensure_ask_question(draft)
+            stage = "store_ask_brief"
             await research_service.store_preparation_brief(
                 session, preparation, plan_data=draft.model_dump(mode="json"), final=False
             )
             return preparation, None
 
-        candidates = (
-            await _entity_discovery(preparation)
-            if draft.entity_scope.status == EntityResolutionStatus.AMBIGUOUS
-            else []
-        )
-        final = parse_brief(
-            await model.complete(
+        candidates: list[dict[str, Any]] = []
+        final = draft
+        if draft.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
+            stage = "entity_discovery"
+            candidates = await _entity_discovery(preparation)
+            stage = "final_completion"
+            final_response = await model.complete(
                 final_brief_prompt(
                     query=preparation.query,
                     draft=draft,
@@ -150,7 +171,8 @@ async def create_preparation(
                     discovery_sources=candidates,
                 )
             )
-        )
+            stage = "final_parse"
+            final = parse_brief(final_response)
         if final.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
             selected_entities = final.entity_scope.entities or draft.entity_scope.entities
             if not selected_entities and candidates:
@@ -181,6 +203,7 @@ async def create_preparation(
                 ],
             })
         final = final.model_copy(update={"questions": []})
+        stage = "store_auto_brief"
         await research_service.store_preparation_brief(
             session,
             preparation,
@@ -190,9 +213,17 @@ async def create_preparation(
             },
             final=True,
         )
+        stage = "start_auto_run"
         run = await research_service.start_preparation(session, user, preparation)
         return preparation, run
     except Exception as exc:
+        logger.error(
+            "research preparation failed preparation_id=%s stage=%s error_type=%s detail=%s",
+            preparation.id,
+            stage,
+            type(exc).__name__,
+            _validation_summary(exc),
+        )
         await research_service.fail_preparation(
             session, preparation, "Research preparation could not resolve the request. Please try again."
         )

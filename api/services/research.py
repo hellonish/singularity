@@ -258,6 +258,10 @@ async def start_preparation(
     run.preparation_id = preparation.id
     preparation.status = "started"
     await session.commit()
+    # ``updated_at`` is server-managed and expires on UPDATE. Refresh both
+    # response objects so Pydantic does not trigger async lazy IO while
+    # serializing the synchronous response model.
+    await session.refresh(preparation)
     await session.refresh(run)
     return run
 

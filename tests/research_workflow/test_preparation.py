@@ -19,15 +19,15 @@ def test_research_brief_enforces_four_to_five_plan_points_and_four_question_cap(
 
     with pytest.raises(ValidationError):
         ResearchBrief(refined_objective="Too short", plan_points=["One", "Two", "Three"])
-    with pytest.raises(ValidationError):
-        ResearchBrief(
-            refined_objective="Too many questions",
-            plan_points=_plan(),
-            questions=[
-                ClarificationQuestion(question_id=f"q{index}", text=f"Question {index}")
-                for index in range(5)
-            ],
-        )
+    capped = ResearchBrief(
+        refined_objective="Too many questions",
+        plan_points=_plan(),
+        questions=[
+            ClarificationQuestion(question_id=f"q{index}", text=f"Question {index}")
+            for index in range(5)
+        ],
+    )
+    assert len(capped.questions) == 4
 
 
 def test_ask_mode_repairs_missing_entity_question_but_auto_can_select():
@@ -73,3 +73,44 @@ def test_brief_accepts_structured_plan_and_constraint_values_from_provider():
         "Resolve the repository", "Inspect primary sources", "Compare evidence", "Write the report",
     ]
     assert brief.must_haves == ["Use the official repository"]
+
+
+def test_brief_tolerates_provider_metadata_and_normalizes_questions():
+    brief = ResearchBrief.model_validate({
+        "refined_objective": "Research the supplied repository",
+        "plan_points": [
+            "Resolve the repository",
+            "Inspect primary sources",
+            "Compare evidence",
+            "Write the report",
+            "Check citations",
+            "This sixth pointer is trimmed",
+        ],
+        "questions": [
+            "Which audience should the report prioritize?",
+            {"id": "format", "question": "Which output format?", "rationale": "Shapes delivery"},
+        ],
+        "deliverable": {"format": "Markdown report"},
+        "entity_scope": {
+            "status": "confirmed",
+            "resolution_mode": "AUTO",
+            "entities": [{
+                "name": "hellonish/singularity",
+                "surface_name": "Singularity",
+                "identifiers": [{"type": "url", "value": "https://github.com/hellonish/singularity"}],
+                "confidence": "98%",
+                "provider_rationale": "The URL is definitive",
+            }],
+            "provider_notes": "extra metadata is not part of the runtime contract",
+        },
+        "provider_notes": "ignored",
+    })
+
+    assert len(brief.plan_points) == 5
+    assert brief.questions[0].question_id == "q1"
+    assert brief.questions[1].question_id == "format"
+    assert brief.deliverable == "Markdown report"
+    assert brief.entity_scope.status == EntityResolutionStatus.RESOLVED
+    assert brief.entity_scope.resolution_mode == "auto"
+    assert brief.entity_scope.entities[0].entity_id == "hellonish_singularity"
+    assert brief.entity_scope.entities[0].confidence == 0.98

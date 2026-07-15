@@ -1,7 +1,10 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from api.config import settings
 from api.models import ResearchPreparation
+from api import research_preparation_runtime
 from api.research_preparation_runtime import ResearchPreparationError
 from api.routers import research as research_router
 
@@ -122,3 +125,68 @@ def test_preparation_failure_returns_cors_visible_gateway_error(
     assert response.status_code == 502, response.text
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert response.json()["detail"] == "Research preparation could not resolve the request."
+
+
+def test_resolved_auto_preparation_uses_one_model_call_and_starts_run(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    class FakeModel:
+        calls = 0
+
+        async def complete(self, _prompt: str, *, max_output_tokens: int = 2_500) -> str:
+            del max_output_tokens
+            self.calls += 1
+            return json.dumps({
+                **_brief(),
+                "questions": [],
+                "entity_scope": {
+                    "status": "resolved",
+                    "entities": [{
+                        "entity_id": "singularity_repo",
+                        "mention": "Singularity",
+                        "canonical_name": "hellonish/singularity",
+                        "identifiers": [{
+                            "type": "url",
+                            "value": "https://github.com/hellonish/singularity.git",
+                        }],
+                        "confidence": 1.0,
+                    }],
+                    "relationship_constraints": [],
+                    "resolution_mode": "auto",
+                    "assumptions": [],
+                },
+            })
+
+    model = FakeModel()
+
+    async def model_for(*_args, **_kwargs):
+        return model
+
+    async def enqueue(_run_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(research_preparation_runtime, "_model_for", model_for)
+    monkeypatch.setattr(research_router, "enqueue_research_run", enqueue)
+
+    credential = client.post(
+        "/llm/credentials",
+        json={"provider": "openrouter", "api_key": "sk-or-preparation-test"},
+        headers=current_user,
+    )
+    assert credential.status_code == 201, credential.text
+    response = client.post(
+        "/research/preparations",
+        json={
+            "query": "Create a report about https://github.com/hellonish/singularity.git",
+            "approval_mode": "auto",
+            "provider_credential_id": credential.json()["id"],
+            "strength": 2,
+        },
+        headers=current_user,
+    )
+
+    assert response.status_code == 202, response.text
+    assert model.calls == 1
+    assert response.json()["preparation"]["status"] == "started"
+    assert response.json()["run"]["preparation_id"] == response.json()["preparation"]["id"]
