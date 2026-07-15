@@ -32,13 +32,35 @@ class ResearchBrief(BaseModel):
     entity_scope: EntityScope = Field(default_factory=EntityScope)
     assumptions: list[str] = Field(default_factory=list, max_length=12)
 
-    @field_validator("plan_points")
+    @field_validator("plan_points", mode="before")
     @classmethod
-    def concise_plan(cls, values: list[str]) -> list[str]:
-        cleaned = [" ".join(str(value).split())[:220] for value in values if str(value).strip()]
+    def concise_plan(cls, values: Any) -> list[str]:
+        if not isinstance(values, list):
+            raise ValueError("plan_points must be an array")
+        cleaned: list[str] = []
+        for value in values:
+            if isinstance(value, dict):
+                value = value.get("text") or value.get("point") or value.get("step") or value.get("value") or ""
+            text = " ".join(str(value).split())[:220]
+            if text:
+                cleaned.append(text)
         if not 4 <= len(cleaned) <= 5:
             raise ValueError("plan_points must contain four or five non-empty pointers")
         return cleaned
+
+    @field_validator("must_haves", "assumptions", mode="before")
+    @classmethod
+    def normalize_brief_values(cls, values: Any) -> list[str]:
+        if not isinstance(values, list):
+            return []
+        normalized: list[str] = []
+        for value in values:
+            if isinstance(value, dict):
+                value = value.get("text") or value.get("value") or value.get("requirement") or value.get("assumption") or ""
+            text = " ".join(str(value).split())
+            if text:
+                normalized.append(text)
+        return list(dict.fromkeys(normalized))
 
 def parse_brief(text: str) -> ResearchBrief:
     payload = extract_object(text)

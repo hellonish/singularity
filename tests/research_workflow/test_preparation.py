@@ -55,3 +55,21 @@ def test_ask_mode_repairs_missing_entity_question_but_auto_can_select():
         ),
     )
     assert auto.questions == []
+
+
+def test_brief_accepts_structured_plan_and_constraint_values_from_provider():
+    brief = ResearchBrief.model_validate({
+        "refined_objective": "Research the repository",
+        "plan_points": [
+            {"step": "Resolve the repository"},
+            {"text": "Inspect primary sources"},
+            {"point": "Compare evidence"},
+            {"value": "Write the report"},
+        ],
+        "must_haves": [{"requirement": "Use the official repository"}],
+        "assumptions": [{"assumption": "The supplied URL is authoritative"}],
+    })
+    assert brief.plan_points == [
+        "Resolve the repository", "Inspect primary sources", "Compare evidence", "Write the report",
+    ]
+    assert brief.must_haves == ["Use the official repository"]

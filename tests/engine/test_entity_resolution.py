@@ -47,3 +47,15 @@ def test_identifier_is_a_required_discriminator_when_no_anchor_exists():
     )
     assert official.decision == SourceEntityDecision.ALIGNED
     assert namesake.decision == SourceEntityDecision.UNCERTAIN
+
+
+def test_entity_discriminators_accept_typed_provider_objects():
+    entity = EntityRef.model_validate({
+        "entity_id": "singularity",
+        "mention": "Singularity",
+        "canonical_name": "Singularity",
+        "identifiers": [{"type": "url", "value": "https://github.com/hellonish/singularity.git"}],
+        "anchors": [{"type": "repository", "value": "hellonish/singularity"}],
+    })
+    assert entity.identifiers == ["https://github.com/hellonish/singularity.git"]
+    assert entity.anchors == ["hellonish/singularity"]

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from api.config import settings
 from api.models import ResearchPreparation
+from api.research_preparation_runtime import ResearchPreparationError
 from api.routers import research as research_router
 
 
@@ -98,3 +99,26 @@ def test_ask_preparation_answers_only_current_question_and_becomes_ready(
     assert answered.json()["status"] == "ready"
     assert answered.json()["answers"] == {"identity": "https://acme.example"}
     assert answered.json()["final_brief"]["questions"] == []
+
+
+def test_preparation_failure_returns_cors_visible_gateway_error(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    async def fail_preparation(*_args, **_kwargs):
+        raise ResearchPreparationError("Research preparation could not resolve the request.")
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(research_router, "prepare_research", fail_preparation)
+    response = client.post(
+        "/research/preparations",
+        json={
+            "query": "Research an intentionally malformed upstream response",
+            "approval_mode": "ask",
+            "provider_credential_id": "credential-test",
+            "strength": 2,
+        },
+        headers={**current_user, "Origin": "http://localhost:3000"},
+    )
+    assert response.status_code == 502, response.text
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.json()["detail"] == "Research preparation could not resolve the request."

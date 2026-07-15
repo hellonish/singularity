@@ -19,6 +19,21 @@ class EntityResolutionStatus(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
+def _string_list(values: Any, *, keys: tuple[str, ...] = ("value", "name", "id", "text")) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    for item in values:
+        if isinstance(item, dict):
+            item = next((item.get(key) for key in keys if item.get(key)), "")
+        if not isinstance(item, (str, int, float)):
+            continue
+        text = " ".join(str(item).split())
+        if text:
+            normalized.append(text)
+    return list(dict.fromkeys(normalized))
+
+
 class EntityRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -32,10 +47,11 @@ class EntityRef(BaseModel):
     selected_description: str = Field(default="", max_length=600)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
-    @field_validator("aliases", "identifiers", "anchors")
+    @field_validator("aliases", "identifiers", "anchors", mode="before")
     @classmethod
-    def normalize_values(cls, values: list[str]) -> list[str]:
-        return list(dict.fromkeys(" ".join(str(value).split()) for value in values if str(value).strip()))
+    def normalize_values(cls, values: Any) -> list[str]:
+        """Accept compact strings or provider-emitted typed discriminator objects."""
+        return _string_list(values)
 
 
 class EntityScope(BaseModel):
@@ -46,6 +62,11 @@ class EntityScope(BaseModel):
     relationship_constraints: list[str] = Field(default_factory=list, max_length=12)
     resolution_mode: str = Field(default="ask", pattern="^(ask|auto|chat)$")
     assumptions: list[str] = Field(default_factory=list, max_length=12)
+
+    @field_validator("relationship_constraints", "assumptions", mode="before")
+    @classmethod
+    def normalize_scope_values(cls, values: Any) -> list[str]:
+        return _string_list(values, keys=("value", "text", "constraint", "assumption", "name"))
 
     @property
     def resolved(self) -> bool:

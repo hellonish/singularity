@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 
 from api.config import settings
 from api.dependencies import CurrentUserDep, SessionDep
+from api.research_preparation_runtime import ResearchPreparationError
 from api.research_preparation_runtime import create_preparation as prepare_research
 from api.research_preparation_runtime import finalize_after_answers
 from api.research_queue import enqueue_research_run
@@ -61,7 +62,10 @@ async def create_research_preparation(
     """Prepare a bounded plan, then pause in Ask mode or dispatch in Auto mode."""
 
     _require_worker()
-    preparation, run = await prepare_research(session, current_user, body)
+    try:
+        preparation, run = await prepare_research(session, current_user, body)
+    except ResearchPreparationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     if run is not None:
         await _dispatch_run(session, run)
     return ResearchPreparationResult(preparation=preparation, run=run)
@@ -96,6 +100,8 @@ async def answer_research_preparation(
     if complete:
         try:
             preparation = await finalize_after_answers(session, current_user, preparation)
+        except ResearchPreparationError as exc:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return preparation

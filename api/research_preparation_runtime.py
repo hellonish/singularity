@@ -28,6 +28,10 @@ from engine.research_workflow.preparation import (
 from engine.tools.contracts import ChatToolInvocation
 
 
+class ResearchPreparationError(RuntimeError):
+    """Safe public boundary for an upstream preparation-model failure."""
+
+
 class PreparationModel:
     def __init__(
         self,
@@ -188,28 +192,38 @@ async def create_preparation(
         )
         run = await research_service.start_preparation(session, user, preparation)
         return preparation, run
-    except Exception:
+    except Exception as exc:
         await research_service.fail_preparation(
             session, preparation, "Research preparation could not resolve the request. Please try again."
         )
-        raise
+        raise ResearchPreparationError(
+            "Research preparation could not resolve the request. Please try again."
+        ) from exc
 
 
 async def finalize_after_answers(
     session: AsyncSession, user: User, preparation: ResearchPreparation
 ) -> ResearchPreparation:
-    model = await _model_for(session, user, preparation)
-    draft = ResearchBrief.model_validate(preparation.plan_data)
-    final = parse_brief(
-        await model.complete(
-            final_brief_prompt(
-                query=preparation.query,
-                draft=draft,
-                answers={str(key): str(value) for key, value in preparation.answers.items()},
-                approval_mode="ask",
+    try:
+        model = await _model_for(session, user, preparation)
+        draft = ResearchBrief.model_validate(preparation.plan_data)
+        final = parse_brief(
+            await model.complete(
+                final_brief_prompt(
+                    query=preparation.query,
+                    draft=draft,
+                    answers={str(key): str(value) for key, value in preparation.answers.items()},
+                    approval_mode="ask",
+                )
             )
         )
-    )
+    except Exception as exc:
+        await research_service.fail_preparation(
+            session, preparation, "Research preparation could not finalize the approved scope."
+        )
+        raise ResearchPreparationError(
+            "Research preparation could not finalize the approved scope. Please try a new preparation."
+        ) from exc
     final = final.model_copy(update={"questions": []})
     if final.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
         questions = list(preparation.plan_data.get("questions", []))
