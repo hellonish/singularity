@@ -442,3 +442,165 @@ python -m pytest tests/database/test_schema.py -q -o addopts=
 # Full existing test suite:
 python -m pytest -q
 ```
+
+## Workflows
+
+Singularity has two engine workflows behind the API: **Chat** (a bounded,
+tool-augmented conversational turn) and **Research** (a multi-agent, DAG-based
+report pipeline running on LangGraph). The flowcharts below trace every branch
+each one can take — routing decisions, retries, fallbacks, and failure exits —
+so the full behaviour is visible without reading the source.
+
+### Chat workflow
+
+A chat turn first classifies the request with **deterministic heuristics**
+(`engine/chat/freshness.py`). A match makes retrieval *mandatory* and seeds an
+immediate discovery burst; a miss is only advisory — the model planner still
+decides whether tools help. Retrieved evidence is folded into the prompt as
+*untrusted data* before the answer model streams its reply.
+
+```mermaid
+flowchart TD
+    Start([User message + context]) --> Route{"route_chat_request()<br/>deterministic heuristics"}
+
+    Route -->|"relative time / freshness phrase<br/>e.g. 'latest', 'price', 'past 3 days'"| Fresh["tool_requested = true<br/>needs_fresh_evidence = true"]
+    Route -->|"live job discovery<br/>'find new-grad roles'"| Fresh
+    Route -->|"explicit tool phrase<br/>'search for', 'run code', 'arxiv'"| Explicit["tool_requested = true<br/>needs_fresh_evidence = false"]
+    Route -->|"terse retry<br/>'try again', 'yes please'"| Retry{"prior live request<br/>in context?"}
+    Route -->|"no heuristic match"| Conv["tool_requested = false<br/>needs_fresh_evidence = false<br/>(advisory: model may still plan)"]
+
+    Retry -->|found| Fresh
+    Retry -->|none| Conv
+
+    Fresh --> ModalCheck
+    Explicit --> ModalCheck
+    Conv --> ModalCheck{"Modal tools<br/>enabled?"}
+
+    ModalCheck -->|"tool_requested AND<br/>tools disabled"| FailTool[["ToolEvidenceUnavailable<br/>(turn fails)"]]
+    ModalCheck -->|"disabled &amp; not required"| DirectAnswer
+    ModalCheck -->|enabled| Budget["choose_agent_step_budget()<br/>emit routing + budget progress"]
+
+    Budget --> Planner["GroqChatToolPlanner<br/>+ routing hint"]
+    Planner --> Seed{"needs_fresh_evidence?"}
+    Seed -->|yes| Seeded["SeededChatToolPlanner<br/>discovery_seed(): 2 web_search calls"]
+    Seed -->|no| PlainPlan[Planner used as-is]
+
+    Seeded --> Loop
+    PlainPlan --> Loop
+
+    subgraph ToolLoop["BoundedChatToolLoop.run() — up to selected_steps"]
+        direction TB
+        Loop["Plan next tool batch<br/>(10s planning timeout)"] --> PlanNull{"planner returned<br/>a batch?"}
+        PlanNull -->|"None → stop"| LoopDone
+        PlanNull -->|batch| Caps["Apply caps:<br/>max_tool_actions, per-tool-type cap,<br/>code_execution repair cap<br/>1 DDGS then Tavily for web_search"]
+        Caps --> Exec["Execute batch in parallel<br/>(semaphore + sandbox semaphore)<br/>per-tool timeout"]
+        Exec --> Redact["Redact credential-like tokens<br/>collect ExecutedToolCall[]"]
+        Redact --> More{"more steps &amp;<br/>tools proposed?"}
+        More -->|yes| Loop
+        More -->|no| LoopDone([loop complete])
+    end
+
+    LoopDone --> Deadline{"turn deadline<br/>exceeded?"}
+    Deadline -->|yes| FailLimit[["ChatRuntimeLimitExceeded"]]
+    Deadline -->|no| Evidence{"usable tool<br/>context produced?"}
+
+    Evidence -->|"no &amp; query names a URL"| Fallback["_web_fetch_fallback()<br/>one best-effort page fetch"]
+    Fallback -->|recovered| HasContext
+    Fallback -->|"still empty &amp; tool_requested"| FailTool
+    Evidence -->|"yes"| HasContext["Merge tool context into prompt<br/>(data-only, untrusted)"]
+    Evidence -->|"no &amp; not required (degraded)"| DirectAnswer
+
+    HasContext --> DirectAnswer["ChatAgent.stream()<br/>answer model"]
+    DirectAnswer --> Streaming{"stream within<br/>deadline?"}
+    Streaming -->|timeout| FailLimit
+    Streaming -->|ok| Answer([Streamed answer + citations])
+
+    classDef fail fill:#4a1414,stroke:#ff6b6b,color:#fff;
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class FailTool,FailLimit fail;
+    class Start,Answer terminal;
+```
+
+### Research workflow
+
+Research is a LangGraph state machine (`engine/research_workflow/langgraph_runtime.py`)
+driven by a team of LLM collaborators (`agents.py`). **Strength (1 Quick / 2
+Standard / 3 Deep)** selects a `RunCaps` profile that scales QA cycles, node
+count, runtime, fetches, and token budgets. The graph plans from multiple
+perspectives, resolves each node against live tools, reviews section coverage
+in bounded QA cycles, and finally writes a cited, validated report — degrading
+to a directly-assembled fallback report rather than failing whenever an
+optional model pass breaks.
+
+```mermaid
+flowchart TD
+    Begin([Query + strength 1/2/3]) --> Caps["RunCaps.for_strength()<br/>cycles, nodes, runtime,<br/>fetch &amp; token budgets"]
+    Caps --> Deadline{{"outer run deadline<br/>(max_runtime_seconds)"}}
+    Deadline --> Polish
+
+    subgraph Graph["LangGraph parent graph"]
+        direction TB
+
+        Polish["polish_prompt<br/>LLMPlanner.polish_prompt()<br/>clarify objective, audience, constraints"] --> PlanBranch{"planner type<br/>(by strength)"}
+        PlanBranch -->|"Quick: DirectResearchPlanner"| DirectNode["single node = exact user query<br/>(zero planning completion)"]
+        PlanBranch -->|"Standard/Deep: LLMPlanner"| Perspectives["parallel_planners<br/>coverage / evidence-risk / narrative<br/>3–5 nodes each (parallel)"]
+
+        DirectNode --> Lead
+        Perspectives --> Lead["plan_lead<br/>LLMLead.merge()<br/>bounded merge → ResearchDAG<br/>(caps.max_nodes hard bound)"]
+        Lead --> LeadEmpty{"any nodes?"}
+        LeadEmpty -->|no| RootNode["inject fallback root node"]
+        LeadEmpty -->|yes| Resolve
+        RootNode --> Resolve
+
+        Resolve["resolve_frontier<br/>resolve_frontier(): ready nodes"] --> PerNode
+
+        subgraph PerNode["Per node: BoundedResearchResolver"]
+            direction TB
+            Discovery["domain_discovery_tools()<br/>route to ≤2 domain tools<br/>+ general web_search"] --> Fetch["fetch promising sources<br/>(≤ caps.max_fetches)<br/>Modal dispatch, 3 retries on infra error"]
+            Fetch --> Rank["rank_evidence()"]
+            Rank --> Answer["LLMAnswerer<br/>synthesize cited notes<br/>+ unresolved_gaps"]
+            Answer --> Records["build source_records / evidence_ids<br/>(dedup by URL)"]
+        end
+
+        Records --> AfterResearch{"route_after_research<br/>cycle &lt; caps.qa_cycles?"}
+        AfterResearch -->|"no (or Quick: 0 cycles)"| Write
+        AfterResearch -->|yes| QA["qa_sections<br/>LLMQA.review() per section"]
+
+        QA --> QAFail{"provider failure?"}
+        QAFail -->|yes| QASkip["mark skipped, keep evidence<br/>(never discard retrieved work)"]
+        QAFail -->|no| QAGaps["accept ≤ N gap suggestions<br/>pass/fail each section"]
+
+        QASkip --> AfterQA
+        QAGaps --> AfterQA{"route_after_qa<br/>new ready gap-nodes?"}
+        AfterQA -->|"yes → research the gaps"| Resolve
+        AfterQA -->|no| Write
+
+        Write["write_report<br/>LLMWriter.write()"] --> Outline{"outline pass<br/>succeeds?"}
+        Outline -->|no| Single["_write_single_call()<br/>one-shot writer"]
+        Outline -->|yes| Sections["per-section body completions<br/>(parallel, 1 repair retry each)<br/>Sections → Subsections → Sub-subsections"]
+
+        Sections --> AnySection{"any valid<br/>section?"}
+        AnySection -->|no| Single
+        AnySection -->|yes| Assemble["assemble ResearchDocument<br/>backfill references"]
+
+        Single --> Validate
+        Assemble --> Validate{"validate_document()<br/>passes?"}
+        Validate -->|no| FallbackDoc["_fallback_document()<br/>directly-assembled cited report"]
+        Validate -->|yes| GoodDoc[valid document]
+    end
+
+    FallbackDoc --> Markdown
+    GoodDoc --> Markdown["to_markdown()"]
+    Markdown --> Report([Cited research report])
+
+    Deadline -. deadline hit .-> TimeoutFail[["TimeoutError<br/>run reached deadline"]]
+
+    classDef fail fill:#4a1414,stroke:#ff6b6b,color:#fff;
+    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
+    class TimeoutFail fail;
+    class Begin,Report terminal;
+```
+
+Progress at every phase (`planning → researching → reviewing → writing`) is
+emitted as structured events and appended to a per-run diagnostics JSONL file,
+so a live run can be followed step by step (see **Application logs** above).
