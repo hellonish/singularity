@@ -9,15 +9,13 @@ import {
   type AuthenticatedUser,
 } from '@/lib/auth';
 
-// Gates the dashboard: a real session (bearer tokens in localStorage) passes
-// through. A visitor who chose "Skip for now — explore the demo" on the login
-// screen is let through in demo mode. Everyone else is bounced to /login.
+// Gates the dashboard: only a real bearer-token session in localStorage may
+// enter the workspace. Everyone else is bounced to /login.
 //
 // This runs client-side only. The tokens live in localStorage, which the server
 // can't read, so a server-side redirect isn't possible without a cookie mode.
 interface AuthSession {
-  user: AuthenticatedUser | null;
-  isDemo: boolean;
+  user: AuthenticatedUser;
 }
 
 const AuthSessionContext = createContext<AuthSession | null>(null);
@@ -31,7 +29,6 @@ export function useAuthSession(): AuthSession {
 type SessionState =
   | { status: 'checking' }
   | { status: 'authenticated'; user: AuthenticatedUser }
-  | { status: 'demo' }
   | { status: 'unauthenticated' }
   | { status: 'error' };
 
@@ -45,10 +42,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     async function resolveSession() {
       if (!isAuthenticated()) {
-        if (sessionStorage.getItem('singularity:demo') === '1') {
-          setSession({ status: 'demo' });
-          return;
-        }
         setSession({ status: 'unauthenticated' });
         router.replace('/login');
         return;
@@ -89,9 +82,5 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const value: AuthSession = session.status === 'demo'
-    ? { user: null, isDemo: true }
-    : { user: session.user, isDemo: false };
-
-  return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;
+  return <AuthSessionContext.Provider value={{ user: session.user }}>{children}</AuthSessionContext.Provider>;
 }

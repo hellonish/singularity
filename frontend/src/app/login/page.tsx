@@ -20,7 +20,6 @@ export default function LoginPage() {
   }, [router]);
 
   const goBack = () => router.push("/");
-  const enterPlatform = () => router.push("/dashboard");
 
   const signInWithGoogle = async () => {
     if (signingIn) return;
@@ -78,24 +77,6 @@ export default function LoginPage() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
               </svg>
               {signingIn ? "Signing in…" : "Continue with Google"}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '18px 0' }}>
-              <span style={{ flex: 1, height: 1, background: 'var(--border)' }}></span>
-              <span className="lp-mono" style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>or</span>
-              <span style={{ flex: 1, height: 1, background: 'var(--border)' }}></span>
-            </div>
-            <button onClick={() => { if (typeof window !== 'undefined') sessionStorage.setItem('singularity:demo', '1'); enterPlatform(); }} className="lp-mono" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', height: 44, border: 'none', background: 'transparent', color: 'var(--text-dim)', borderRadius: 11, cursor: 'pointer', fontSize: 12.5 }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-2)';
-                e.currentTarget.style.color = 'var(--text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = 'var(--text-dim)';
-              }}
-            >
-              Skip for now — explore the demo
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
           </div>
           <p className="lp-mono" style={{ margin: '20px auto 0', maxWidth: '34ch', fontSize: 10.5, lineHeight: 1.6, color: 'var(--text-faint)' }}>
