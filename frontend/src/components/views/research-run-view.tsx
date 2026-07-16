@@ -11,6 +11,7 @@ import {
   RunProgress,
 } from '@/lib/api';
 import { emptyRunProgress } from '@/lib/research-feed';
+import { useIsMobile } from '@/lib/use-media-query';
 
 /* ============================================================================
  * Research Run — live progress view.
@@ -157,7 +158,7 @@ function FeedItem({ item }: { item: RunFeedItem }) {
           <div className="sg-mono" style={{ ...MONO, display: 'inline-flex', alignItems: 'center', gap: '9px', padding: '8px 12px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)' }}>
             {isSearch ? Icon.search : Icon.wrench}
             <span style={{ color: 'var(--accent-2)' }}>{item.tool}</span>
-            {item.query && <span style={{ fontStyle: 'italic', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '360px' }}>&ldquo;{item.query}&rdquo;</span>}
+            {item.query && <span style={{ fontStyle: 'italic', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 'min(360px, 60vw)' }}>&ldquo;{item.query}&rdquo;</span>}
             {item.running ? <Spinner /> : item.failed
               ? <span style={{ color: 'var(--warn)', fontSize: '11px' }}>failed</span>
               : <span style={{ color: 'var(--text-faint)', fontSize: '10.5px' }}>{typeof item.sourceCount === 'number' ? `${item.sourceCount} results` : 'done'}</span>}
@@ -222,6 +223,7 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
   const { runs, runProgress, cancelResearch } = useWorkspace();
   const feedRef = useRef<HTMLDivElement>(null);
   const [elapsed, setElapsed] = useState(0);
+  const isMobile = useIsMobile();
 
   const run = runs.find((item) => item.id === activeRunId);
   const progress = __fixtures ?? (activeRunId ? runProgress[activeRunId] : undefined) ?? emptyRunProgress();
@@ -278,19 +280,21 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', background: 'var(--bg)' }}>
       {/* top chrome */}
-      <header style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '14px', height: '58px', padding: '0 72px 0 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
-        <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11px', letterSpacing: '.04em', color: 'var(--text-faint)' }}>
-          {Icon.search} Deep research run
-        </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '9px' }}>
-          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)' }}>
+      <header style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '14px', height: isMobile ? 'auto' : '58px', minHeight: isMobile ? '58px' : undefined, padding: isMobile ? '10px 12px 10px 56px' : '0 72px 0 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+        {!isMobile && (
+          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11px', letterSpacing: '.04em', color: 'var(--text-faint)' }}>
+            {Icon.search} Deep research run
+          </span>
+        )}
+        <div style={{ marginLeft: isMobile ? 0 : 'auto', display: 'flex', alignItems: 'center', gap: '9px', overflowX: isMobile ? 'auto' : undefined, WebkitOverflowScrolling: 'touch', flex: isMobile ? '1 1 100%' : undefined }}>
+          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)', flexShrink: 0 }}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="1.9"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>
             {fmtTime(shownElapsed)}
           </span>
-          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)' }}><span style={{ width: '7px', height: '7px', background: 'var(--text-dim)' }} />{depthLabel}</span>
-          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</span>
+          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)', flexShrink: 0 }}><span style={{ width: '7px', height: '7px', background: 'var(--text-dim)' }} />{depthLabel}</span>
+          <span className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 12px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '9px', fontSize: '12px', color: 'var(--text)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>{modelLabel}</span>
           {running && run && (
-            <button onClick={() => void cancelResearch(run.id).catch(() => undefined)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 14px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', color: 'var(--text)', borderRadius: '9px', cursor: 'pointer', ...MONO, fontSize: '12px', fontWeight: 500 }}>
+            <button onClick={() => void cancelResearch(run.id).catch(() => undefined)} style={{ display: 'flex', alignItems: 'center', gap: '7px', height: '32px', padding: '0 14px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', color: 'var(--text)', borderRadius: '9px', cursor: 'pointer', ...MONO, fontSize: '12px', fontWeight: 500, flexShrink: 0 }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>Stop
             </button>
           )}
@@ -299,13 +303,13 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
       <div style={{ flexShrink: 0, height: '2px', background: 'var(--border)' }}><div style={{ height: '100%', background: 'var(--accent)', width: `${progressPct}%`, transition: 'width .35s ease' }} /></div>
 
       {/* query bar */}
-      <div style={{ flexShrink: 0, padding: '22px 28px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
+      <div style={{ flexShrink: 0, padding: isMobile ? '18px 16px 16px' : '22px 28px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
         <div style={{ maxWidth: '1180px', margin: '0 auto' }}>
           <div className="sg-mono" style={{ ...MONO, display: 'flex', alignItems: 'center', gap: '9px', fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '10px' }}>
             <span className={running ? 'rn-dot' : ''} style={{ width: '7px', height: '7px', borderRadius: '50%', background: running ? 'var(--accent)' : 'var(--ok)' }} />
             {kicker}
           </div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(21px,2.6vw,28px)', fontWeight: 400, lineHeight: 1.25, letterSpacing: '-.02em', maxWidth: '40ch' }}>{run?.query || 'Research run'}</h1>
+          <h1 style={{ margin: 0, fontSize: 'clamp(20px,5.5vw,28px)', fontWeight: 400, lineHeight: 1.25, letterSpacing: '-.02em', maxWidth: '40ch' }}>{run?.query || 'Research run'}</h1>
           <div className="sg-mono" style={{ ...MONO, marginTop: '10px', fontSize: '11.5px', color: 'var(--text-dim)' }}>
             {finished ? `Completed in ${fmtTime(shownElapsed)}` : running ? `Running · ${fmtTime(shownElapsed)} elapsed` : run?.status === 'failed' ? 'Run failed' : 'Queued'} · {depthLabel} depth
           </div>
@@ -314,8 +318,8 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
 
       {/* body */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', background: 'var(--bg)' }}>
-        <div style={{ width: '100%', maxWidth: '1180px', margin: '0 auto', display: 'grid', gridTemplateColumns: '296px 1fr', minHeight: 0 }}>
-          <aside style={{ borderRight: '1px solid var(--border)', padding: '26px 22px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '26px' }}>
+        <div style={{ width: '100%', maxWidth: '1180px', margin: '0 auto', display: isMobile ? 'flex' : 'grid', flexDirection: isMobile ? 'column' : undefined, gridTemplateColumns: isMobile ? undefined : '296px 1fr', minHeight: 0, overflowY: isMobile ? 'auto' : undefined }}>
+          <aside style={{ borderRight: isMobile ? 'none' : '1px solid var(--border)', borderBottom: isMobile ? '1px solid var(--border)' : 'none', padding: isMobile ? '18px 16px' : '26px 22px', overflowY: isMobile ? 'visible' : 'auto', display: 'flex', flexDirection: 'column', gap: '26px', flexShrink: 0 }}>
             <PipelineRail phases={progress.phases} />
             <LiveTelemetry progress={progress} />
             <div style={{ marginTop: 'auto', paddingTop: '8px' }}>
@@ -326,7 +330,7 @@ export function ResearchRunView({ __fixtures }: { __fixtures?: RunProgress }) {
             </div>
           </aside>
 
-          <div ref={feedRef} style={{ minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', padding: '26px clamp(20px,4vw,44px) 120px' }}>
+          <div ref={feedRef} style={{ minHeight: 0, overflowY: isMobile ? 'visible' : 'auto', overscrollBehavior: 'contain', padding: isMobile ? '18px 16px 60px' : '26px clamp(20px,4vw,44px) 120px' }}>
             <div style={{ maxWidth: '760px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {progress.feed.map((item) => (
                 <div key={item.id} className="rn-in" style={{ display: 'flex', flexDirection: 'column' }}>

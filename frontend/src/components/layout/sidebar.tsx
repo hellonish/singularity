@@ -76,8 +76,9 @@ function SectionChevron({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-export function Sidebar() {
-  const { sidebarOpen, toggleSidebar, activeReportId, activeChatId, view, setView, setActiveReportId, setActiveChatId, setActiveRunId, setActivePreparationId, setMode, setSettingsOpen } = useAppStore();
+export function Sidebar({ forceOpen = false, onNavigate }: { forceOpen?: boolean; onNavigate?: () => void } = {}) {
+  const { sidebarOpen: sidebarOpenState, toggleSidebar, activeReportId, activeChatId, view, setView, setActiveReportId, setActiveChatId, setActiveRunId, setActivePreparationId, setMode, setSettingsOpen } = useAppStore();
+  const sidebarOpen = forceOpen || sidebarOpenState;
   const { reports, runs, chats, deleteChat, deleteReport } = useWorkspace();
   const [isHovered, setIsHovered] = useState(false);
   const [chatMenuOpenId, setChatMenuOpenId] = useState<string | null>(null);
@@ -119,12 +120,14 @@ export function Sidebar() {
       setActivePreparationId(null);
       setActiveRunId(run.id);
       setView('run');
+      onNavigate?.();
       return;
     }
     setActiveRunId(null);
     setView('report');
+    onNavigate?.();
   };
-  const openChat = (id: string) => { setActiveChatId(id); setView('chat'); };
+  const openChat = (id: string) => { setActiveChatId(id); setView('chat'); onNavigate?.(); };
   const onDeleteChat = async (id: string) => {
     setChatMenuOpenId(null);
     await deleteChat(id);
@@ -136,7 +139,7 @@ export function Sidebar() {
     if (activeReportId === id) { setActiveReportId(null); setView('grid'); }
   };
 
-  return <aside style={{ width: sidebarOpen ? '264px' : '62px', display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--surface)', borderRight: '1px solid var(--border)', transition: 'width .2s', flexShrink: 0 }}>
+  return <aside style={{ width: forceOpen ? 'min(84vw, 300px)' : sidebarOpen ? '264px' : '62px', display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: 'var(--surface)', borderRight: '1px solid var(--border)', transition: forceOpen ? undefined : 'width .2s', flexShrink: 0 }}>
     <div
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -146,16 +149,18 @@ export function Sidebar() {
         <>
           <button
             type="button"
-            onClick={() => setView('grid')}
+            onClick={() => { setView('grid'); onNavigate?.(); }}
             title="Go to projects"
             style={{ display: 'flex', alignItems: 'center', gap: '9px', padding: 0, border: 'none', background: 'transparent', color: 'inherit', cursor: 'pointer' }}
           >
             <AppLogoMark width={32} height={32} />
             <span style={{ fontSize: '18px', fontWeight: 600 }}>Singularity</span>
           </button>
-          <button onClick={toggleSidebar} title="Collapse sidebar" style={{ marginLeft: 'auto', width: '30px', height: '30px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            ‹
-          </button>
+          {!forceOpen && (
+            <button onClick={toggleSidebar} title="Collapse sidebar" style={{ marginLeft: 'auto', width: '30px', height: '30px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              ‹
+            </button>
+          )}
         </>
       ) : (
         isHovered ? (
@@ -168,7 +173,7 @@ export function Sidebar() {
       )}
     </div>
     <div style={{ padding: '12px' }}>
-      <button onClick={() => { setView('grid'); setMode('chat'); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '40px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', borderRadius: '10px', cursor: 'pointer', color: 'var(--text)', paddingTop: '2px', fontSize: '13.5px' }}>
+      <button onClick={() => { setView('grid'); setMode('chat'); onNavigate?.(); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '40px', border: '1px solid var(--border-strong)', background: 'var(--surface-2)', borderRadius: '10px', cursor: 'pointer', color: 'var(--text)', paddingTop: '2px', fontSize: '13.5px' }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: sidebarOpen ? '6px' : '0' }}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
         {sidebarOpen && 'New Chat'}
       </button>
@@ -283,7 +288,7 @@ export function Sidebar() {
     </nav>
     <div style={{ padding: '8px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
       <button
-        onClick={() => setSettingsOpen(true)}
+        onClick={() => { setSettingsOpen(true); onNavigate?.(); }}
         title="Settings"
         style={{ display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'flex-start' : 'center', gap: '10px', width: '100%', padding: '9px 10px', border: 'none', borderRadius: '8px', cursor: 'pointer', background: 'transparent', color: 'var(--text-dim)', fontSize: '13.5px', transition: 'background 0.2s ease' }}
         onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--surface-2)'; }}

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/app-store';
 import { logout } from '@/lib/auth';
 import { useAuthSession } from '@/components/auth/auth-guard';
+import { useIsMobile } from '@/lib/use-media-query';
 
 function accountInitial(name: string): string {
   return name.trim().charAt(0).toLocaleUpperCase() || '?';
@@ -12,12 +13,13 @@ function accountInitial(name: string): string {
 export function TopChrome() {
   const router = useRouter();
   const { user } = useAuthSession();
-  const { view, setView, setSettingsOpen, userMenuOpen, setUserMenuOpen, chatCollapsed, obAdvance } = useAppStore();
+  const { view, setView, setSettingsOpen, userMenuOpen, setUserMenuOpen, chatCollapsed, obAdvance, mobileSidebarOpen, setMobileSidebarOpen } = useAppStore();
+  const isMobile = useIsMobile();
 
   const accountName = user.display_name?.trim() || user.email || 'Account';
   const accountEmail = user.email;
 
-  const rightOffset = view === 'report' ? (chatCollapsed ? 56 : 400) : 0;
+  const rightOffset = !isMobile && view === 'report' ? (chatCollapsed ? 56 : 400) : 0;
 
   const handleBackToGrid = () => {
     setView('grid');
@@ -30,7 +32,17 @@ export function TopChrome() {
   };
 
   return (
-    <header style={{ position: 'absolute', top: 0, left: 0, right: rightOffset, zIndex: 25, display: 'flex', alignItems: 'center', gap: '8px', height: view === 'run' ? '58px' : '72px', padding: '0 18px', pointerEvents: 'none' }}>
+    <header style={{ position: 'absolute', top: 0, left: 0, right: rightOffset, zIndex: 25, display: 'flex', alignItems: 'center', gap: '8px', height: view === 'run' ? '58px' : '72px', padding: isMobile ? '0 12px' : '0 18px', pointerEvents: 'none' }}>
+      {isMobile && (
+        <button
+          onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
+          title="Open menu"
+          aria-label="Open menu"
+          style={{ pointerEvents: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', border: '1px solid var(--border)', backgroundColor: 'var(--surface)', color: 'var(--text)', borderRadius: '10px', cursor: 'pointer', flexShrink: 0 }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></svg>
+        </button>
+      )}
       {view === 'report' && (
         <button
           onClick={handleBackToGrid}

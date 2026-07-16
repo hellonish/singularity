@@ -71,12 +71,12 @@ export function ResearchPreparationView() {
       { label: 'Drafting the research plan for your approval', state: liveIndex === 3 ? 'live' : 'queued' },
     ];
     return (
-      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg)', padding: '56px 28px' }}>
+      <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg)', padding: 'clamp(84px,18vw,96px) clamp(16px,4vw,28px) clamp(32px,10vw,56px)' }}>
         <section style={{ width: '100%', maxWidth: '820px', margin: '0 auto' }}>
           <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.15em', textTransform: 'uppercase', color: failed ? 'var(--warn)' : 'var(--accent-2)' }}>
             {failed ? 'Preparation stopped' : 'Research process · Preparing plan'}
           </div>
-          <h1 style={{ margin: '12px 0 8px', fontSize: '30px', fontWeight: 400, lineHeight: 1.2 }}>
+          <h1 style={{ margin: '12px 0 8px', fontSize: 'clamp(22px,6vw,30px)', fontWeight: 400, lineHeight: 1.2 }}>
             {failed ? 'The research plan could not be prepared' : heading}
           </h1>
           <p style={{ margin: 0, color: 'var(--text-dim)', lineHeight: 1.55 }}>
@@ -148,12 +148,12 @@ export function ResearchPreparationView() {
   };
 
   return (
-    <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg)', padding: '56px 28px' }}>
+    <main style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--bg)', padding: 'clamp(32px,10vw,56px) clamp(16px,4vw,28px)' }}>
       <section style={{ width: '100%', maxWidth: '820px', margin: '0 auto' }}>
         <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.15em', textTransform: 'uppercase', color: 'var(--accent-2)' }}>
           Research plan · {preparation.approval_mode === 'auto' ? 'Auto resolve' : 'Ask mode'} · Approval required
         </div>
-        <h1 style={{ margin: '12px 0 8px', fontSize: '30px', fontWeight: 400, lineHeight: 1.2 }}>Review the approach before research starts</h1>
+        <h1 style={{ margin: '12px 0 8px', fontSize: 'clamp(22px,6vw,30px)', fontWeight: 400, lineHeight: 1.2 }}>Review the approach before research starts</h1>
         <p style={{ margin: 0, color: 'var(--text-dim)', lineHeight: 1.55 }}>{preparation.query}</p>
 
         <div style={{ marginTop: '28px', padding: '22px 24px', border: '1px solid var(--border-strong)', borderRadius: '16px', background: 'var(--surface)' }}>

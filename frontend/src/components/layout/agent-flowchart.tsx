@@ -62,11 +62,48 @@ export function AgentFlowchart({ progress }: FlowchartProps) {
     }
   `;
 
+  // Scale the fixed 600×680 diagram down to fit the container width on small
+  // screens while preserving its aspect ratio and keeping it centered.
+  const BASE_W = 600;
+  const BASE_H = 680;
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  const [scale, setScale] = React.useState(1);
+
+  React.useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const update = () => {
+      const avail = el.clientWidth;
+      setScale(Math.min(1, avail / BASE_W));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="relative w-full h-[760px] flex items-center justify-center overflow-visible">
+    <div
+      ref={wrapRef}
+      className="relative w-full flex items-center justify-center overflow-hidden"
+      style={{
+        // Reserve only the space the scaled diagram actually occupies so it
+        // stays centered and never overflows on narrow screens.
+        height: BASE_H * scale,
+      }}
+    >
       <style>{flowStyle}</style>
-      
-      <div className="relative" style={{ width: 600, height: 680 }}>
+
+      <div
+        className="relative"
+        style={{
+          width: BASE_W,
+          height: BASE_H,
+          transform: `scale(${scale})`,
+          transformOrigin: 'center center',
+        }}
+      >
+        <div className="relative" style={{ width: BASE_W, height: BASE_H }}>
         {/* BACKGROUND SVG for streams (drawn on the 2D plane behind the 3D blocks) */}
         <svg className="absolute inset-0 w-full h-full overflow-visible z-0">
           <g fill="none" strokeWidth="2.5" className="transition-colors duration-500">
@@ -165,6 +202,7 @@ export function AgentFlowchart({ progress }: FlowchartProps) {
 
         {/* Writer Agent */}
         <ShapeNode x={100} y={640} w={260} h={60} title="Writer Agent" caption="Report formation" active={isActive(7)} glowing={true} />
+        </div>
       </div>
     </div>
   );

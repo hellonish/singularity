@@ -23,6 +23,8 @@ interface AppState {
   theme: Theme;
   accent: string;
   sidebarOpen: boolean;
+  mobileSidebarOpen: boolean;
+  mobileReportChatOpen: boolean;
   view: ViewMode;
   mode: SearchMode;
   intensity: Intensity;
@@ -50,6 +52,8 @@ interface AppState {
   setTheme: (theme: Theme) => void;
   setAccent: (accent: string) => void;
   toggleSidebar: () => void;
+  setMobileSidebarOpen: (open: boolean) => void;
+  setMobileReportChatOpen: (open: boolean) => void;
   setView: (view: ViewMode) => void;
   setMode: (mode: SearchMode) => void;
   setIntensity: (intensity: Intensity) => void;
@@ -82,6 +86,8 @@ export const useAppStore = create<AppState>()(
   theme: 'system',
   accent: '#7c5230',
   sidebarOpen: true,
+  mobileSidebarOpen: false,
+  mobileReportChatOpen: false,
   view: 'grid',
   mode: 'chat',
   intensity: 'medium',
@@ -114,6 +120,8 @@ export const useAppStore = create<AppState>()(
     applyThemeAndAccent(useAppStore.getState().theme, accent);
   },
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+  setMobileSidebarOpen: (mobileSidebarOpen) => set({ mobileSidebarOpen }),
+  setMobileReportChatOpen: (mobileReportChatOpen) => set({ mobileReportChatOpen }),
   setView: (view) => set({ view }),
   setMode: (mode) => set({ mode }),
   setIntensity: (intensity) => set({ intensity }),

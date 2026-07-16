@@ -123,7 +123,7 @@ export default function LandingPage() {
       </header>
 
       {/* ===== HERO ===== */}
-      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start' }}>
+      <section id="top" data-screen-label="Hero" style={{ position: 'relative', overflow: 'hidden', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <canvas ref={waveRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 0 }}></canvas>
         <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 1080, margin: '0 auto', padding: 'clamp(24px,4vw,56px) clamp(20px,5vw,44px) clamp(32px,5vw,64px)', textAlign: 'center' }}>
           <div className="lp-mono" style={{ display: 'inline-flex', alignItems: 'center', gap: 9, fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--text-faint)', border: '1px solid var(--border)', background: 'var(--surface)', borderRadius: 999, padding: '7px 15px', marginBottom: 'clamp(16px,2.5vw,30px)', animation: 'lp-rise .5s ease both' }}>
@@ -182,7 +182,7 @@ export default function LandingPage() {
             </div>
 
             {/* right */}
-            <div style={{ position: 'relative', minHeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
                <AgentFlowchart progress={rp} />
             </div>
           </div>
@@ -261,8 +261,8 @@ export default function LandingPage() {
               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#ffbd2e' }} />
               <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#27c93f' }} />
             </div>
-            <div className="lp-mono" style={{ padding: '24px', color: '#d4d4d4', fontSize: 12.5, lineHeight: 1.6, overflowX: 'auto' }}>
-              <pre style={{ margin: '0 0 24px 0', color: 'var(--accent)', fontSize: '10px', lineHeight: 1.15, fontFamily: '"JetBrains Mono", "Courier New", Courier, monospace', whiteSpace: 'pre', letterSpacing: 0 }}>
+            <div className="lp-mono" style={{ padding: 'clamp(14px,4vw,24px)', color: '#d4d4d4', fontSize: 'clamp(10px,2.6vw,12.5px)', lineHeight: 1.6, overflowX: 'hidden' }}>
+              <pre style={{ margin: '0 0 24px 0', color: 'var(--accent)', fontSize: 'clamp(5px,1.65vw,10px)', lineHeight: 1.15, fontFamily: '"JetBrains Mono", "Courier New", Courier, monospace', whiteSpace: 'pre', letterSpacing: 0 }}>
 {`███████╗██╗███╗   ██╗ ██████╗ ██╗   ██╗██╗      █████╗ ██████╗ ██╗████████╗██╗   ██╗
 ██╔════╝██║████╗  ██║██╔════╝ ██║   ██║██║     ██╔══██╗██╔══██╗██║╚══██╔══╝╚██╗ ██╔╝
 ███████╗██║██╔██╗ ██║██║  ███╗██║   ██║██║     ███████║██████╔╝██║   ██║    ╚████╔╝
@@ -272,8 +272,8 @@ export default function LandingPage() {
               </pre>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {TERMINAL_COMMANDS.map((cmd, i) => (
-                  <div key={i} className="reveal" style={{ display: 'flex', gap: 16, transitionDelay: `${0.2 + i * 0.06}s` }}>
-                    <span style={{ color: '#4ec9b0', width: 75, flexShrink: 0 }}>{cmd.cmd}</span>
+                  <div key={i} className="reveal" style={{ display: 'flex', gap: 'clamp(10px,3vw,16px)', transitionDelay: `${0.2 + i * 0.06}s` }}>
+                    <span style={{ color: '#4ec9b0', width: 68, flexShrink: 0 }}>{cmd.cmd}</span>
                     <span style={{ color: '#a1a1aa' }}>{cmd.desc}</span>
                   </div>
                 ))}

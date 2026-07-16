@@ -111,8 +111,8 @@ export function ChatView() {
 
   return <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
     <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
-      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '90px 24px 24px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
-        <h1 style={{ margin: '0 0 20px', fontSize: '24px', fontWeight: 400 }}>{chat?.title || 'New chat'}</h1>
+      <div style={{ maxWidth: '900px', margin: '0 auto', padding: 'clamp(64px,14vw,90px) clamp(14px,4vw,24px) 24px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        <h1 style={{ margin: '0 0 20px', fontSize: 'clamp(19px,5vw,24px)', fontWeight: 400 }}>{chat?.title || 'New chat'}</h1>
         {hasMore && <div className="sg-mono" style={{ alignSelf: 'center', fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Scroll up for earlier messages</div>}
         {visibleTurns.map((message, index) => {
           // This assistant turn is actively streaming its answer when the chat
@@ -121,7 +121,7 @@ export function ChatView() {
           // alive and to soften the streaming answer's trailing edge.
           const isLastTurn = index === visibleTurns.length - 1;
           const answerStreaming = message.role === 'assistant' && isStreaming && isLastTurn && !message.pending && !!message.content;
-          return <div key={message.id} data-message-id={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+          return <div key={message.id} data-message-id={message.id} style={{ alignSelf: message.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '92%' }}>
           <div className="sg-mono" style={{ fontSize: '9.5px', letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--text-faint)', marginBottom: '6px', textAlign: message.role === 'user' ? 'right' : 'left' }}>{message.role === 'user' ? 'You' : 'Singularity'}</div>
           {message.role === 'assistant' && message.progress?.length ? (
             <ProgressTrail steps={message.progress} thinking={!!message.pending} streaming={answerStreaming} />

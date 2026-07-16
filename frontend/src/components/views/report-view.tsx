@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useAppStore } from '@/store/app-store';
 import { useWorkspace } from '@/components/workspace-provider';
 import { Markdown } from '@/components/ui/markdown';
+import { useIsMobile } from '@/lib/use-media-query';
 
 export function ReportView() {
-  const { activeReportId, activeChatId, setActiveChatId, setActiveRunId, setView, chatCollapsed, toggleChatCollapsed } = useAppStore();
+  const { activeReportId, activeChatId, setActiveChatId, setActiveRunId, setView, chatCollapsed, toggleChatCollapsed, mobileReportChatOpen, setMobileReportChatOpen } = useAppStore();
+  const isMobile = useIsMobile();
   const { reports, runs, chats, messages, reportContent, runActivity, loadReport, loadMessages, createAndSendChat, sendChat, cancelResearch, activeCredential, availableModels, modelsLoading, streamingChatIds } = useWorkspace();
   const [query, setQuery] = useState('');
   const [sending, setSending] = useState(false);
@@ -101,11 +103,13 @@ export function ReportView() {
   // above hands it to the live run surface on the next client commit.
   if (running) return null;
 
-  return <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-    <section style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '100px min(8vw, 96px) 48px' }}>
+  const chatOpen = isMobile ? mobileReportChatOpen : !chatCollapsed;
+
+  return <div style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative' }}>
+    <section style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: isMobile ? '84px 20px 48px' : '100px min(8vw, 96px) 48px' }}>
       <article style={{ maxWidth: '820px', margin: '0 auto' }}>
         <div className="sg-mono" style={{ fontSize: '10.5px', letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--accent-2)', marginBottom: '14px' }}>Research report</div>
-        <h1 style={{ margin: '0 0 14px', fontSize: '36px', fontWeight: 400, fontStyle: 'italic' }}>{report?.title || 'Research report'}</h1>
+        <h1 style={{ margin: '0 0 14px', fontSize: 'clamp(24px,7vw,36px)', fontWeight: 400, fontStyle: 'italic' }}>{report?.title || 'Research report'}</h1>
         {running && <div style={{ margin: '20px 0', padding: '15px 17px', border: '1px solid var(--border-strong)', borderRadius: '12px', background: 'var(--surface)' }}>
           <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.1em', color: 'var(--accent-2)', textTransform: 'uppercase' }}>{activity?.phase || run.status}</div>
           <div style={{ marginTop: '6px', color: 'var(--text-dim)' }}>{activity?.message || 'Research is working…'}</div>
@@ -115,16 +119,37 @@ export function ReportView() {
         {content ? <div className="chat-message-content report-content" style={{ fontSize: '17px', lineHeight: 1.72 }}><Markdown>{content}</Markdown></div> : !running && <p style={{ color: 'var(--text-dim)' }}>This report has no completed version yet.</p>}
       </article>
     </section>
-    <aside style={{ width: chatCollapsed ? '56px' : '390px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', flexDirection: 'column', minHeight: 0, transition: 'width 0.3s ease', overflow: 'hidden', position: 'relative' }}>
+
+    {isMobile && !mobileReportChatOpen && (
+      <button
+        onClick={() => setMobileReportChatOpen(true)}
+        title="Open report chat"
+        aria-label="Open report chat"
+        style={{ position: 'absolute', bottom: '20px', right: '20px', zIndex: 20, width: '52px', height: '52px', borderRadius: '50%', border: 'none', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow)', cursor: 'pointer' }}
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+      </button>
+    )}
+
+    <aside
+      style={isMobile ? {
+        position: 'fixed', inset: 0, zIndex: 70, background: 'var(--surface)',
+        display: chatOpen ? 'flex' : 'none', flexDirection: 'column', minHeight: 0,
+      } : {
+        width: chatCollapsed ? '56px' : '390px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', flexDirection: 'column', minHeight: 0, transition: 'width 0.3s ease', overflow: 'hidden', position: 'relative',
+      }}
+    >
       {/* Closed State Button */}
-      <div style={{ position: 'absolute', top: '20px', left: '0', width: '56px', display: 'flex', justifyContent: 'center', transition: 'opacity 0.2s ease', opacity: chatCollapsed ? 1 : 0, pointerEvents: chatCollapsed ? 'auto' : 'none', zIndex: 10 }}>
-        <button onClick={toggleChatCollapsed} title="Open chat" style={{ width: '32px', height: '32px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          ‹
-        </button>
-      </div>
+      {!isMobile && (
+        <div style={{ position: 'absolute', top: '20px', left: '0', width: '56px', display: 'flex', justifyContent: 'center', transition: 'opacity 0.2s ease', opacity: chatCollapsed ? 1 : 0, pointerEvents: chatCollapsed ? 'auto' : 'none', zIndex: 10 }}>
+          <button onClick={toggleChatCollapsed} title="Open chat" style={{ width: '32px', height: '32px', border: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            ‹
+          </button>
+        </div>
+      )}
 
       {/* Open State Content */}
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: '390px', transition: 'opacity 0.2s ease', opacity: chatCollapsed ? 0 : 1, pointerEvents: chatCollapsed ? 'none' : 'auto' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: isMobile ? undefined : '390px', transition: isMobile ? undefined : 'opacity 0.2s ease', opacity: chatOpen ? 1 : 0, pointerEvents: chatOpen ? 'auto' : 'none' }}>
         <div style={{ padding: '20px 18px 12px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
             <div className="sg-mono" style={{ fontSize: '10px', letterSpacing: '.12em', textTransform: 'uppercase', color: 'var(--text-faint)' }}>Report chat</div>
@@ -133,8 +158,8 @@ export function ReportView() {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
                 New
               </button>
-              <button onClick={toggleChatCollapsed} title="Close chat" style={{ width: '28px', height: '28px', border: '1px solid var(--border)', background: 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                ›
+              <button onClick={() => (isMobile ? setMobileReportChatOpen(false) : toggleChatCollapsed())} title="Close chat" style={{ width: '28px', height: '28px', border: '1px solid var(--border)', background: 'transparent', borderRadius: '6px', cursor: 'pointer', color: 'var(--text-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {isMobile ? '✕' : '›'}
               </button>
             </div>
           </div>
