@@ -55,6 +55,11 @@ dc build api
 
 # --- migrate (optional) -----------------------------------------------------
 if [ "$RUN_MIGRATE" = true ]; then
+  # LangGraph checkpoint setup includes DDL. Stop old workers before it runs so
+  # a long-lived research transaction cannot hold a lock until Supabase cancels
+  # the migration for exceeding statement_timeout.
+  log "Stopping api + worker before migrations"
+  dc stop api worker
   log "Running Alembic migrations"
   dc run --rm migrate
 else

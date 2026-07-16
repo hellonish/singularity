@@ -46,3 +46,10 @@ async def create_schema() -> None:
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+    # Local SQLite does not use the production migration service. Initialize
+    # LangGraph's checkpoint tables at application startup instead, never from
+    # an individual research run.
+    if settings.database_url.startswith("sqlite"):
+        from engine.research_workflow.checkpoint import setup_checkpointer
+
+        await setup_checkpointer(settings.database_url)

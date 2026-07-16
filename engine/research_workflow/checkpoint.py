@@ -32,10 +32,21 @@ def create_checkpointer(database_url: str):
 
 @asynccontextmanager
 async def checkpoint_context(database_url: str):
-    """Open, initialize, and close the durable checkpointer correctly."""
+    """Open and close a checkpointer whose schema was initialized at deploy time."""
+    manager = create_checkpointer(database_url)
+    async with manager as checkpointer:
+        yield checkpointer
+
+
+async def setup_checkpointer(database_url: str) -> None:
+    """Apply LangGraph checkpoint migrations once during startup or deployment.
+
+    ``AsyncPostgresSaver.setup`` executes DDL, including concurrent index
+    creation. Running it from every research job can block behind an existing
+    transaction until Supabase cancels it for exceeding statement_timeout.
+    """
     manager = create_checkpointer(database_url)
     async with manager as checkpointer:
         setup = getattr(checkpointer, "setup", None)
         if setup is not None:
             await setup()
-        yield checkpointer

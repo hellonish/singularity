@@ -60,7 +60,10 @@ services:
       - .env.production
     environment:
       SINGULARITY_AUTO_CREATE_SCHEMA: "false"
-    command: alembic upgrade head
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && python -m api.checkpoint_setup
     restart: "no"
 
   api:
