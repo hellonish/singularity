@@ -2,7 +2,12 @@ import pytest
 from pydantic import ValidationError
 
 from engine.entity_resolution import EntityRef, EntityResolutionStatus, EntityScope
-from engine.research_workflow.preparation import ClarificationQuestion, ResearchBrief, ensure_ask_question
+from engine.research_workflow.preparation import (
+    ClarificationQuestion,
+    ResearchBrief,
+    ensure_ask_question,
+    parse_final_brief,
+)
 
 
 def _plan() -> list[str]:
@@ -114,3 +119,21 @@ def test_brief_tolerates_provider_metadata_and_normalizes_questions():
     assert brief.entity_scope.resolution_mode == "auto"
     assert brief.entity_scope.entities[0].entity_id == "hellonish_singularity"
     assert brief.entity_scope.entities[0].confidence == 0.98
+
+
+def test_final_brief_keeps_the_validated_plan_when_model_returns_only_entity_scope():
+    draft = ResearchBrief(
+        refined_objective="Analyze the supplied repository",
+        plan_points=_plan(),
+        deliverable="Cited repository report",
+    )
+
+    final = parse_final_brief(
+        '{"entity_scope":{"status":"resolved","resolution_mode":"auto","entities":[{"name":"hellonish/singularity","identifiers":["https://github.com/hellonish/singularity"]}]}}',
+        draft,
+    )
+
+    assert final.refined_objective == draft.refined_objective
+    assert final.plan_points == draft.plan_points
+    assert final.entity_scope.status == EntityResolutionStatus.RESOLVED
+    assert final.entity_scope.entities[0].canonical_name == "hellonish/singularity"

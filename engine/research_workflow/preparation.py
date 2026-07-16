@@ -141,6 +141,25 @@ def parse_brief(text: str) -> ResearchBrief:
     return ResearchBrief.model_validate(payload)
 
 
+def parse_final_brief(text: str, draft: ResearchBrief) -> ResearchBrief:
+    """Apply a final entity-resolution response to an already valid draft.
+
+    The initial completion establishes the research objective and the bounded
+    4–5 point plan. The optional final completion exists to freeze entity
+    identity after discovery or clarification. Some providers return only that
+    changed ``entity_scope`` object despite being asked to repeat the whole
+    contract; preserve the validated draft fields instead of treating that
+    narrow patch as an invalid new plan.
+    """
+    payload = extract_object(text)
+    if payload is None:
+        raise ValueError("research preparation model did not return a JSON object")
+    return ResearchBrief.model_validate({
+        **draft.model_dump(mode="json"),
+        **payload,
+    })
+
+
 def with_validated_execution_requirements(brief: ResearchBrief, query: str) -> ResearchBrief:
     """Derive execution requirements from the original request, not model output."""
     return brief.model_copy(update={

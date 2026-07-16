@@ -205,3 +205,71 @@ def test_resolved_auto_preparation_uses_one_model_call_and_waits_for_approval(
     active = client.get("/research/preparations/active", headers=current_user)
     assert active.status_code == 200, active.text
     assert active.json() is None
+
+
+def test_auto_preparation_accepts_a_partial_final_entity_resolution(
+    client: TestClient, current_user: dict[str, str], monkeypatch
+) -> None:
+    class FakeModel:
+        calls = 0
+
+        async def complete(self, _prompt: str, *, max_output_tokens: int = 2_500) -> str:
+            del max_output_tokens
+            self.calls += 1
+            if self.calls == 1:
+                return json.dumps({
+                    **_brief(),
+                    "questions": [],
+                    "entity_scope": {
+                        "status": "ambiguous", "entities": [{"name": "Singularity"}],
+                        "relationship_constraints": [], "resolution_mode": "auto", "assumptions": [],
+                    },
+                })
+            # OpenRouter models occasionally return just the field changed by
+            # discovery. The runtime must retain the validated initial plan.
+            return json.dumps({
+                "entity_scope": {
+                    "status": "resolved",
+                    "entities": [{
+                        "name": "hellonish/singularity",
+                        "identifiers": ["https://github.com/hellonish/singularity"],
+                    }],
+                    "relationship_constraints": [], "resolution_mode": "auto", "assumptions": [],
+                },
+            })
+
+    model = FakeModel()
+
+    async def model_for(*_args, **_kwargs):
+        return model
+
+    async def discover(_preparation):
+        return [{"title": "hellonish/singularity", "url": "https://github.com/hellonish/singularity"}]
+
+    monkeypatch.setattr(settings, "research_worker_enabled", True)
+    monkeypatch.setattr(research_preparation_runtime, "_model_for", model_for)
+    monkeypatch.setattr(research_preparation_runtime, "_entity_discovery", discover)
+
+    credential = client.post(
+        "/llm/credentials",
+        json={"provider": "openrouter", "api_key": "sk-or-preparation-test"},
+        headers=current_user,
+    )
+    assert credential.status_code == 201, credential.text
+    response = client.post(
+        "/research/preparations",
+        json={
+            "query": "Create a report about https://github.com/hellonish/singularity",
+            "approval_mode": "auto",
+            "provider_credential_id": credential.json()["id"],
+            "strength": 2,
+        },
+        headers=current_user,
+    )
+
+    assert response.status_code == 202, response.text
+    preparation = response.json()["preparation"]
+    assert model.calls == 2
+    assert preparation["status"] == "ready"
+    assert len(preparation["final_brief"]["plan_points"]) == 4
+    assert preparation["final_brief"]["entity_scope"]["status"] == "resolved"

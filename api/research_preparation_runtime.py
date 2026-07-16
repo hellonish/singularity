@@ -26,6 +26,7 @@ from engine.research_workflow.preparation import (
     final_brief_prompt,
     initial_brief_prompt,
     parse_brief,
+    parse_final_brief,
     with_validated_execution_requirements,
 )
 from engine.tools.contracts import ChatToolInvocation
@@ -177,7 +178,9 @@ async def create_preparation(
                 )
             )
             stage = "final_parse"
-            final = with_validated_execution_requirements(parse_brief(final_response), preparation.query)
+            final = with_validated_execution_requirements(
+                parse_final_brief(final_response, draft), preparation.query
+            )
         if final.entity_scope.status == EntityResolutionStatus.AMBIGUOUS:
             selected_entities = final.entity_scope.entities or draft.entity_scope.entities
             if not selected_entities and candidates:
@@ -247,7 +250,7 @@ async def finalize_after_answers(
     try:
         model = await _model_for(session, user, preparation)
         draft = ResearchBrief.model_validate(preparation.plan_data)
-        final = with_validated_execution_requirements(parse_brief(
+        final = with_validated_execution_requirements(parse_final_brief(
             await model.complete(
                 final_brief_prompt(
                     query=preparation.query,
@@ -255,7 +258,8 @@ async def finalize_after_answers(
                     answers={str(key): str(value) for key, value in preparation.answers.items()},
                     approval_mode="ask",
                 )
-            )
+            ),
+            draft,
         ), preparation.query)
     except Exception as exc:
         await research_service.fail_preparation(
