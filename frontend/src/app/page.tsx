@@ -82,7 +82,6 @@ export default function LandingPage() {
         .lp-btn:active{transform:translateY(0)}
         .lp-btn-primary:hover{background:var(--text);box-shadow:0 6px 22px var(--accent-soft)}
         .lp-btn-primary:hover svg{transform:translateX(3px)}
-        .lp-btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
       ` }} />
 
       {/* ===== NAV ===== */}
@@ -141,9 +140,6 @@ export default function LandingPage() {
               Get started
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             </button>
-            <a href="#research" className="lp-mono lp-btn lp-btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: 9, height: 50, padding: '0 24px', border: '1px solid var(--border-strong)', borderRadius: 0, background: 'var(--surface)', color: 'var(--text)', fontSize: 13.5, fontWeight: 500 }}>
-              See a sample report
-            </a>
           </div>
           <div className="lp-mono" style={{ marginTop: 14, fontSize: 11.5, color: 'var(--text-faint)', animation: 'lp-rise .5s ease both .2s' }}>No credit card · Your keys, your usage</div>
 
