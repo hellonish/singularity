@@ -141,6 +141,11 @@ DocumentSection.model_rebuild()
 
 
 def validate_document(document: ResearchDocument) -> ResearchDocument:
+    # A title and repeated query can be serialized as Markdown even when the
+    # writer produced no report body at all. Treat that as a failed output,
+    # rather than letting the worker mark a hollow report ready.
+    if not document.sections:
+        raise ValueError("research document must contain at least one cited section")
     refs = {ref.tag for ref in document.references}
     for section in _sections(document.sections):
         # A heading with neither blocks nor subsections renders as an empty

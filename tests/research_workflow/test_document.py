@@ -121,3 +121,15 @@ def test_document_requires_a_reference_for_every_content_block():
     )
     with pytest.raises(ValueError, match="must include at least one reference"):
         validate_document(doc)
+
+
+def test_validate_document_rejects_a_report_with_no_sections():
+    doc = ResearchDocument(
+        title="Research report",
+        query="What changed?",
+        sections=[],
+        references=[],
+    )
+
+    with pytest.raises(ValueError, match="at least one cited section"):
+        validate_document(doc)

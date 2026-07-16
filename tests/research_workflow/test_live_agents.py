@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from engine.research_workflow.caps import RunCaps
 from engine.research_workflow.dag import ResearchDAG, ResearchNode, ResearchNodeStatus
 from engine.research_workflow.agents import LLMLead, LLMPlanner, LLMQA, LLMWriter
@@ -241,6 +243,22 @@ def test_writer_falls_back_to_completed_cited_evidence_after_provider_failure(ca
         record.levelname == "WARNING" and "ProviderError" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_writer_does_not_turn_missing_citable_evidence_into_an_empty_report() -> None:
+    class FailingModel:
+        async def complete(self, prompt: str, *, max_output_tokens: int) -> str:
+            raise ProviderError(code="provider_invalid_json_response", message="invalid JSON", retryable=True)
+
+    caps = RunCaps.for_strength(1)
+    dag = ResearchDAG()
+    dag.add_node(
+        ResearchNode(node_id="root", question="What happened?", section_id="overview", level=0),
+        caps,
+    )
+
+    with pytest.raises(ValueError, match="at least one cited section"):
+        asyncio.run(LLMWriter(FailingModel()).write(dag, "What happened?"))
 
 
 def _answered_dag(caps: RunCaps) -> ResearchDAG:

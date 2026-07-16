@@ -14,6 +14,7 @@ from .document import (
     ResearchDocument,
     StatsBlock,
     TableBlock,
+    validate_document,
 )
 
 # The researcher node numbers its evidence as ``SOURCE 1``/``SOURCE 2`` so the
@@ -41,6 +42,10 @@ def strip_source_tokens(text: str) -> str:
 
 def to_markdown(document: ResearchDocument) -> str:
     """Loss-aware export for clients that only support Markdown."""
+    # Keep every export behind the same completeness invariant as the writer.
+    # This protects persisted reports even if a future workflow collaborator
+    # returns an unvalidated ResearchDocument.
+    document = validate_document(document)
     refs = {ref.tag: ref for ref in document.references}
     parts = [f"# {document.title}", f"**Query:** {document.query}"]
     for section in document.sections:
