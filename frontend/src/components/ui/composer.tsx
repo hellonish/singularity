@@ -144,7 +144,7 @@ export function Composer() {
     : chatBusy ? 'Singularity is replying…' : 'Shift + Enter for new line';
 
   return (
-    <div style={{ flexShrink: 0, padding: '14px 24px 22px', background: 'linear-gradient(0deg, var(--bg) 62%, transparent)' }}>
+    <div style={{ flexShrink: 0, padding: 'clamp(10px,3vw,14px) clamp(10px,4vw,24px) clamp(14px,4vw,22px)', background: 'linear-gradient(0deg, var(--bg) 62%, transparent)' }}>
       <form
         data-tour="composer"
         onSubmit={handleSubmit}
@@ -158,13 +158,14 @@ export function Composer() {
             onKeyDown={handleKeyDown}
             rows={1}
             placeholder={mode === 'research' ? 'What do you want to research?' : 'Message Singularity...'}
-            style={{ flex: 1, boxSizing: 'border-box', resize: 'none', border: 'none', outline: 'none', overflowY: 'hidden', background: 'transparent', color: 'var(--text)', fontFamily: 'var(--font-serif)', fontSize: '18px', lineHeight: 1.5, maxHeight: `${COMPOSER_MAX_HEIGHT_PX}px`, padding: '4px 4px' }}
+            style={{ flex: 1, boxSizing: 'border-box', resize: 'none', border: 'none', outline: 'none', overflowY: 'hidden', background: 'transparent', color: 'var(--text)', fontFamily: 'var(--font-serif)', fontSize: '16px', lineHeight: 1.5, maxHeight: `${COMPOSER_MAX_HEIGHT_PX}px`, padding: '4px 4px' }}
           />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 12px 12px' }}>
-          
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+
           {/* Mode Chip */}
-          <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
               data-tour="mode"
               type="button"
@@ -193,7 +194,7 @@ export function Composer() {
           </div>
 
           {mode === 'research' && (
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
               <button
                 type="button"
                 onClick={() => toggleMenu('approval')}
@@ -219,7 +220,7 @@ export function Composer() {
           )}
 
           {/* Effort Chip */}
-          <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
               type="button"
               onClick={() => toggleMenu('effort')}
@@ -247,7 +248,7 @@ export function Composer() {
           </div>
 
           {/* Model Chip */}
-          <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative', flexShrink: 0 }}>
             <button
               type="button"
               onClick={() => toggleMenu('model')}
@@ -295,12 +296,13 @@ export function Composer() {
               </div>
             )}
           </div>
+        </div>
 
           <button
             type="submit"
             title="Send"
             disabled={!canSend}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 'auto', width: '32px', height: '32px', borderRadius: '10px', border: 'none', backgroundColor: canSend ? 'var(--accent)' : 'var(--surface-3)', color: canSend ? '#fff' : 'var(--text-faint)', cursor: canSend ? 'pointer' : 'default', transition: 'background-color 0.2s, color 0.2s' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: '32px', height: '32px', borderRadius: '10px', border: 'none', backgroundColor: canSend ? 'var(--accent)' : 'var(--surface-3)', color: canSend ? '#fff' : 'var(--text-faint)', cursor: canSend ? 'pointer' : 'default', transition: 'background-color 0.2s, color 0.2s' }}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
           </button>

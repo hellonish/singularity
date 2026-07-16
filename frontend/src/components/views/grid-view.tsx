@@ -90,10 +90,10 @@ export function GridView() {
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
-        <div style={{ maxWidth: '1180px', margin: '0 auto', padding: '90px 32px 40px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ maxWidth: '1180px', margin: '0 auto', padding: 'clamp(64px,14vw,90px) clamp(16px,4vw,32px) 40px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: '34px', fontWeight: 400, letterSpacing: '-.02em', lineHeight: 1.05, minHeight: '36px' }}>
+              <h1 style={{ margin: 0, fontSize: 'clamp(24px,6vw,34px)', fontWeight: 400, letterSpacing: '-.02em', lineHeight: 1.15, minHeight: '36px' }}>
                 {greetingMessage ? (
                   <>{greetingMessage.prefix}<span style={{ color: 'var(--accent)' }}>{greetingMessage.suffix}</span></>
                 ) : '\u00A0'}
@@ -102,7 +102,7 @@ export function GridView() {
             <span className="sg-mono" style={{ fontSize: '12px', color: 'var(--text-dim)', paddingBottom: '4px' }}>{reports.length} reports</span>
           </div>
           {loading ? <p style={{ color: 'var(--text-dim)' }}>Loading your workspace…</p> : reports.length === 0 ? null : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(268px, 1fr))', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(268px, 100%), 1fr))', gap: '16px' }}>
               {reports.map((report) => {
                 const run = runs.find((item) => item.report_id === report.id);
                 return <button key={report.id} onClick={() => handleOpenProject(report.id, run?.id)} className="animate-sg-rise" style={{ position: 'relative', minWidth: 0, overflow: 'hidden', cursor: 'pointer', textAlign: 'left', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '14px', padding: '18px 18px 15px', boxShadow: 'var(--shadow-sm)', color: 'var(--text)' }}>

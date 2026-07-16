@@ -83,7 +83,8 @@ User
 ├── Reports (one-to-many)
 │   ├── Report versions (one-to-many)
 │   └── Chats (one-to-many, optional report link)
-├── Research runs (one-to-many, optionally linked to a report)
+├── Research preparations (one-to-many, approval-gated research briefs)
+├── Research runs (one-to-many, optionally linked to a report and preparation)
 └── Refresh tokens (one-to-many)
 ```
 
@@ -117,7 +118,7 @@ All routes are available in the generated OpenAPI UI at `/docs`.
 | Summaries | `GET/POST /chats/{id}/summaries` | Stores durable chat-summary checkpoints. |
 | Reports | `GET/POST /reports`, `GET /reports/{id}`, `GET /reports/{id}/stream` | Creates and lists report metadata; the stream endpoint replays the latest stored report version over SSE (or `report.pending` when none exists yet). |
 | Versions | `GET/POST /reports/{id}/versions`, `GET /reports/{id}/versions/{version_id}/content` | Saves version content into local object storage and exposes it as Markdown. |
-| Research | `GET/POST /research/runs`, `GET /research/runs/{id}`, `POST /research/runs/{id}/cancel`, `GET /research/runs/{id}/events` | Creates bounded LangGraph research runs, persists replayable events, and optionally dispatches them to the ARQ worker. |
+| Research | `POST /research/preparations`, answer/start/cancel preparation routes, plus `GET/POST /research/runs`, run cancellation, and run events | Prepares an approval-gated research brief, then queues a bounded LangGraph run and replays its durable events. Direct `POST /research/runs` remains for compatible clients. |
 | LLM / BYOK | `GET/POST/PATCH /llm/credentials`, `GET /llm/credentials/{id}/models`, `POST /llm/completions` | Stores encrypted Groq credentials, discovers models with that credential, and runs request-scoped completions. |
 
 `POST /chats` is limited to 3 requests/second per user, message sends (normal
@@ -131,10 +132,10 @@ multiple API instances.
 `engine/research_workflow/` contains the LangGraph state contracts and bounded runtime:
 
 - QA may add at most two research nodes per section per cycle.
-- Each research node may make at most four external tool calls: one search,
-  two page fetches, and one optional recovery call.
-- Strength controls the overall cycle, node, and runtime caps; it does
-  not increase either per-section QA suggestions or per-node tool calls.
+- Each research node has a strength-specific external-tool budget (4/5/6 calls
+  for Quick/Standard/Deep), including a bounded number of page fetches.
+- Strength controls the overall cycle, node, runtime, and per-node tool caps;
+  the per-section QA-suggestion cap remains fixed.
 - `api/research_worker.py` is the ARQ entrypoint. It assembles the BYOK LLM
   adapter, Modal executor, QA reviewer, vector scope, structured writer, and
   LangGraph checkpointer directly from the persisted run configuration.
@@ -466,240 +467,150 @@ python -m pytest -q
 
 ## Workflows
 
-Singularity has two engine workflows behind the API: **Chat** (a bounded,
-tool-augmented conversational turn) and **Research** (a multi-agent, DAG-based
-report pipeline running on LangGraph). The flowcharts below trace every branch
-each one can take — routing decisions, retries, fallbacks, and failure exits —
-so the full behaviour is visible without reading the source.
+Singularity has two user-facing engine paths: **Chat**, a persisted conversational
+turn with optional tool use, and **Research**, an approval-gated, durable report
+run. The diagrams below reflect the current API, CLI, and worker boundaries.
 
-### Chat workflow (unified agent loop)
+### Chat mode
 
-A chat turn is **one native tool-calling agent loop**
-(`engine/chat/agent_loop.py`): the same model that answers decides which tools
-to call, receives full (budgeted) results as native `role: "tool"` messages,
-can emit many tool calls in a single turn (executed in parallel), and streams
-the final answer from the same loop. Deterministic heuristics
-(`engine/chat/freshness.py`) are advisory: a freshness match seeds a
-speculative discovery burst and adds a time-sensitive hint, but never gates
-the turn. Effort profiles, execution routing, redaction, and citation handling
-bound the loop as guardrails.
-
-#### Components and methods
-
-| Component | Replaced | Responsibility |
-| --- | --- | --- |
-| `engine/chat/agent_loop.py` — `UnifiedChatAgentLoop.stream()` | `ChatRuntime.stream()` + `BoundedChatToolLoop.run()` + `ChatAgent.stream()` | Owns the whole turn: message-list state, bounded iteration, tool dispatch, final answer streaming. |
-| `LLMProvider.stream_with_tools()` | `plan_tool_call()` | One provider call per model turn that yields streamed answer deltas and/or a terminal batch of complete tool calls (natively parallel). `stream_chat()` remains for text-only turns (tools disabled, forced final answer). |
-| Concurrent turn setup | serial routing → budget → capability lookup | Model-capability resolution (6h-TTL cached) and the speculative two-search discovery seed run as tasks before the first model turn. |
-| `engine/chat/catalog.py` — full skill catalog + `load_skill(skill_id)` meta-tool | `select_skills()` 3-skill keyword shortlist | System prompt lists a one-line summary of **every** chat-capable skill; the model calls `load_skill` to pull full instructions on demand (progressive disclosure). |
-| `route_chat_request()` (advisory mode) | mandatory fail-closed routing | A freshness match seeds the discovery burst and adds a "time-sensitive" hint; it never fails the turn. Hard failure remains only for explicit, unsimulatable tool commands ("run this code") with tools disabled. |
-| Typed tool-error taxonomy | `_web_fetch_fallback()` URL regex | Tool failures return typed tool messages (`retryable_infra` / `permanent` / `empty_result`) so the model chooses retry, alternate tool, or explicit disclosure. |
-| `budget_agent_messages()` | `budget_chat_prompt()` + `format_tool_context()` string merge | Fits the full message list (system + history + tool messages) per model turn: oldest tool payloads compact first, then the `<context>` block, then the output budget; message structure is never broken. |
-| Effort profiles (`effort.py`), `RoutedChatToolExecutor`, redaction, URL-dedup citations | unchanged | Turn/action/parallelism/timeout ceilings, trusted-function vs sandbox routing with retries, credential redaction, untrusted-data framing. |
-
-Keyword step budgeting (`choose_agent_step_budget`) is gone: the loop starts
-each turn with the full effort ceiling available and a per-turn budget line in
-the system prompt; the model stops when it has enough evidence — the caps
-*are* the budget. A durable turn-checkpoint store (resume tool results across
-dropped SSE connections) is planned but not yet implemented.
-
-#### Unified pipeline
+Chat is served by `POST /chats/{chat_id}/messages/stream`. The API persists the
+user message, resolves the selected encrypted BYOK credential only for the
+request, adds prior conversation and (when attached) authorized report context,
+then streams the shared `UnifiedChatAgentLoop`. The assistant message is
+persisted before the SSE stream closes.
 
 ```mermaid
 flowchart TD
-    Start([User message + history]) --> Setup
+    Start([User sends a chat message]) --> Auth["Authenticate user and load chat"]
+    Auth --> PersistUser["Persist user message"]
+    PersistUser --> Config{"Active BYOK credential?"}
+    Config -->|no| CredentialError([HTTP 422])
+    Config -->|yes| Context{"Chat linked to a report?"}
+    Context -->|yes| Retrieve["Retrieve authorized report chunks<br/>and prior chat history"]
+    Retrieve --> Retrieved{"Context available?"}
+    Retrieved -->|no| ContextError([SSE message.error])
+    Retrieved -->|yes| Route
+    Context -->|no| Route["Route request and resolve entity scope"]
 
-    subgraph Setup["Turn setup — concurrent tasks"]
+    Route --> Ambiguous{"Tool request has<br/>an unresolved entity?"}
+    Ambiguous -->|yes| Clarify([Stream clarification])
+    Ambiguous -->|no| ToolGate{"Required execution<br/>can run?"}
+    ToolGate -->|required Sandbox unavailable| Degrade["Run one text-only<br/>degraded answer"]
+    ToolGate -->|explicit tool request<br/>and all tools unavailable| ToolError([SSE message.error])
+    ToolGate -->|yes / no tool needed| Capability
+
+    subgraph Setup["Concurrent turn setup"]
         direction LR
-        CapsR["resolve model capabilities<br/>(context window, output limit)"]
-        HintR["route_chat_request()<br/>→ advisory hint only"]
-        SeedR["speculative discovery seed<br/>(fires immediately on freshness match)"]
+        Capability["Resolve model capabilities"]
+        Fresh{"Fresh request?"}
+        Seed["Run speculative discovery seed"]
     end
 
-    Setup --> Compose["Compose message list:<br/>system prompt + skill catalog<br/>+ history + seed tool messages"]
-    Compose --> ModelTurn
-
-    subgraph Loop["UnifiedChatAgentLoop — bounded by effort profile"]
-        direction TB
-        ModelTurn["Model turn:<br/>stream_with_tools(messages, schemas)"] --> Kind{"output kind?"}
-        Kind -->|"tool_calls[] (N per turn)"| Validate["validate + apply caps:<br/>max_tool_actions, per-tool caps,<br/>code repair cap, DDGS→Tavily"]
-        Validate --> Exec["Execute batch in parallel<br/>(action + sandbox semaphores,<br/>trusted fn / sandbox routing)"]
-        Exec --> Append["Append role:'tool' messages<br/>(typed errors included, redacted)"]
-        Append --> Budget2["budget_agent_messages()<br/>compact oldest tool payloads"]
-        Budget2 --> StepCheck{"steps / actions /<br/>deadline margin left?"}
-        StepCheck -->|yes| ModelTurn
-        StepCheck -->|"deadline margin hit"| Force["cancel outstanding tools;<br/>force final answer from<br/>evidence gathered so far"]
-        Kind -->|"text deltas"| Answer
-        Force --> Answer
-    end
-
-    Answer([Streamed answer + citations])
+    ToolGate --> Fresh
+    Fresh -->|yes| Seed
+    Fresh -->|no| Compose
+    Capability --> Compose["Build budgeted message list:<br/>system prompt, skills, context, history, seed evidence"]
+    Seed --> Compose
+    Compose --> Model["Model turn with native tool schemas"]
+    Model --> Decision{"Text or tool calls?"}
+    Decision -->|text| Stream["Stream answer deltas"]
+    Decision -->|tool calls| Execute["Validate caps and execute batch in parallel<br/>via trusted Function or task-scoped Sandbox"]
+    Execute --> Evidence["Append redacted tool results or typed errors"]
+    Evidence --> Budget{"Time / step / action budget left?"}
+    Budget -->|yes| Model
+    Budget -->|no| Forced["Force a text-only final answer<br/>from gathered evidence"]
+    Forced --> Stream
+    Degrade --> Stream
+    Stream --> PersistAssistant["Persist assistant message<br/>and generate the initial chat title when needed"]
+    PersistAssistant --> Done([SSE completed])
 
     classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class Start,Answer terminal;
+    class Start,Clarify,CredentialError,ContextError,ToolError,Done terminal;
 ```
 
-#### Flow types
+Freshness routing is advisory: it can seed discovery and add a time-sensitive
+hint, but the model still decides whether more tools are useful. Tool batches,
+turns, output, and wall-clock time are bounded by the selected effort profile.
+When the budget is exhausted, the loop reserves time for a final answer rather
+than discarding evidence already collected.
 
-Every request archetype travels the same loop; only the entry state and the
-model's tool decisions differ.
+The CLI uses this same API flow by default. In explicit local-developer mode it
+runs the same engine loop directly with the configured provider and Modal
+settings.
 
-**1. Conversational turn** (no heuristic match, model plans no tools):
+### Research mode
 
-```mermaid
-flowchart LR
-    U([Message]) --> S["Turn setup (no seed)"] --> M["Model turn 1"] -->|"text deltas only"| A([Answer])
-    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class U,A terminal;
-```
-
-One model call total — strictly cheaper than the retired planner-then-answerer
-two-call minimum.
-
-**2. Fresh-evidence turn** (freshness heuristic matched):
-
-```mermaid
-flowchart LR
-    U([Message]) --> S["Turn setup:<br/>seed burst runs during setup"] --> M1["Model turn 1<br/>sees seed results + hint"]
-    M1 -->|"parallel tool_calls:<br/>fetch top sources"| E["parallel execute"] --> M2["Model turn 2"]
-    M2 -->|"evidence sufficient"| A([Cited answer])
-    M2 -.->|"gap found → more calls"| E
-    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class U,A terminal;
-```
-
-The seed's "zero planning cost" property is preserved; follow-up fetches now
-batch in one model turn instead of one per planning round-trip.
-
-**3. Explicit tool turn** ("run this code", "search arxiv for …"):
-
-```mermaid
-flowchart LR
-    U([Message]) --> M1["Model turn 1:<br/>code skill preloaded<br/>+ Sandbox tool call"] --> E["stateful sandbox execute"]
-    E -->|"nonzero exit (typed)"| M2["Model turn 2:<br/>repair + rerun<br/>(≤ repair cap)"] --> E
-    E -->|success| A([Answer with results])
-    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class U,A terminal;
-```
-
-Specialized discovery skills remain progressively disclosed. High-confidence
-repository, code, and data requests use the deterministic capability router so
-the relevant Sandbox skill is available on the first model turn.
-
-**4. Degraded turn** (time-sensitive, but tools fail or are disabled):
-
-```mermaid
-flowchart LR
-    U([Message]) --> M1["Model turn 1"] -->|tool_calls| E["execute → typed failures<br/>(retryable_infra)"]
-    E --> M2["Model turn 2:<br/>retry / alternate tool"] -->|"still failing"| A(["Answer with explicit disclosure:<br/>'live data unavailable; as of training…'"])
-    M2 -.->|recovered| A2([Cited answer])
-    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class U,A,A2 terminal;
-```
-
-Replaces the old `ToolEvidenceUnavailable` dead end. The only remaining hard
-failure is an explicit tool command with Modal disabled.
-
-**5. Deadline soft-landing** (long turn approaching the effort time cap):
-
-```mermaid
-flowchart LR
-    U([Message]) --> L["loop iterations…"] --> D{"deadline − margin?"}
-    D -->|hit| F["cancel outstanding tools;<br/>final forced answer turn"] --> A([Best-effort answer<br/>from gathered evidence])
-    D -->|ok| L
-    classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class U,A terminal;
-```
-
-`ChatRuntimeLimitExceeded` is now raised only when even the forced answer
-cannot complete inside the run cap — never after gathered evidence could still
-be synthesized.
-
-The retry ladder inside every model turn: provider errors retry with backoff
-only before the first visible output (a partial answer is never duplicated),
-and an empty stream from a reasoning model retries once at low reasoning
-effort before failing with `provider_empty_stream`.
-
-### Research workflow
-
-Research is a LangGraph state machine (`engine/research_workflow/langgraph_runtime.py`)
-driven by a team of LLM collaborators (`agents.py`). **Strength (1 Quick / 2
-Standard / 3 Deep)** selects a `RunCaps` profile that scales QA cycles, node
-count, runtime, fetches, and token budgets. The graph plans from multiple
-perspectives, resolves each node against live tools, reviews section coverage
-in bounded QA cycles, and finally writes a cited, validated report — degrading
-to a directly-assembled fallback report rather than failing whenever an
-optional model pass breaks.
+The browser path starts with a **research preparation**, so the user can review
+the objective, 4–5 plan points, entity choice, and any required isolated
+execution before the full research budget is spent. **Ask** mode collects up to
+four clarifications; **Auto** mode may use bounded web discovery to resolve an
+ambiguous entity, but it still pauses for explicit user approval. The direct
+`POST /research/runs` endpoint remains for compatible clients such as the CLI;
+without a prepared brief it rejects ambiguous targets before dispatching tools.
 
 ```mermaid
 flowchart TD
-    Begin([Query + strength 1/2/3]) --> Caps["RunCaps.for_strength()<br/>cycles, nodes, runtime,<br/>fetch &amp; token budgets"]
-    Caps --> Deadline{{"outer run deadline<br/>(max_runtime_seconds)"}}
-    Deadline --> Polish
+    Start([Research request]) --> Entry{"Entry path"}
 
-    subgraph Graph["LangGraph parent graph"]
-        direction TB
+    Entry -->|Browser| Prepare["POST /research/preparations"]
+    Prepare --> Draft["LLM creates a bounded brief:<br/>objective, 4–5 plan points, entity scope,<br/>assumptions, and execution requirements"]
+    Draft --> Mode{"Approval mode?"}
 
-        Polish["polish_prompt<br/>LLMPlanner.polish_prompt()<br/>clarify objective, audience, constraints"] --> PlanBranch{"planner type<br/>(by strength)"}
-        PlanBranch -->|"Quick: DirectResearchPlanner"| DirectNode["single node = exact user query<br/>(zero planning completion)"]
-        PlanBranch -->|"Standard/Deep: LLMPlanner"| Perspectives["parallel_planners<br/>coverage / evidence-risk / narrative<br/>3–5 nodes each (parallel)"]
+    Mode -->|Ask| Questions["Show proposed plan and ask<br/>1–4 clarification questions"]
+    Questions --> Answers{"All answers received?"}
+    Answers -->|no| Questions
+    Answers -->|yes| FinalizeAsk["Finalize brief and entity scope"]
+    FinalizeAsk --> AskResolved{"Entity resolved?"}
+    AskResolved -->|no, questions remain| Questions
+    AskResolved -->|no, limit reached| PrepFailed([Preparation failed])
+    AskResolved -->|yes| Ready
 
-        DirectNode --> Lead
-        Perspectives --> Lead["plan_lead<br/>LLMLead.merge()<br/>bounded merge → ResearchDAG<br/>(caps.max_nodes hard bound)"]
-        Lead --> LeadEmpty{"any nodes?"}
-        LeadEmpty -->|no| RootNode["inject fallback root node"]
-        LeadEmpty -->|yes| Resolve
-        RootNode --> Resolve
+    Mode -->|Auto| AutoScope{"Entity ambiguous?"}
+    AutoScope -->|yes| Discovery["Bounded web discovery"]
+    Discovery --> FinalizeAuto["Finalize brief with selected entity<br/>and record the assumption"]
+    AutoScope -->|no| FinalizeAuto
+    FinalizeAuto --> AutoResolved{"Entity candidate available?"}
+    AutoResolved -->|no| PrepFailed
+    AutoResolved -->|yes| Ready["Preparation ready:<br/>review final plan"]
 
-        Resolve["resolve_frontier<br/>resolve_frontier(): ready nodes"] --> PerNode
+    Entry -->|Compatible client| Direct["POST /research/runs"]
+    Direct --> DirectScope{"Unprepared target resolved?"}
+    DirectScope -->|no| DirectError([Reject before tool dispatch])
+    DirectScope -->|yes| Queue
 
-        subgraph PerNode["Per node: BoundedResearchResolver"]
-            direction TB
-            Discovery["domain_discovery_tools()<br/>route to ≤2 domain tools<br/>+ general web_search"] --> Fetch["fetch promising sources<br/>(≤ caps.max_fetches)<br/>Modal dispatch, 3 retries on infra error"]
-            Fetch --> Rank["rank_evidence()"]
-            Rank --> Answer["LLMAnswerer<br/>synthesize cited notes<br/>+ unresolved_gaps"]
-            Answer --> Records["build source_records / evidence_ids<br/>(dedup by URL)"]
-        end
+    Ready --> Approve{"User explicitly starts plan?"}
+    Approve -->|no| Ready
+    Approve -->|yes| Queue["Create report + research run<br/>append queued event and enqueue ARQ worker"]
 
-        Records --> AfterResearch{"route_after_research<br/>cycle &lt; caps.qa_cycles?"}
-        AfterResearch -->|"no (or Quick: 0 cycles)"| Write
-        AfterResearch -->|yes| QA["qa_sections<br/>LLMQA.review() per section"]
+    Queue --> Worker["Worker resolves BYOK credential, model,<br/>RunCaps, entity scope, and Sandbox requirements"]
+    Worker --> Polish["Clarify objective"]
+    Polish --> Plan["Generate parallel research angles"]
+    Plan --> Lead["Merge a bounded ResearchDAG"]
+    Lead --> Resolve["Resolve ready nodes in parallel:<br/>discover, fetch, rank, and synthesize evidence"]
+    Resolve --> QA{"QA cycles remaining?"}
+    QA -->|yes| Review["Review source coverage"]
+    Review --> Gaps{"Accepted gap nodes?"}
+    Gaps -->|yes| Resolve
+    Gaps -->|no| Write
+    QA -->|no| Write["Write cited report:<br/>outline, parallel sections, validation"]
+    Write --> Valid{"Document valid?"}
+    Valid -->|no| Fallback["Assemble cited fallback document"]
+    Valid -->|yes| Persist
+    Fallback --> Persist["Persist evidence, report version,<br/>and report vector context"]
+    Persist --> Completed([Mark run completed;<br/>replay durable SSE events and report])
+    Worker -. timeout, cancellation, or failure .-> Failed([Mark run failed or cancelled])
 
-        QA --> QAFail{"provider failure?"}
-        QAFail -->|yes| QASkip["mark skipped, keep evidence<br/>(never discard retrieved work)"]
-        QAFail -->|no| QAGaps["accept ≤ N gap suggestions<br/>pass/fail each section"]
-
-        QASkip --> AfterQA
-        QAGaps --> AfterQA{"route_after_qa<br/>new ready gap-nodes?"}
-        AfterQA -->|"yes → research the gaps"| Resolve
-        AfterQA -->|no| Write
-
-        Write["write_report<br/>LLMWriter.write()"] --> Outline{"outline pass<br/>succeeds?"}
-        Outline -->|no| Single["_write_single_call()<br/>one-shot writer"]
-        Outline -->|yes| Sections["per-section body completions<br/>(parallel, 1 repair retry each)<br/>Sections → Subsections → Sub-subsections"]
-
-        Sections --> AnySection{"any valid<br/>section?"}
-        AnySection -->|no| Single
-        AnySection -->|yes| Assemble["assemble ResearchDocument<br/>backfill references"]
-
-        Single --> Validate
-        Assemble --> Validate{"validate_document()<br/>passes?"}
-        Validate -->|no| FallbackDoc["_fallback_document()<br/>directly-assembled cited report"]
-        Validate -->|yes| GoodDoc[valid document]
-    end
-
-    FallbackDoc --> Markdown
-    GoodDoc --> Markdown["to_markdown()"]
-    Markdown --> Report([Cited research report])
-
-    Deadline -. deadline hit .-> TimeoutFail[["TimeoutError<br/>run reached deadline"]]
-
-    classDef fail fill:#4a1414,stroke:#ff6b6b,color:#fff;
     classDef terminal fill:#14324a,stroke:#4dabf7,color:#fff;
-    class TimeoutFail fail;
-    class Begin,Report terminal;
+    class Start,PrepFailed,DirectError,Completed,Failed terminal;
 ```
 
-Progress at every phase (`planning → researching → reviewing → writing`) is
-emitted as structured events and appended to a per-run diagnostics JSONL file,
-so a live run can be followed step by step (see **Application logs** above).
+Strength selects `RunCaps`: Quick, Standard, and Deep scale the node, tool,
+fetch, evidence, token, QA-cycle, and runtime budgets while retaining hard
+limits. Progress and phase events are persisted in `research_run_events`; the
+client can reconnect with `Last-Event-ID`, then stream the completed report
+from its report endpoint.
+
+For the terminal REPL, `/mode` selects **Research**. Hosted mode creates a
+compatible direct run and renders progress followed by the persisted Markdown
+report; explicit local-developer mode runs the same bounded graph directly and
+renders its Markdown in the terminal.
